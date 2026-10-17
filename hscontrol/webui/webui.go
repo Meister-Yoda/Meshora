@@ -7,6 +7,7 @@
 package webui
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -17,6 +18,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -28,6 +30,7 @@ import (
 	"github.com/juanfont/headscale/hscontrol/state"
 	"github.com/juanfont/headscale/hscontrol/templates"
 	"github.com/juanfont/headscale/hscontrol/types"
+	"github.com/juanfont/headscale/hscontrol/util"
 	"github.com/rs/zerolog/log"
 )
 
@@ -120,6 +123,9 @@ func (h *Handler) Routes(r chi.Router) {
 		r.Group(func(r chi.Router) {
 			r.Use(h.requireSession)
 			r.Get("/", h.overview)
+			r.Get("/users", h.users)
+			r.Get("/nodes", h.nodes)
+			r.Get("/pending", h.pending)
 			r.Post("/logout", h.logout)
 		})
 	})
@@ -259,14 +265,160 @@ func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeHTML(w, http.StatusOK, templates.AdminOverview(templates.AdminOverviewInfo{
-		Username:    sess.username,
-		Base:        h.publicPath,
-		ServerURL:   h.serverURL,
-		CSRFToken:   sess.csrf,
-		UserCount:   len(users),
-		NodeCount:   nodes.Len(),
-		OnlineCount: online,
+		Username:     sess.username,
+		Base:         h.publicPath,
+		ServerURL:    h.serverURL,
+		CSRFToken:    sess.csrf,
+		UserCount:    len(users),
+		NodeCount:    nodes.Len(),
+		OnlineCount:  online,
+		PendingCount: len(h.state.ListAuthCacheEntries()),
 	}).Render())
+}
+
+func (h *Handler) pageInfo(r *http.Request) templates.AdminPageInfo {
+	sess := sessionFrom(r)
+
+	return templates.AdminPageInfo{
+		Base:      h.publicPath,
+		Username:  sess.username,
+		CSRFToken: sess.csrf,
+	}
+}
+
+func (h *Handler) users(w http.ResponseWriter, r *http.Request) {
+	users, err := h.state.ListAllUsers()
+	if err != nil {
+		log.Error().Err(err).Msg("web admin: listing users")
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+
+		return
+	}
+
+	// Tagged nodes belong to their tags, not to the user who created them.
+	nodesPerUser := make(map[types.UserID]int)
+
+	for _, node := range h.state.ListNodes().All() {
+		if !node.IsTagged() {
+			nodesPerUser[node.TypedUserID()]++
+		}
+	}
+
+	rows := make([]templates.AdminUserRow, 0, len(users))
+	for i := range users {
+		u := users[i].View()
+
+		provider := "CLI"
+		if u.Provider() == util.RegisterMethodOIDC {
+			provider = "OIDC"
+		}
+
+		rows = append(rows, templates.AdminUserRow{
+			Name:        u.Name(),
+			DisplayName: u.DisplayName(),
+			Email:       u.Email(),
+			Provider:    provider,
+			NodeCount:   nodesPerUser[types.UserID(u.ID())],
+			CreatedAt:   u.Model().CreatedAt,
+		})
+	}
+
+	writeHTML(w, http.StatusOK, templates.AdminUsers(h.pageInfo(r), rows).Render())
+}
+
+func (h *Handler) nodes(w http.ResponseWriter, r *http.Request) {
+	nodes := h.state.ListNodes()
+	rows := make([]templates.AdminNodeRow, 0, nodes.Len())
+
+	for _, n := range nodes.All() {
+		row := templates.AdminNodeRow{
+			GivenName: n.GivenName(),
+			Hostname:  n.Hostname(),
+			Expired:   n.IsExpired(),
+		}
+
+		if n.IsTagged() {
+			row.Tags = n.Tags().AsSlice()
+		} else {
+			row.Owner = n.User().Username()
+		}
+
+		if ip, ok := n.IPv4().GetOk(); ok {
+			row.IPv4 = ip.String()
+		}
+
+		if ip, ok := n.IPv6().GetOk(); ok {
+			row.IPv6 = ip.String()
+		}
+
+		if online, ok := n.IsOnline().GetOk(); ok {
+			row.Online = &online
+		}
+
+		row.LastSeen, _ = n.LastSeen().GetOk()
+		row.Expiry, _ = n.Expiry().GetOk()
+
+		if hi := n.Hostinfo(); hi.Valid() {
+			row.OS = hi.OS()
+		}
+
+		rows = append(rows, row)
+	}
+
+	slices.SortFunc(rows, func(a, b templates.AdminNodeRow) int {
+		return cmp.Compare(a.GivenName, b.GivenName)
+	})
+
+	writeHTML(w, http.StatusOK, templates.AdminNodes(h.pageInfo(r), rows).Render())
+}
+
+func (h *Handler) pending(w http.ResponseWriter, r *http.Request) {
+	entries := h.state.ListAuthCacheEntries()
+	rows := make([]templates.AdminPendingRow, 0, len(entries))
+
+	for _, e := range entries {
+		row := templates.AdminPendingRow{CreatedAt: e.Request.CreatedAt()}
+
+		switch {
+		case e.Request.IsRegistration():
+			reg := e.Request.RegistrationData()
+			row.Hostname = reg.Hostname
+			row.MachineKey = shortMachineKey(reg.MachineKey.String())
+
+			if reg.Hostinfo != nil {
+				row.OS = reg.Hostinfo.OS
+			}
+		case e.Request.IsSSHCheck():
+			binding := e.Request.SSHCheckBinding()
+			row.SSHCheck = true
+			row.Hostname = h.nodeName(binding.SrcNodeID) + " → " + h.nodeName(binding.DstNodeID)
+		default:
+			continue
+		}
+
+		rows = append(rows, row)
+	}
+
+	writeHTML(w, http.StatusOK, templates.AdminPending(h.pageInfo(r), rows).Render())
+}
+
+func (h *Handler) nodeName(id types.NodeID) string {
+	if node, ok := h.state.GetNodeByID(id); ok {
+		return cmp.Or(node.GivenName(), node.Hostname())
+	}
+
+	return "node " + id.String()
+}
+
+// shortMachineKey shortens "mkey:<64 hex>" to "mkey:<8 hex>…".
+func shortMachineKey(k string) string {
+	const keep = len("mkey:") + 8
+
+	if len(k) <= keep {
+		return k
+	}
+
+	return k[:keep] + "…"
 }
 
 // requireSession rejects requests without a valid session, and POSTs
@@ -372,6 +524,7 @@ func writeHTML(w http.ResponseWriter, status int, body string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
 
+	//nolint:gosec // G705: body comes from elem-go templates, which escape text and attribute values carrying user input
 	_, err := w.Write([]byte(body))
 	if err != nil {
 		log.Error().Err(err).Msg("web admin: writing response")

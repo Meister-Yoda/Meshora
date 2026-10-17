@@ -16,6 +16,8 @@ import (
 	"github.com/juanfont/headscale/hscontrol/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"tailscale.com/tailcfg"
+	"tailscale.com/types/key"
 )
 
 const (
@@ -167,7 +169,7 @@ func TestStylesheetIsPublic(t *testing.T) {
 	assert.Contains(t, body, ".auth-card")
 
 	_, login := env.get(env.client, "/admin/login")
-	assert.Contains(t, login, `href="/admin/assets/admin.css"`)
+	assert.Contains(t, login, `href="/admin/assets/admin.css?v=`)
 	assert.NotContains(t, login, "style=", "the CSP forbids inline styles")
 }
 
@@ -283,4 +285,146 @@ func TestLoginEscapesEchoedUsername(t *testing.T) {
 	_, body := env.login(env.client, `"><script>alert(1)</script>`, "wrong password!!")
 	assert.NotContains(t, body, "<script>alert(1)</script>")
 	assert.True(t, strings.Contains(body, "&#34;&gt;&lt;script&gt;") || strings.Contains(body, "&quot;&gt;&lt;script&gt;"))
+}
+
+const xssPayload = `"><script>alert(1)</script>`
+
+// assertEscaped checks that the XSS payload never reaches the page raw, in a
+// text node or in an attribute value.
+func assertEscaped(t *testing.T, body string) {
+	t.Helper()
+
+	assert.NotContains(t, body, "<script>alert(1)</script>")
+	assert.NotContains(t, body, `"><script`)
+	assert.NotContains(t, body, "style=", "the CSP forbids inline styles")
+}
+
+func TestListPagesRequireLogin(t *testing.T) {
+	env := newTestEnv(t)
+
+	for _, path := range []string{"/admin/users", "/admin/nodes", "/admin/pending"} {
+		resp, _ := env.get(env.client, path)
+		assert.Equal(t, http.StatusSeeOther, resp.StatusCode, path)
+		assert.Equal(t, "/admin/login", resp.Header.Get("Location"), path)
+	}
+}
+
+func TestListPagesEmpty(t *testing.T) {
+	env := newTestEnv(t)
+
+	resp, _ := env.login(env.client, testAdmin, testPassword)
+	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
+
+	for path, want := range map[string]string{
+		"/admin/users":   "No users yet",
+		"/admin/nodes":   "No nodes yet",
+		"/admin/pending": "Nothing pending",
+	} {
+		resp, body := env.get(env.client, path)
+		require.Equal(t, http.StatusOK, resp.StatusCode, path)
+		assert.Contains(t, body, want, path)
+		assert.Contains(t, body, `aria-current="page"`, path)
+		assert.NotContains(t, body, "<table", path)
+	}
+}
+
+func TestUsersPage(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Usernames are validated, but OIDC display names and emails come from
+	// the identity provider unchecked.
+	user := env.state.CreateUserForTest("dave")
+	require.NoError(t, env.state.DB().DB.Model(user).Updates(map[string]any{
+		"display_name": xssPayload,
+		"email":        xssPayload + "@example.com",
+		"provider":     "oidc",
+	}).Error)
+	env.state.PutNodeInStoreForTest(*env.state.CreateRegisteredNodeForTest(user, "laptop"))
+
+	resp, _ := env.login(env.client, testAdmin, testPassword)
+	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
+
+	resp, body := env.get(env.client, "/admin/users")
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Contains(t, body, `<a aria-current="page" href="/admin/users">Users</a>`)
+	assert.Contains(t, body, "&lt;script&gt;alert(1)&lt;/script&gt;")
+	assert.Contains(t, body, ">OIDC<")
+	assert.Contains(t, body, `title="&#34;&gt;&lt;script&gt;`, "display name escaped in attribute")
+	assert.Contains(t, body, `<td class="num">1</td>`, "one node owned by the user")
+	assertEscaped(t, body)
+}
+
+func TestNodesPage(t *testing.T) {
+	env := newTestEnv(t)
+
+	user := env.state.CreateUserForTest("bob")
+
+	// The NodeStore holds nodes with User preloaded, as loaded from the DB.
+	// No given name yet, so the raw hostname is the primary label and also
+	// lands in the title attribute.
+	owned := env.state.CreateRegisteredNodeForTest(user, "owned")
+	owned.User = user
+	owned.Hostname = xssPayload
+	owned.GivenName = ""
+	online := true
+	owned.IsOnline = &online
+	env.state.PutNodeInStoreForTest(*owned)
+
+	// Tagged nodes keep UserID for "created by" tracking; the tags own them.
+	tagged := env.state.CreateRegisteredNodeForTest(user, "server")
+	tagged.User = user
+	tagged.Tags = []string{"tag:server"}
+	env.state.PutNodeInStoreForTest(*tagged)
+
+	resp, _ := env.login(env.client, testAdmin, testPassword)
+	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
+
+	resp, body := env.get(env.client, "/admin/nodes")
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Contains(t, body, "2 nodes registered.")
+	assert.Contains(t, body, ">tag:server<")
+	assert.Contains(t, body, ">Online<")
+	assert.Contains(t, body, owned.IPv4.String())
+	assert.Contains(t, body, "&lt;script&gt;alert(1)&lt;/script&gt;")
+	assert.Contains(t, body, `title="&#34;&gt;&lt;script&gt;`, "hostname escaped in attribute")
+	assertEscaped(t, body)
+
+	// The tagged node's row must not list bob as owner: only the owned
+	// node's row does.
+	assert.Equal(t, 1, strings.Count(body, "<td>bob</td>"))
+
+	_, users := env.get(env.client, "/admin/users")
+	assert.Contains(t, users, `<td class="num">1</td>`, "tagged nodes do not count for their creator")
+}
+
+func TestPendingPage(t *testing.T) {
+	env := newTestEnv(t)
+
+	user := env.state.CreateUserForTest("carol")
+	src := env.state.CreateRegisteredNodeForTest(user, "src")
+	env.state.PutNodeInStoreForTest(*src)
+
+	env.state.SetAuthCacheEntry(types.MustAuthID(), types.NewRegisterAuthRequest(&types.RegistrationData{
+		MachineKey: key.NewMachine().Public(),
+		Hostname:   xssPayload,
+		Hostinfo:   &tailcfg.Hostinfo{OS: "linux"},
+	}))
+	env.state.SetAuthCacheEntry(types.MustAuthID(), types.NewSSHCheckAuthRequest(src.ID, 999))
+
+	resp, _ := env.login(env.client, testAdmin, testPassword)
+	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
+
+	resp, body := env.get(env.client, "/admin/pending")
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Contains(t, body, ">Registration<")
+	assert.Contains(t, body, ">SSH check<")
+	assert.Contains(t, body, ">linux<")
+	assert.Contains(t, body, "mkey:")
+	assert.Contains(t, body, "src → node 999")
+	assert.Contains(t, body, "just now")
+	assertEscaped(t, body)
+
+	_, overview := env.get(env.client, "/admin/")
+	assert.Contains(t, overview, `href="/admin/pending"`)
+	assert.Regexp(t, `Pending</div><div class="stat-value">2<`, overview)
 }
