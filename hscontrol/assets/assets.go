@@ -18,6 +18,12 @@ var Favicon []byte
 //go:embed style.css
 var CSS string
 
+// AdminCSS is the stylesheet of the web admin dashboard, served as a file
+// under /admin/assets/ so the dashboard CSP can forbid inline styles.
+//
+//go:embed admin.css
+var AdminCSS []byte
+
 // SVG is the embedded headscale.svg logo used in HTML templates.
 //
 //go:embed headscale.svg

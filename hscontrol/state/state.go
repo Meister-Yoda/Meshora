@@ -1549,6 +1549,36 @@ func (s *State) AuthenticateAPIKey(keyStr string) (*types.APIKey, error) {
 	return s.db.AuthenticateAPIKey(keyStr)
 }
 
+// CreateWebAdmin creates a local web admin dashboard account.
+func (s *State) CreateWebAdmin(username, password string) (*types.WebAdmin, error) {
+	return s.db.CreateWebAdmin(username, password)
+}
+
+// ListWebAdmins returns all web admin dashboard accounts.
+func (s *State) ListWebAdmins() ([]types.WebAdmin, error) {
+	return s.db.ListWebAdmins()
+}
+
+// GetWebAdminByID returns the web admin dashboard account with the given id.
+func (s *State) GetWebAdminByID(id uint64) (*types.WebAdmin, error) {
+	return s.db.GetWebAdminByID(id)
+}
+
+// DeleteWebAdmin deletes the web admin dashboard account named username.
+func (s *State) DeleteWebAdmin(username string) error {
+	return s.db.DeleteWebAdmin(username)
+}
+
+// SetWebAdminPassword replaces the password of a web admin dashboard account.
+func (s *State) SetWebAdminPassword(username, password string) error {
+	return s.db.SetWebAdminPassword(username, password)
+}
+
+// AuthenticateWebAdmin verifies a web admin dashboard login.
+func (s *State) AuthenticateWebAdmin(username, password string) (*types.WebAdmin, error) {
+	return s.db.AuthenticateWebAdmin(username, password)
+}
+
 // SetAPIKeyUser sets the owning user of an API key by its database ID.
 func (s *State) SetAPIKeyUser(keyID uint64, userID types.UserID) error {
 	return s.db.SetAPIKeyUser(keyID, userID)

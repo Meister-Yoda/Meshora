@@ -144,6 +144,8 @@ type Config struct {
 
 	OIDC OIDCConfig
 
+	WebAdmin WebAdminConfig
+
 	LogTail    LogTailConfig
 	Taildrop   TaildropConfig
 	AutoUpdate AutoUpdateConfig
@@ -240,6 +242,13 @@ type OIDCConfig struct {
 	EmailVerifiedRequired      bool
 	UseExpiryFromToken         bool
 	PKCE                       PKCEConfig
+}
+
+// WebAdminConfig configures the built-in admin dashboard served under
+// /admin, where local admin accounts (not tailnet users) log in.
+type WebAdminConfig struct {
+	Enabled    bool
+	SessionTTL time.Duration
 }
 
 type DERPConfig struct {
@@ -477,6 +486,9 @@ func LoadConfig(path string, isFile bool) error {
 	viper.SetDefault("oidc.pkce.method", "S256")
 	viper.SetDefault("oidc.email_verified_required", true)
 
+	viper.SetDefault("web_admin.enabled", false)
+	viper.SetDefault("web_admin.session_ttl", "12h")
+
 	viper.SetDefault("logtail.enabled", false)
 	viper.SetDefault("taildrop.enabled", true)
 	viper.SetDefault("auto_update.enabled", false)
@@ -621,6 +633,14 @@ func validateServerConfigInto(v *configValidator) {
 				Cause:  err,
 			})
 		}
+	}
+
+	if viper.GetBool("web_admin.enabled") && viper.GetDuration("web_admin.session_ttl") <= 0 {
+		v.Add(&ConfigError{
+			Reason:  "web_admin.session_ttl must be positive",
+			Current: []KV{{"web_admin.session_ttl", viper.GetString("web_admin.session_ttl")}},
+			Hint:    "set a duration such as 12h",
+		})
 	}
 
 	if viper.IsSet("dns.extra_records") && viper.IsSet("dns.extra_records_path") {
@@ -1462,6 +1482,11 @@ func LoadServerConfig() (*Config, error) {
 				Enabled: viper.GetBool("oidc.pkce.enabled"),
 				Method:  viper.GetString("oidc.pkce.method"),
 			},
+		},
+
+		WebAdmin: WebAdminConfig{
+			Enabled:    viper.GetBool("web_admin.enabled"),
+			SessionTTL: viper.GetDuration("web_admin.session_ttl"),
 		},
 
 		LogTail: logTailConfig,

@@ -282,6 +282,12 @@ WHERE tags IS NOT NULL AND tags != '[]' AND tags != '' AND tags != 'null'
 				},
 				Rollback: func(db *gorm.DB) error { return nil },
 			},
+			{
+				// Meshora: local accounts for the web admin dashboard.
+				ID:       "202610171200-create-web-admins",
+				Migrate:  ensureWebAdminsTable,
+				Rollback: func(db *gorm.DB) error { return nil },
+			},
 		},
 	)
 
@@ -300,6 +306,11 @@ WHERE tags IS NOT NULL AND tags != '[]' AND tags != '' AND tags != 'null'
 		}
 
 		err = tx.AutoMigrate(&types.Node{}, &types.Policy{})
+		if err != nil {
+			return err
+		}
+
+		err = ensureWebAdminsTable(tx)
 		if err != nil {
 			return err
 		}
