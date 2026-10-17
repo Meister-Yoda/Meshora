@@ -112,6 +112,17 @@ type CreateUserRequestBody struct {
 	PictureUrl  *string `json:"pictureUrl,omitempty"`
 }
 
+// CreateWebAdminOutputBody defines model for CreateWebAdminOutputBody.
+type CreateWebAdminOutputBody struct {
+	WebAdmin WebAdmin `json:"webAdmin"`
+}
+
+// CreateWebAdminRequestBody defines model for CreateWebAdminRequestBody.
+type CreateWebAdminRequestBody struct {
+	Password string `json:"password"`
+	Username string `json:"username"`
+}
+
 // DebugCreateNodeRequestBody defines model for DebugCreateNodeRequestBody.
 type DebugCreateNodeRequestBody struct {
 	Key    *string   `json:"key,omitempty"`
@@ -131,6 +142,9 @@ type DeletePreAuthKeyOutputBody = map[string]interface{}
 
 // DeleteUserOutputBody defines model for DeleteUserOutputBody.
 type DeleteUserOutputBody = map[string]interface{}
+
+// DeleteWebAdminOutputBody defines model for DeleteWebAdminOutputBody.
+type DeleteWebAdminOutputBody = map[string]interface{}
 
 // ErrorDetail defines model for ErrorDetail.
 type ErrorDetail struct {
@@ -223,6 +237,11 @@ type ListUsersOutputBody struct {
 	Users []User `json:"users"`
 }
 
+// ListWebAdminsOutputBody defines model for ListWebAdminsOutputBody.
+type ListWebAdminsOutputBody struct {
+	WebAdmins []WebAdmin `json:"webAdmins"`
+}
+
 // Node defines model for Node.
 type Node struct {
 	ApprovedRoutes  []string           `json:"approvedRoutes"`
@@ -305,6 +324,14 @@ type SetTagsRequestBody struct {
 	Tags *[]string `json:"tags,omitempty"`
 }
 
+// SetWebAdminPasswordOutputBody defines model for SetWebAdminPasswordOutputBody.
+type SetWebAdminPasswordOutputBody = map[string]interface{}
+
+// SetWebAdminPasswordRequestBody defines model for SetWebAdminPasswordRequestBody.
+type SetWebAdminPasswordRequestBody struct {
+	Password string `json:"password"`
+}
+
 // User defines model for User.
 type User struct {
 	CreatedAt     time.Time `json:"createdAt"`
@@ -320,6 +347,14 @@ type User struct {
 // UserOutputBody defines model for UserOutputBody.
 type UserOutputBody struct {
 	User User `json:"user"`
+}
+
+// WebAdmin defines model for WebAdmin.
+type WebAdmin struct {
+	CreatedAt   *time.Time `json:"createdAt"`
+	Id          string     `json:"id"`
+	LastLoginAt *time.Time `json:"lastLoginAt"`
+	Username    string     `json:"username"`
 }
 
 // DeleteApiKeyParams defines parameters for DeleteApiKey.
@@ -396,6 +431,12 @@ type ExpirePreAuthKeyJSONRequestBody = ExpirePreAuthKeyRequestBody
 
 // CreateUserJSONRequestBody defines body for CreateUser for application/json ContentType.
 type CreateUserJSONRequestBody = CreateUserRequestBody
+
+// CreateWebAdminJSONRequestBody defines body for CreateWebAdmin for application/json ContentType.
+type CreateWebAdminJSONRequestBody = CreateWebAdminRequestBody
+
+// SetWebAdminPasswordJSONRequestBody defines body for SetWebAdminPassword for application/json ContentType.
+type SetWebAdminPasswordJSONRequestBody = SetWebAdminPasswordRequestBody
 
 // RequestEditorFn is the function signature for the RequestEditor callback function
 type RequestEditorFn func(ctx context.Context, req *http.Request) error
@@ -747,6 +788,44 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /api/v1/user/{oldId}/rename/{newName} (the `RenameUser` operationId).
 	RenameUser(ctx context.Context, oldId string, newName string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListWebAdmins List web admin accounts
+	//
+	// Corresponds with GET /api/v1/webadmin (the `ListWebAdmins` operationId).
+	ListWebAdmins(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateWebAdminWithBody Create web admin account
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /api/v1/webadmin (the `CreateWebAdmin` operationId).
+	CreateWebAdminWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateWebAdmin Create web admin account
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /api/v1/webadmin (the `CreateWebAdmin` operationId).
+	CreateWebAdmin(ctx context.Context, body CreateWebAdminJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteWebAdmin Delete web admin account
+	//
+	// Corresponds with DELETE /api/v1/webadmin/{username} (the `DeleteWebAdmin` operationId).
+	DeleteWebAdmin(ctx context.Context, username string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SetWebAdminPasswordWithBody Set web admin password
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /api/v1/webadmin/{username}/password (the `SetWebAdminPassword` operationId).
+	SetWebAdminPasswordWithBody(ctx context.Context, username string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SetWebAdminPassword Set web admin password
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /api/v1/webadmin/{username}/password (the `SetWebAdminPassword` operationId).
+	SetWebAdminPassword(ctx context.Context, username string, body SetWebAdminPasswordJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
 // ListApiKeys List API keys
@@ -1446,6 +1525,104 @@ func (c *Client) DeleteUser(ctx context.Context, id string, reqEditors ...Reques
 // Corresponds with POST /api/v1/user/{oldId}/rename/{newName} (the `RenameUser` operationId).
 func (c *Client) RenameUser(ctx context.Context, oldId string, newName string, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRenameUserRequest(c.Server, oldId, newName)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListWebAdmins List web admin accounts
+//
+// Corresponds with GET /api/v1/webadmin (the `ListWebAdmins` operationId).
+func (c *Client) ListWebAdmins(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListWebAdminsRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateWebAdminWithBody Create web admin account
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /api/v1/webadmin (the `CreateWebAdmin` operationId).
+func (c *Client) CreateWebAdminWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateWebAdminRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateWebAdmin Create web admin account
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /api/v1/webadmin (the `CreateWebAdmin` operationId).
+func (c *Client) CreateWebAdmin(ctx context.Context, body CreateWebAdminJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateWebAdminRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// DeleteWebAdmin Delete web admin account
+//
+// Corresponds with DELETE /api/v1/webadmin/{username} (the `DeleteWebAdmin` operationId).
+func (c *Client) DeleteWebAdmin(ctx context.Context, username string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteWebAdminRequest(c.Server, username)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// SetWebAdminPasswordWithBody Set web admin password
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /api/v1/webadmin/{username}/password (the `SetWebAdminPassword` operationId).
+func (c *Client) SetWebAdminPasswordWithBody(ctx context.Context, username string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetWebAdminPasswordRequestWithBody(c.Server, username, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// SetWebAdminPassword Set web admin password
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /api/v1/webadmin/{username}/password (the `SetWebAdminPassword` operationId).
+func (c *Client) SetWebAdminPassword(ctx context.Context, username string, body SetWebAdminPasswordJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetWebAdminPasswordRequest(c.Server, username, body)
 	if err != nil {
 		return nil, err
 	}
@@ -2696,6 +2873,154 @@ func NewRenameUserRequest(server string, oldId string, newName string) (*http.Re
 	return req, nil
 }
 
+// NewListWebAdminsRequest constructs an http.Request for the ListWebAdmins method
+func NewListWebAdminsRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/webadmin")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCreateWebAdminRequest calls the generic CreateWebAdmin builder with application/json body
+func NewCreateWebAdminRequest(server string, body CreateWebAdminJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateWebAdminRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewCreateWebAdminRequestWithBody constructs an http.Request for the CreateWebAdmin method, with any body, and a specified content type
+func NewCreateWebAdminRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/webadmin")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewDeleteWebAdminRequest constructs an http.Request for the DeleteWebAdmin method
+func NewDeleteWebAdminRequest(server string, username string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "username", username, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/webadmin/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewSetWebAdminPasswordRequest calls the generic SetWebAdminPassword builder with application/json body
+func NewSetWebAdminPasswordRequest(server string, username string, body SetWebAdminPasswordJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewSetWebAdminPasswordRequestWithBody(server, username, "application/json", bodyReader)
+}
+
+// NewSetWebAdminPasswordRequestWithBody constructs an http.Request for the SetWebAdminPassword method, with any body, and a specified content type
+func NewSetWebAdminPasswordRequestWithBody(server string, username string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "username", username, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/webadmin/%s/password", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 func (c *Client) applyEditors(ctx context.Context, req *http.Request, additionalEditors []RequestEditorFn) error {
 	for _, r := range c.RequestEditors {
 		if err := r(ctx, req); err != nil {
@@ -3046,6 +3371,48 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with POST /api/v1/user/{oldId}/rename/{newName} (the `RenameUser` operationId).
 	RenameUserWithResponse(ctx context.Context, oldId string, newName string, reqEditors ...RequestEditorFn) (*RenameUserResponse, error)
+
+	// ListWebAdminsWithResponse List web admin accounts
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/webadmin (the `ListWebAdmins` operationId).
+	ListWebAdminsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListWebAdminsResponse, error)
+
+	// CreateWebAdminWithBodyWithResponse Create web admin account
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/webadmin (the `CreateWebAdmin` operationId).
+	CreateWebAdminWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateWebAdminResponse, error)
+
+	// CreateWebAdminWithResponse Create web admin account
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/webadmin (the `CreateWebAdmin` operationId).
+	CreateWebAdminWithResponse(ctx context.Context, body CreateWebAdminJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateWebAdminResponse, error)
+
+	// DeleteWebAdminWithResponse Delete web admin account
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with DELETE /api/v1/webadmin/{username} (the `DeleteWebAdmin` operationId).
+	DeleteWebAdminWithResponse(ctx context.Context, username string, reqEditors ...RequestEditorFn) (*DeleteWebAdminResponse, error)
+
+	// SetWebAdminPasswordWithBodyWithResponse Set web admin password
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/webadmin/{username}/password (the `SetWebAdminPassword` operationId).
+	SetWebAdminPasswordWithBodyWithResponse(ctx context.Context, username string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetWebAdminPasswordResponse, error)
+
+	// SetWebAdminPasswordWithResponse Set web admin password
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/webadmin/{username}/password (the `SetWebAdminPassword` operationId).
+	SetWebAdminPasswordWithResponse(ctx context.Context, username string, body SetWebAdminPasswordJSONRequestBody, reqEditors ...RequestEditorFn) (*SetWebAdminPasswordResponse, error)
 }
 
 type ListApiKeysResponse struct {
@@ -4440,6 +4807,198 @@ func (r RenameUserResponse) ContentType() string {
 	return ""
 }
 
+type ListWebAdminsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *ListWebAdminsOutputBody
+	// ApplicationproblemJSONDefault the response for an HTTP default `application/problem+json` response
+	ApplicationproblemJSONDefault *ErrorModel
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListWebAdminsResponse) GetJSON200() *ListWebAdminsOutputBody {
+	return r.JSON200
+}
+
+// GetApplicationproblemJSONDefault returns the response for an HTTP default `application/problem+json` response
+func (r ListWebAdminsResponse) GetApplicationproblemJSONDefault() *ErrorModel {
+	return r.ApplicationproblemJSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r ListWebAdminsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListWebAdminsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListWebAdminsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListWebAdminsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type CreateWebAdminResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *CreateWebAdminOutputBody
+	// ApplicationproblemJSONDefault the response for an HTTP default `application/problem+json` response
+	ApplicationproblemJSONDefault *ErrorModel
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r CreateWebAdminResponse) GetJSON200() *CreateWebAdminOutputBody {
+	return r.JSON200
+}
+
+// GetApplicationproblemJSONDefault returns the response for an HTTP default `application/problem+json` response
+func (r CreateWebAdminResponse) GetApplicationproblemJSONDefault() *ErrorModel {
+	return r.ApplicationproblemJSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r CreateWebAdminResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateWebAdminResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateWebAdminResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CreateWebAdminResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type DeleteWebAdminResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *DeleteWebAdminOutputBody
+	// ApplicationproblemJSONDefault the response for an HTTP default `application/problem+json` response
+	ApplicationproblemJSONDefault *ErrorModel
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r DeleteWebAdminResponse) GetJSON200() *DeleteWebAdminOutputBody {
+	return r.JSON200
+}
+
+// GetApplicationproblemJSONDefault returns the response for an HTTP default `application/problem+json` response
+func (r DeleteWebAdminResponse) GetApplicationproblemJSONDefault() *ErrorModel {
+	return r.ApplicationproblemJSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r DeleteWebAdminResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteWebAdminResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteWebAdminResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r DeleteWebAdminResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type SetWebAdminPasswordResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *SetWebAdminPasswordOutputBody
+	// ApplicationproblemJSONDefault the response for an HTTP default `application/problem+json` response
+	ApplicationproblemJSONDefault *ErrorModel
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r SetWebAdminPasswordResponse) GetJSON200() *SetWebAdminPasswordOutputBody {
+	return r.JSON200
+}
+
+// GetApplicationproblemJSONDefault returns the response for an HTTP default `application/problem+json` response
+func (r SetWebAdminPasswordResponse) GetApplicationproblemJSONDefault() *ErrorModel {
+	return r.ApplicationproblemJSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r SetWebAdminPasswordResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r SetWebAdminPasswordResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r SetWebAdminPasswordResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r SetWebAdminPasswordResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 // ListApiKeysWithResponse List API keys
 //
 // Returns a wrapper object for the known response body format(s).
@@ -5003,6 +5562,84 @@ func (c *ClientWithResponses) RenameUserWithResponse(ctx context.Context, oldId 
 		return nil, err
 	}
 	return ParseRenameUserResponse(rsp)
+}
+
+// ListWebAdminsWithResponse List web admin accounts
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/webadmin (the `ListWebAdmins` operationId).
+func (c *ClientWithResponses) ListWebAdminsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListWebAdminsResponse, error) {
+	rsp, err := c.ListWebAdmins(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListWebAdminsResponse(rsp)
+}
+
+// CreateWebAdminWithBodyWithResponse Create web admin account
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/webadmin (the `CreateWebAdmin` operationId).
+func (c *ClientWithResponses) CreateWebAdminWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateWebAdminResponse, error) {
+	rsp, err := c.CreateWebAdminWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateWebAdminResponse(rsp)
+}
+
+// CreateWebAdminWithResponse Create web admin account
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/webadmin (the `CreateWebAdmin` operationId).
+func (c *ClientWithResponses) CreateWebAdminWithResponse(ctx context.Context, body CreateWebAdminJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateWebAdminResponse, error) {
+	rsp, err := c.CreateWebAdmin(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateWebAdminResponse(rsp)
+}
+
+// DeleteWebAdminWithResponse Delete web admin account
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with DELETE /api/v1/webadmin/{username} (the `DeleteWebAdmin` operationId).
+func (c *ClientWithResponses) DeleteWebAdminWithResponse(ctx context.Context, username string, reqEditors ...RequestEditorFn) (*DeleteWebAdminResponse, error) {
+	rsp, err := c.DeleteWebAdmin(ctx, username, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteWebAdminResponse(rsp)
+}
+
+// SetWebAdminPasswordWithBodyWithResponse Set web admin password
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/webadmin/{username}/password (the `SetWebAdminPassword` operationId).
+func (c *ClientWithResponses) SetWebAdminPasswordWithBodyWithResponse(ctx context.Context, username string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetWebAdminPasswordResponse, error) {
+	rsp, err := c.SetWebAdminPasswordWithBody(ctx, username, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetWebAdminPasswordResponse(rsp)
+}
+
+// SetWebAdminPasswordWithResponse Set web admin password
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/webadmin/{username}/password (the `SetWebAdminPassword` operationId).
+func (c *ClientWithResponses) SetWebAdminPasswordWithResponse(ctx context.Context, username string, body SetWebAdminPasswordJSONRequestBody, reqEditors ...RequestEditorFn) (*SetWebAdminPasswordResponse, error) {
+	rsp, err := c.SetWebAdminPassword(ctx, username, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetWebAdminPasswordResponse(rsp)
 }
 
 // ParseListApiKeysResponse parses an HTTP response from a ListApiKeysWithResponse call
@@ -5945,6 +6582,138 @@ func ParseRenameUserResponse(rsp *http.Response) (*RenameUserResponse, error) {
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest UserOutputBody
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListWebAdminsResponse parses an HTTP response from a ListWebAdminsWithResponse call
+func ParseListWebAdminsResponse(rsp *http.Response) (*ListWebAdminsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListWebAdminsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ListWebAdminsOutputBody
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateWebAdminResponse parses an HTTP response from a CreateWebAdminWithResponse call
+func ParseCreateWebAdminResponse(rsp *http.Response) (*CreateWebAdminResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateWebAdminResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest CreateWebAdminOutputBody
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDeleteWebAdminResponse parses an HTTP response from a DeleteWebAdminWithResponse call
+func ParseDeleteWebAdminResponse(rsp *http.Response) (*DeleteWebAdminResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteWebAdminResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest DeleteWebAdminOutputBody
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseSetWebAdminPasswordResponse parses an HTTP response from a SetWebAdminPasswordWithResponse call
+func ParseSetWebAdminPasswordResponse(rsp *http.Response) (*SetWebAdminPasswordResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &SetWebAdminPasswordResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest SetWebAdminPasswordOutputBody
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
