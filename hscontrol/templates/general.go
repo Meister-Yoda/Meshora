@@ -3,33 +3,18 @@ package templates
 import (
 	"github.com/chasefleming/elem-go"
 	"github.com/chasefleming/elem-go/attrs"
-	"github.com/chasefleming/elem-go/styles"
 	"github.com/juanfont/headscale/hscontrol/assets"
 )
 
-// mdTypesetBody creates a body element with md-typeset styling
-// that matches the official Headscale documentation design.
-// Uses CSS classes with styles defined in [assets.CSS].
-func mdTypesetBody(children ...elem.Node) *elem.Element {
+// publicBody lays out an end-user page in the Meshora design: the brand
+// above a centred card holding the content, and the footer below it.
+// Styling lives in [assets.CSS].
+func publicBody(children ...elem.Node) *elem.Element {
 	return elem.Body(
-		attrs.Props{
-			attrs.Style: styles.Props{
-				styles.MinHeight:       "100vh",
-				styles.Display:         "flex",
-				styles.FlexDirection:   "column",
-				styles.AlignItems:      "center",
-				styles.BackgroundColor: "var(--hs-bg)",
-				styles.Padding:         "3rem 1.5rem",
-			}.ToInline(),
-			"translate": "no",
-		},
-		elem.Main(attrs.Props{
-			attrs.Class: "md-typeset",
-			attrs.Style: styles.Props{
-				styles.MaxWidth: "min(800px, 90vw)",
-				styles.Width:    "100%",
-			}.ToInline(),
-		}, children...),
+		attrs.Props{attrs.Class: "public", "translate": "no"},
+		elem.Header(attrs.Props{attrs.Class: "public-header"}, brand("")),
+		elem.Main(attrs.Props{attrs.Class: "md-typeset public-card"}, children...),
+		pageFooter(),
 	)
 }
 
@@ -83,54 +68,25 @@ func codeBlockText(code string) *elem.Element {
 	return elem.Pre(nil, elem.Code(nil, elem.Text(code)))
 }
 
-// headscaleLogo returns the Headscale SVG logo for consistent branding across all pages.
-// The logo is styled by the .headscale-logo CSS class.
-func headscaleLogo() elem.Node {
-	// Return the embedded SVG as-is
-	return elem.Raw(assets.SVG)
-}
-
 // pageFooter creates a consistent footer for all pages.
 func pageFooter() *elem.Element {
-	return elem.Footer(
-		attrs.Props{
-			attrs.Style: styles.Props{
-				styles.MarginTop:  space3XL,
-				styles.TextAlign:  "center",
-				styles.FontSize:   fontSizeSmall,
-				styles.Color:      "var(--md-default-fg-color--light)",
-				styles.LineHeight: lineHeightBase,
-			}.ToInline(),
-		},
-		elem.Text("Powered by "),
-		elem.A(attrs.Props{
-			attrs.Href:   "https://github.com/juanfont/headscale",
-			attrs.Rel:    "noreferrer noopener",
-			attrs.Target: "_blank",
-		}, elem.Text("Headscale")),
-	)
+	return elem.Footer(attrs.Props{attrs.Class: "public-footer"}, poweredBy()...)
 }
 
-// page renders a standard Headscale page: the given title in the document
-// head, and a body that begins with the Headscale logo, contains the supplied
-// content nodes in order, and ends with the shared footer.
+// page renders a standard end-user page: the given title in the document
+// head and the content in the Meshora card layout (see [publicBody]).
 func page(title string, content ...elem.Node) *elem.Element {
-	body := make([]elem.Node, 0, len(content)+2)
-	body = append(body, headscaleLogo())
-	body = append(body, content...)
-	body = append(body, pageFooter())
-
 	return HtmlStructure(
 		elem.Title(nil, elem.Text(title)),
-		mdTypesetBody(body...),
+		publicBody(content...),
 	)
 }
 
 // HtmlStructure creates a complete HTML document structure with proper meta tags
 // and semantic HTML5 structure. The head and body elements are passed as parameters
 // to allow for customization of each page.
-// Styling is provided via a CSS stylesheet (Material for MkDocs design system) with
-// minimal inline styles for layout and positioning.
+// Styling is provided by the Meshora stylesheet [assets.CSS], inlined; it uses
+// the system font stack, so no third-party font requests are made.
 func HtmlStructure(head, body *elem.Element) *elem.Element {
 	return elem.Html(
 		attrs.Props{attrs.Lang: "en"},
@@ -151,17 +107,10 @@ func HtmlStructure(head, body *elem.Element) *elem.Element {
 				attrs.Rel:  "icon",
 				attrs.Href: "/favicon.ico",
 			}),
-			// Google Fonts for Roboto and Roboto Mono
-			elem.Link(attrs.Props{
-				attrs.Rel:     "preconnect",
-				attrs.Href:    "https://fonts.gstatic.com",
-				"crossorigin": "",
+			elem.Meta(attrs.Props{
+				attrs.Name:    "color-scheme",
+				attrs.Content: "light dark",
 			}),
-			elem.Link(attrs.Props{
-				attrs.Rel:  "stylesheet",
-				attrs.Href: "https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Roboto+Mono:wght@400;700&display=swap",
-			}),
-			// Material for MkDocs CSS styles
 			elem.Style(attrs.Props{attrs.Type: "text/css"}, elem.Raw(assets.CSS)),
 			head,
 		),

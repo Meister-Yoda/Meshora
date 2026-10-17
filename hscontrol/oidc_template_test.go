@@ -56,14 +56,14 @@ func TestAuthErrorTemplate(t *testing.T) {
 			assert.Contains(t, html, tt.result.Heading)
 			assert.Contains(t, html, tt.result.Message)
 
-			// Verify Material for MkDocs design system CSS is present
-			assert.Contains(t, html, "Material for MkDocs")
-			assert.Contains(t, html, "Roboto")
+			// Verify the Meshora stylesheet is present
+			assert.Contains(t, html, "Meshora end-user pages")
 			assert.Contains(t, html, ".md-typeset")
+			assert.NotContains(t, html, "fonts.googleapis.com")
 
 			// Verify SVG elements are present
 			assert.Contains(t, html, "<svg")
-			assert.Contains(t, html, "class=\"headscale-logo\"")
+			assert.Contains(t, html, "class=\"brand-mark\"")
 			assert.Contains(t, html, "id=\"error-icon\"")
 
 			// Verify no success checkbox icon
@@ -121,14 +121,14 @@ func TestAuthSuccessTemplate(t *testing.T) {
 			assert.Contains(t, html, tt.result.User)
 			assert.Contains(t, html, tt.result.Message)
 
-			// Verify Material for MkDocs design system CSS is present
-			assert.Contains(t, html, "Material for MkDocs")
-			assert.Contains(t, html, "Roboto")
+			// Verify the Meshora stylesheet is present
+			assert.Contains(t, html, "Meshora end-user pages")
 			assert.Contains(t, html, ".md-typeset")
+			assert.NotContains(t, html, "fonts.googleapis.com")
 
 			// Verify SVG elements are present
 			assert.Contains(t, html, "<svg")
-			assert.Contains(t, html, "class=\"headscale-logo\"")
+			assert.Contains(t, html, "class=\"brand-mark\"")
 			assert.Contains(t, html, "id=\"checkbox\"")
 		})
 	}

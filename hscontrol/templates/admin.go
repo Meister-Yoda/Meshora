@@ -48,7 +48,7 @@ type AdminLoginInfo struct {
 // AdminLogin renders the web admin dashboard login page.
 func AdminLogin(info AdminLoginInfo) *elem.Element {
 	card := []elem.Node{
-		brand(),
+		brand("Admin"),
 		elem.H1(nil, elem.Text("Sign in")),
 		elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text("Use your Meshora admin account.")),
 	}
@@ -202,13 +202,18 @@ func adminDocument(base, title, bodyClass string, body ...elem.Node) *elem.Eleme
 	)
 }
 
-func brand() *elem.Element {
-	return elem.Div(
-		attrs.Props{attrs.Class: "brand"},
+// brand renders the Meshora logo and name, with an optional tag pill such as
+// "Admin". Admin and end-user pages share it.
+func brand(tag string) *elem.Element {
+	children := []elem.Node{
 		elem.Raw(meshoraMark),
 		elem.Span(nil, elem.Text("Meshora")),
-		elem.Span(attrs.Props{attrs.Class: "brand-tag"}, elem.Text("Admin")),
-	)
+	}
+	if tag != "" {
+		children = append(children, elem.Span(attrs.Props{attrs.Class: "brand-tag"}, elem.Text(tag)))
+	}
+
+	return elem.Div(attrs.Props{attrs.Class: "brand"}, children...)
 }
 
 func poweredBy() []elem.Node {
