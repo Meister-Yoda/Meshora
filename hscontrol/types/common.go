@@ -141,6 +141,10 @@ type AuthRequest struct {
 	// finalise the registration without re-running the OIDC flow.
 	pendingConfirmation *PendingRegistrationConfirmation
 
+	// created is when the request entered the auth cache, shown as its age
+	// in the web admin dashboard.
+	created time.Time
+
 	finished chan AuthVerdict
 	closed   *atomic.Bool
 }
@@ -149,6 +153,7 @@ type AuthRequest struct {
 // for non-registration flows that only need a verdict channel.
 func NewAuthRequest() *AuthRequest {
 	return &AuthRequest{
+		created:  time.Now(),
 		finished: make(chan AuthVerdict, 1),
 		closed:   &atomic.Bool{},
 	}
@@ -158,11 +163,10 @@ func NewAuthRequest() *AuthRequest {
 // minimal [RegistrationData] for a node-registration flow. The data is
 // stored by pointer; callers must not mutate it after handing it off.
 func NewRegisterAuthRequest(data *RegistrationData) *AuthRequest {
-	return &AuthRequest{
-		regData:  data,
-		finished: make(chan AuthVerdict, 1),
-		closed:   &atomic.Bool{},
-	}
+	rn := NewAuthRequest()
+	rn.regData = data
+
+	return rn
 }
 
 // NewSSHCheckAuthRequest creates a pending auth request bound to a
@@ -170,14 +174,18 @@ func NewRegisterAuthRequest(data *RegistrationData) *AuthRequest {
 // OIDC callback must verify their incoming request matches this binding
 // before recording any verdict.
 func NewSSHCheckAuthRequest(src, dst NodeID) *AuthRequest {
-	return &AuthRequest{
-		sshBinding: &SSHCheckBinding{
-			SrcNodeID: src,
-			DstNodeID: dst,
-		},
-		finished: make(chan AuthVerdict, 1),
-		closed:   &atomic.Bool{},
+	rn := NewAuthRequest()
+	rn.sshBinding = &SSHCheckBinding{
+		SrcNodeID: src,
+		DstNodeID: dst,
 	}
+
+	return rn
+}
+
+// CreatedAt returns when the request was created.
+func (rn *AuthRequest) CreatedAt() time.Time {
+	return rn.created
 }
 
 // RegistrationData returns the cached registration payload. It panics if
