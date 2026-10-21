@@ -24,6 +24,10 @@ MagicDNS, DERP, OIDC, …), dazu:
 - **Admin-Dashboard** unter `/admin`
   - Übersicht über Nutzer, Geräte und Online-Geräte
   - Listen der Nutzer, Geräte und wartenden Registrierungen
+  - Registrierungen zuweisen oder ablehnen und SSH-Checks freigeben oder ablehnen
+  - Nutzer anlegen, umbenennen und löschen; Geräte umbenennen, taggen,
+    ablaufen lassen und löschen
+  - Pre-Auth-Keys anlegen und ablaufen lassen; neue Schlüssel werden nur einmal angezeigt
 - **Lokale Admin-Accounts**, getrennt von den Tailnet-Nutzern
   - Passwort-Hashes mit Argon2id
   - Sessions im Arbeitsspeicher. Sie enden bei Passwortänderung, beim Löschen
@@ -40,13 +44,13 @@ MagicDNS, DERP, OIDC, …), dazu:
 
 ## Stand
 
-| Phase | Inhalt                                                                                                         | Stand     |
-| ----- | -------------------------------------------------------------------------------------------------------------- | --------- |
-| 1     | Admin-Accounts, Login, Sessions, Meshora-Design                                                                | fertig    |
-| 2     | Dashboard-Listen: Nutzer, Geräte, wartende Registrierungen                                                     | fertig    |
-| 3     | Dashboard-Aktionen: Registrierungen zuweisen, SSH-Checks freigeben, Geräte, Nutzer und Pre-Auth-Keys verwalten | in Arbeit |
-| 4     | Komfort für Endnutzer: Meshora-Startseite vor OIDC, optional gemerkte Session                                  | geplant   |
-| 5     | Dokumentation und ein Docker-Compose-Beispiel (Meshora + Reverse Proxy + Keycloak)                             | geplant   |
+| Phase | Inhalt                                                                                                         | Stand   |
+| ----- | -------------------------------------------------------------------------------------------------------------- | ------- |
+| 1     | Admin-Accounts, Login, Sessions, Meshora-Design                                                                | fertig  |
+| 2     | Dashboard-Listen: Nutzer, Geräte, wartende Registrierungen                                                     | fertig  |
+| 3     | Dashboard-Aktionen: Registrierungen zuweisen, SSH-Checks freigeben, Geräte, Nutzer und Pre-Auth-Keys verwalten | fertig  |
+| 4     | Komfort für Endnutzer: Meshora-Startseite vor OIDC, optional gemerkte Session                                  | geplant |
+| 5     | Dokumentation und ein Docker-Compose-Beispiel (Meshora + Reverse Proxy + Keycloak)                             | geplant |
 
 ## Schnellstart
 
@@ -95,8 +99,9 @@ tailscale login --login-server https://vpn.example.com
 ```
 
 Mit OIDC meldet sich der Nutzer beim Identity-Provider an und bestätigt das
-Gerät. Ohne OIDC weist ein Admin das Gerät einem Nutzer zu: nach Phase 3 im
-Dashboard, bis dahin mit `headscale auth register --auth-id … --user …`.
+Gerät. Ohne OIDC öffnet ein Admin `/admin/pending`, wählt die Registrierung
+und weist das Gerät einem Nutzer zu. Alternativ steht der CLI-Befehl
+`headscale auth register --auth-id … --user …` zur Verfügung.
 
 ## Admin-Accounts verwalten
 

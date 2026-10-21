@@ -23,6 +23,9 @@ MagicDNS, DERP, OIDC, …), plus:
 - **Admin dashboard** at `/admin`
   - overview of users, nodes and online devices
   - lists of users, nodes and pending registrations
+  - assign or reject registrations and approve or reject SSH checks
+  - create, rename and delete users; rename, tag, expire and delete devices
+  - create and expire pre-auth keys, with new secrets displayed only once
 - **Local admin accounts**, separate from tailnet users
   - Argon2id password hashes
   - in-memory sessions that end on password change, account deletion or restart
@@ -37,13 +40,13 @@ MagicDNS, DERP, OIDC, …), plus:
 
 ## Status
 
-| Phase | Content                                                                                            | State       |
-| ----- | -------------------------------------------------------------------------------------------------- | ----------- |
-| 1     | Admin accounts, login, sessions, Meshora design                                                    | done        |
-| 2     | Dashboard lists: users, nodes, pending registrations                                               | done        |
-| 3     | Dashboard actions: assign registrations, approve SSH checks, manage nodes, users and pre-auth keys | in progress |
-| 4     | Sign-in comfort for end users: Meshora start page before OIDC, optional remembered session         | planned     |
-| 5     | Documentation and a Docker Compose example (Meshora + reverse proxy + Keycloak)                    | planned     |
+| Phase | Content                                                                                            | State   |
+| ----- | -------------------------------------------------------------------------------------------------- | ------- |
+| 1     | Admin accounts, login, sessions, Meshora design                                                    | done    |
+| 2     | Dashboard lists: users, nodes, pending registrations                                               | done    |
+| 3     | Dashboard actions: assign registrations, approve SSH checks, manage nodes, users and pre-auth keys | done    |
+| 4     | Sign-in comfort for end users: Meshora start page before OIDC, optional remembered session         | planned |
+| 5     | Documentation and a Docker Compose example (Meshora + reverse proxy + Keycloak)                    | planned |
 
 ## Quick start
 
@@ -90,9 +93,9 @@ tailscale login --login-server https://vpn.example.com
 ```
 
 With OIDC configured, the user signs in with the identity provider and
-confirms the device. Without OIDC, an admin assigns the device to a user (from
-the dashboard once phase 3 is done, or today with
-`headscale auth register --auth-id … --user …`).
+confirms the device. Without OIDC, an admin opens `/admin/pending`, selects
+the registration and assigns the device to a user. The CLI command
+`headscale auth register --auth-id … --user …` is also available.
 
 ## Managing admin accounts
 
