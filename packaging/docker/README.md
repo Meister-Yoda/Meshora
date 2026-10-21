@@ -8,19 +8,19 @@ und Docker Compose v2. Die Images laufen als root im Container.
 
 Von der Release-Seite dieses Projekts
 `meshora-compose.tar.gz`, `SHA256SUMS` und das passende Image herunterladen:
-`meshora_v0.1.0-rc.1_linux_amd64.docker.tar.gz` für Intel/AMD oder
-`meshora_v0.1.0-rc.1_linux_arm64.docker.tar.gz` für ARM64.
+`meshora_v0.1.0-rc.2_linux_amd64.docker.tar.gz` für Intel/AMD oder
+`meshora_v0.1.0-rc.2_linux_arm64.docker.tar.gz` für ARM64.
 
 ```bash
 sha256sum --ignore-missing -c SHA256SUMS
-docker load -i meshora_v0.1.0-rc.1_linux_amd64.docker.tar.gz
+docker load -i meshora_v0.1.0-rc.2_linux_amd64.docker.tar.gz
 mkdir meshora
 tar -xzf meshora-compose.tar.gz -C meshora
 cd meshora
 mkdir -p config data
 cp config.yaml config/config.yaml
 cat > .env <<'EOF'
-MESHORA_VERSION=v0.1.0-rc.1
+MESHORA_VERSION=v0.1.0-rc.2
 MESHORA_SERVER_URL=http://192.168.1.100:8080
 EOF
 ```

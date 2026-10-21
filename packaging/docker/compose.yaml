@@ -1,6 +1,6 @@
 services:
   meshora:
-    image: meshora:${MESHORA_VERSION:-v0.1.0-rc.1}
+    image: meshora:${MESHORA_VERSION:-v0.1.0-rc.2}
     pull_policy: never
     restart: unless-stopped
     read_only: true
