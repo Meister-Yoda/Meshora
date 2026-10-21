@@ -43,6 +43,7 @@ import (
 	"github.com/juanfont/headscale/hscontrol/types"
 	"github.com/juanfont/headscale/hscontrol/types/change"
 	"github.com/juanfont/headscale/hscontrol/util"
+	"github.com/juanfont/headscale/hscontrol/webui"
 	"github.com/pkg/profile"
 	"github.com/rs/zerolog/log"
 	"github.com/sasha-s/go-deadlock"
@@ -503,6 +504,10 @@ func (h *Headscale) createRouter(apiV1Mux, apiV2Mux http.Handler) *chi.Mux {
 		r.Get("/oidc/callback", provider.OIDCCallbackHandler)
 		r.Get("/register/confirm/{auth_id}", provider.RegisterConfirmGetHandler)
 		r.Post("/register/confirm/{auth_id}", provider.RegisterConfirmHandler)
+	}
+
+	if h.cfg.WebAdmin.Enabled {
+		webui.New(h.state, h.cfg).Routes(r)
 	}
 
 	r.Get("/apple", h.AppleConfigMessage)

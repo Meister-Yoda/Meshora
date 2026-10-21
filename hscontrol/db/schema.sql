@@ -109,6 +109,16 @@ CREATE TABLE policies(
 );
 CREATE INDEX idx_policies_deleted_at ON policies(deleted_at);
 
+CREATE TABLE web_admins(
+  id integer PRIMARY KEY AUTOINCREMENT,
+  username text NOT NULL,
+  password_hash blob NOT NULL,
+  created_at datetime,
+  updated_at datetime,
+  last_login_at datetime
+);
+CREATE UNIQUE INDEX idx_web_admins_username ON web_admins(username);
+
 CREATE TABLE database_versions(
   id integer PRIMARY KEY,
   version text NOT NULL,

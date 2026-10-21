@@ -24,6 +24,7 @@ func mapError(msg string, err error) error {
 		errors.Is(err, state.ErrNodeNotInNodeStore),
 		errors.Is(err, db.ErrUserNotFound),
 		errors.Is(err, db.ErrNodeNotFoundRegistrationCache),
+		errors.Is(err, db.ErrWebAdminNotFound),
 		errors.Is(err, state.ErrRegistrationExpired):
 		return huma.Error404NotFound(msg, err)
 
@@ -36,11 +37,14 @@ func mapError(msg string, err error) error {
 		errors.Is(err, db.ErrUserStillHasNodes),
 		errors.Is(err, db.ErrCannotChangeOIDCUser),
 		errors.Is(err, db.ErrPreAuthKeyNotTaggedOrOwned),
-		errors.Is(err, db.ErrSingleUseAuthKeyHasBeenUsed):
+		errors.Is(err, db.ErrSingleUseAuthKeyHasBeenUsed),
+		errors.Is(err, db.ErrWebAdminUsernameInvalid),
+		errors.Is(err, db.ErrWebAdminPasswordTooShort):
 		return huma.Error400BadRequest(msg, err)
 
 	case errors.Is(err, state.ErrNodeKeyInUse),
-		errors.Is(err, state.ErrAmbiguousNodeOwnership):
+		errors.Is(err, state.ErrAmbiguousNodeOwnership),
+		errors.Is(err, db.ErrWebAdminExists):
 		return huma.Error409Conflict(msg, err)
 
 	default:
