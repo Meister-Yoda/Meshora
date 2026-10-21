@@ -1800,6 +1800,36 @@ func (s *State) SetAuthCacheEntry(id types.AuthID, entry *types.AuthRequest) {
 	s.authCache.Add(id, entry)
 }
 
+// AuthCacheEntry is a pending auth request together with its cache key.
+type AuthCacheEntry struct {
+	ID      types.AuthID
+	Request *types.AuthRequest
+}
+
+// ListAuthCacheEntries returns the pending auth requests, oldest first.
+// Entries are read with Peek so listing them neither refreshes their LRU
+// position nor pairs a key with another key's value when one expires
+// mid-listing.
+func (s *State) ListAuthCacheEntries() []AuthCacheEntry {
+	keys := s.authCache.Keys()
+	entries := make([]AuthCacheEntry, 0, len(keys))
+
+	for _, id := range keys {
+		req, ok := s.authCache.Peek(id)
+		if !ok || req == nil {
+			continue
+		}
+
+		entries = append(entries, AuthCacheEntry{ID: id, Request: req})
+	}
+
+	slices.SortStableFunc(entries, func(a, b AuthCacheEntry) int {
+		return a.Request.CreatedAt().Compare(b.Request.CreatedAt())
+	})
+
+	return entries
+}
+
 // DeleteAuthCacheEntryForTest drops a pending auth request from the cache,
 // exposed for testing so a test can reproduce a session that was lost
 // (expired, evicted, or dropped on a control-plane restart) without faking an

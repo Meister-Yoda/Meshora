@@ -62,3 +62,41 @@ func TestAuthCacheBoundedLRU(t *testing.T) {
 		assert.True(t, ok, "non-evicted entry %d should still be in the cache", i)
 	}
 }
+
+func TestListAuthCacheEntries(t *testing.T) {
+	s := &State{
+		authCache: expirable.NewLRU[types.AuthID, *types.AuthRequest](10, nil, time.Minute),
+	}
+
+	assert.Empty(t, s.ListAuthCacheEntries())
+
+	regID := types.MustAuthID()
+	sshID := types.MustAuthID()
+
+	reg := types.NewRegisterAuthRequest(&types.RegistrationData{Hostname: "laptop"})
+	s.SetAuthCacheEntry(regID, reg)
+
+	// Make sure the second request gets a strictly later timestamp.
+	require.Eventually(t, func() bool { return time.Now().After(reg.CreatedAt()) },
+		time.Second, time.Microsecond)
+	s.SetAuthCacheEntry(sshID, types.NewSSHCheckAuthRequest(1, 2))
+
+	// Touching the older entry moves it to the LRU front; the listing must
+	// still be ordered by age.
+	_, ok := s.GetAuthCacheEntry(regID)
+	require.True(t, ok)
+
+	entries := s.ListAuthCacheEntries()
+	require.Len(t, entries, 2)
+
+	assert.Equal(t, regID, entries[0].ID)
+	assert.True(t, entries[0].Request.IsRegistration())
+	assert.Equal(t, "laptop", entries[0].Request.RegistrationData().Hostname)
+
+	assert.Equal(t, sshID, entries[1].ID)
+	assert.True(t, entries[1].Request.IsSSHCheck())
+	assert.False(t, entries[1].Request.CreatedAt().Before(entries[0].Request.CreatedAt()))
+
+	s.DeleteAuthCacheEntryForTest(regID)
+	assert.Len(t, s.ListAuthCacheEntries(), 1)
+}
