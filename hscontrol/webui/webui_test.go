@@ -8,12 +8,14 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/juanfont/headscale/hscontrol/state"
 	"github.com/juanfont/headscale/hscontrol/types"
+	"github.com/juanfont/headscale/hscontrol/types/change"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"tailscale.com/tailcfg"
@@ -33,6 +35,17 @@ type testEnv struct {
 	state  *state.State
 	server *httptest.Server
 	client *http.Client
+
+	changesMu sync.Mutex
+	changes   []change.Change
+}
+
+// changeCount returns how many changes the dashboard handed to Change.
+func (e *testEnv) changeCount() int {
+	e.changesMu.Lock()
+	defer e.changesMu.Unlock()
+
+	return len(e.changes)
 }
 
 func newTestEnv(t *testing.T) *testEnv {
@@ -60,13 +73,20 @@ func newTestEnv(t *testing.T) *testEnv {
 	_, err = st.CreateWebAdmin(testAdmin, testPassword)
 	require.NoError(t, err)
 
+	env := &testEnv{t: t, state: st, client: newClient(t)}
+
 	r := chi.NewRouter()
-	New(st, cfg).Routes(r)
+	New(st, cfg, func(cs ...change.Change) {
+		env.changesMu.Lock()
+		defer env.changesMu.Unlock()
 
-	server := httptest.NewServer(r)
-	t.Cleanup(server.Close)
+		env.changes = append(env.changes, cs...)
+	}).Routes(r)
 
-	return &testEnv{t: t, state: st, server: server, client: newClient(t)}
+	env.server = httptest.NewServer(r)
+	t.Cleanup(env.server.Close)
+
+	return env
 }
 
 func newClient(t *testing.T) *http.Client {

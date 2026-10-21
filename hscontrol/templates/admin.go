@@ -23,6 +23,9 @@ import (
 // dashboard form.
 const AdminCSRFField = "csrf_token"
 
+// submitType is the type of every submit button.
+const submitType = "submit"
+
 // AdminStylesheetPath is the stylesheet's path below the dashboard base.
 const AdminStylesheetPath = "/assets/admin.css"
 
@@ -83,7 +86,7 @@ func AdminLogin(info AdminLoginInfo) *elem.Element {
 		adminField("Username", "username", "text", info.Username, "username"),
 		adminField("Password", "password", "password", "", "current-password"),
 		elem.Button(
-			attrs.Props{attrs.Type: "submit", attrs.Class: "btn btn-primary btn-block"},
+			attrs.Props{attrs.Type: submitType, attrs.Class: "btn btn-primary btn-block"},
 			elem.Text("Sign in"),
 		),
 	))
@@ -146,7 +149,7 @@ func AdminOverview(info AdminOverviewInfo) *elem.Element {
 		)),
 	)
 
-	return adminShell(info.Base, info.Username, info.CSRFToken, "Overview",
+	return adminShell(info.Base, info.Username, info.CSRFToken, "Overview", nil,
 		elem.Div(
 			attrs.Props{attrs.Class: "page-head"},
 			elem.H1(nil, elem.Text("Overview")),
@@ -157,11 +160,27 @@ func AdminOverview(info AdminOverviewInfo) *elem.Element {
 	)
 }
 
-// AdminPageInfo is the data every signed-in list page needs.
+// AdminFlash is a one-time message shown after an action.
+type AdminFlash struct {
+	Error   bool
+	Message string
+	// Secret is shown once in a copyable block, e.g. a new pre-auth key.
+	Secret string
+}
+
+// AdminChoice is one <option> of a select.
+type AdminChoice struct {
+	Value    string
+	Label    string
+	Selected bool
+}
+
+// AdminPageInfo is the data every signed-in page needs.
 type AdminPageInfo struct {
 	Base      string
 	Username  string
 	CSRFToken string
+	Flash     *AdminFlash
 	// Now is the reference time for relative times; zero means time.Now.
 	Now time.Time
 }
@@ -174,8 +193,13 @@ func (p AdminPageInfo) now() time.Time {
 	return p.Now
 }
 
+func (p AdminPageInfo) shell(title string, content ...elem.Node) *elem.Element {
+	return adminShell(p.Base, p.Username, p.CSRFToken, title, p.Flash, content...)
+}
+
 // AdminUserRow is one row of [AdminUsers].
 type AdminUserRow struct {
+	ID uint
 	// Name is the login name, DisplayName the full name; either may be empty.
 	Name        string
 	DisplayName string
@@ -195,7 +219,7 @@ func AdminUsers(info AdminPageInfo, users []AdminUserRow) *elem.Element {
 		rows := make([]elem.Node, 0, len(users))
 		for _, u := range users {
 			rows = append(rows, elem.Tr(nil,
-				elem.Td(nil, twoLine(cmp.Or(u.DisplayName, u.Name), u.Name)),
+				elem.Td(nil, twoLine(userHref(info.Base, u.ID), cmp.Or(u.DisplayName, u.Name), u.Name)),
 				elem.Td(nil, textOrDash(u.Email)),
 				elem.Td(nil, elem.Span(attrs.Props{attrs.Class: "pill"}, elem.Text(u.Provider))),
 				elem.Td(attrs.Props{attrs.Class: "num"}, elem.Text(strconv.Itoa(u.NodeCount))),
@@ -206,14 +230,41 @@ func AdminUsers(info AdminPageInfo, users []AdminUserRow) *elem.Element {
 		body = dataTable("Users", []string{"User", "Email", "Provider", "Nodes", "Created"}, rows)
 	}
 
-	return adminShell(info.Base, info.Username, info.CSRFToken, "Users",
+	create := elem.Section(
+		attrs.Props{attrs.Class: "card"},
+		elem.H2(nil, elem.Text("Add a user")),
+		elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text(
+			"Users who sign in with your identity provider are created automatically. "+
+				"Add one here to register devices for them before they sign in.",
+		)),
+		elem.Form(
+			attrs.Props{attrs.Class: "form-grid", attrs.Method: "POST", attrs.Action: info.Base + "/users"},
+			adminCSRFInput(info.CSRFToken),
+			textField("Username", "name", "", true),
+			textField("Display name", "display_name", "", false),
+			textField("Email", "email", "", false),
+			elem.Div(attrs.Props{attrs.Class: "form-actions"}, submitButton("Add user", "btn-primary")),
+		),
+	)
+
+	return info.shell("Users",
 		pageHead("Users", countLabel(len(users), "user", "users")+" in this tailnet."),
 		body,
+		create,
 	)
+}
+
+func userHref(base string, id uint) string {
+	return base + "/users/" + strconv.FormatUint(uint64(id), 10)
+}
+
+func nodeHref(base string, id uint64) string {
+	return base + "/nodes/" + strconv.FormatUint(id, 10)
 }
 
 // AdminNodeRow is one row of [AdminNodes].
 type AdminNodeRow struct {
+	ID        uint64
 	GivenName string
 	Hostname  string
 	// Tags owns the node when non-empty (tags-as-identity); Owner is the
@@ -237,33 +288,38 @@ func AdminNodes(info AdminPageInfo, nodes []AdminNodeRow) *elem.Element {
 		"Nodes appear here once a device has been registered.")
 
 	if len(nodes) > 0 {
-		now := info.now()
-
-		rows := make([]elem.Node, 0, len(nodes))
-		for _, n := range nodes {
-			rows = append(rows, elem.Tr(nil,
-				elem.Td(nil, twoLine(cmp.Or(n.GivenName, n.Hostname), n.Hostname)),
-				elem.Td(nil, ownerCell(n.Tags, n.Owner)),
-				elem.Td(attrs.Props{attrs.Class: "mono"}, addressCell(n.IPv4, n.IPv6)),
-				elem.Td(nil, statusCell(n.Online)),
-				elem.Td(nil, relCell(n.LastSeen, now)),
-				elem.Td(nil, expiryCell(n.Expiry, n.Expired)),
-				elem.Td(nil, textOrDash(n.OS)),
-			))
-		}
-
-		body = dataTable("Nodes",
-			[]string{"Node", "Owner", "Addresses", "Status", "Last seen", "Expiry", "OS"}, rows)
+		body = nodeTable(info, nodes)
 	}
 
-	return adminShell(info.Base, info.Username, info.CSRFToken, "Nodes",
+	return info.shell("Nodes",
 		pageHead("Nodes", countLabel(len(nodes), "node", "nodes")+" registered."),
 		body,
 	)
 }
 
+func nodeTable(info AdminPageInfo, nodes []AdminNodeRow) *elem.Element {
+	now := info.now()
+
+	rows := make([]elem.Node, 0, len(nodes))
+	for _, n := range nodes {
+		rows = append(rows, elem.Tr(nil,
+			elem.Td(nil, twoLine(nodeHref(info.Base, n.ID), cmp.Or(n.GivenName, n.Hostname), n.Hostname)),
+			elem.Td(nil, ownerCell(n.Tags, n.Owner)),
+			elem.Td(attrs.Props{attrs.Class: "mono"}, addressCell(n.IPv4, n.IPv6)),
+			elem.Td(nil, statusCell(n.Online)),
+			elem.Td(nil, relCell(n.LastSeen, now)),
+			elem.Td(nil, expiryCell(n.Expiry, n.Expired)),
+			elem.Td(nil, textOrDash(n.OS)),
+		))
+	}
+
+	return dataTable("Nodes",
+		[]string{"Node", "Owner", "Addresses", "Status", "Last seen", "Expiry", "OS"}, rows)
+}
+
 // AdminPendingRow is one row of [AdminPending].
 type AdminPendingRow struct {
+	AuthID string
 	// SSHCheck marks an SSH check-mode request; otherwise it is a node
 	// registration.
 	SSHCheck   bool
@@ -290,18 +346,22 @@ func AdminPending(info AdminPageInfo, pending []AdminPendingRow) *elem.Element {
 
 			rows = append(rows, elem.Tr(nil,
 				elem.Td(nil, kind),
-				elem.Td(nil, twoLine(p.Hostname, "")),
+				elem.Td(nil, twoLine("", p.Hostname, "")),
 				elem.Td(nil, textOrDash(p.OS)),
 				elem.Td(attrs.Props{attrs.Class: "mono"}, textOrDash(p.MachineKey)),
 				elem.Td(nil, relCell(p.CreatedAt, now)),
+				elem.Td(attrs.Props{attrs.Class: "cell-action"}, elem.A(attrs.Props{
+					attrs.Href:  pendingHref(info.Base, p.AuthID),
+					attrs.Class: "btn btn-primary btn-sm",
+				}, elem.Text("Review"))),
 			))
 		}
 
 		body = dataTable("Pending",
-			[]string{"Type", "Device", "OS", "Machine key", "Started"}, rows)
+			[]string{"Type", "Device", "OS", "Machine key", "Started", "Action"}, rows)
 	}
 
-	return adminShell(info.Base, info.Username, info.CSRFToken, "Pending",
+	return info.shell("Pending",
 		pageHead("Pending", "Logins that have started but not finished yet. They expire on their own."),
 		body,
 	)
@@ -350,14 +410,26 @@ func emptyState(title, hint string) *elem.Element {
 	)
 }
 
-// twoLine renders a primary label with an optional muted second line. Both
-// are truncated by CSS, so their full values go into title attributes
-// (escaped: elem-go does not escape attribute values).
-func twoLine(primary, secondary string) *elem.Element {
-	children := []elem.Node{
-		elem.Span(attrs.Props{attrs.Class: "cell-main", attrs.Title: html.EscapeString(primary)},
-			elem.Text(cmp.Or(primary, "—"))),
+func pendingHref(base, authID string) string {
+	return base + "/pending/" + html.EscapeString(authID)
+}
+
+// twoLine renders a primary label, linked to href when set, with an optional
+// muted second line. Both are truncated by CSS, so their full values go into
+// title attributes (escaped: elem-go does not escape attribute values).
+func twoLine(href, primary, secondary string) *elem.Element {
+	mainProps := attrs.Props{attrs.Class: "cell-main", attrs.Title: html.EscapeString(primary)}
+
+	var main *elem.Element
+
+	if href != "" {
+		mainProps[attrs.Href] = href
+		main = elem.A(mainProps, elem.Text(cmp.Or(primary, "—")))
+	} else {
+		main = elem.Span(mainProps, elem.Text(cmp.Or(primary, "—")))
 	}
+
+	children := []elem.Node{main}
 	if secondary != "" && secondary != primary {
 		children = append(children, elem.Span(
 			attrs.Props{attrs.Class: "cell-sub", attrs.Title: html.EscapeString(secondary)},
@@ -486,7 +558,7 @@ func relativeTime(t, now time.Time) string {
 }
 
 // adminShell wraps a signed-in page in the top bar and footer.
-func adminShell(base, username, csrf, title string, content ...elem.Node) *elem.Element {
+func adminShell(base, username, csrf, title string, flash *AdminFlash, content ...elem.Node) *elem.Element {
 	initial := ""
 	if r := []rune(username); len(r) > 0 {
 		initial = string(r[0])
@@ -507,6 +579,7 @@ func adminShell(base, username, csrf, title string, content ...elem.Node) *elem.
 				navLink(base+"/users", "Users", title == "Users"),
 				navLink(base+"/nodes", "Nodes", title == "Nodes"),
 				navLink(base+"/pending", "Pending", title == "Pending"),
+				navLink(base+"/keys", "Keys", title == "Keys"),
 			),
 			elem.Div(
 				attrs.Props{attrs.Class: "account"},
@@ -516,7 +589,7 @@ func adminShell(base, username, csrf, title string, content ...elem.Node) *elem.
 					attrs.Props{attrs.Method: "POST", attrs.Action: base + "/logout"},
 					adminCSRFInput(csrf),
 					elem.Button(
-						attrs.Props{attrs.Type: "submit", attrs.Class: "btn btn-ghost btn-sm"},
+						attrs.Props{attrs.Type: submitType, attrs.Class: "btn btn-ghost btn-sm"},
 						elem.Text("Sign out"),
 					),
 				),
@@ -526,7 +599,7 @@ func adminShell(base, username, csrf, title string, content ...elem.Node) *elem.
 
 	return adminDocument(base, title+" · Meshora", "app",
 		topbar,
-		elem.Main(attrs.Props{attrs.Class: "content"}, content...),
+		elem.Main(attrs.Props{attrs.Class: "content"}, append([]elem.Node{flashBanner(flash)}, content...)...),
 		elem.Footer(attrs.Props{attrs.Class: "app-footer"}, poweredBy()...),
 	)
 }
