@@ -30,7 +30,7 @@ import (
 	"github.com/juanfont/headscale/hscontrol/state"
 	"github.com/juanfont/headscale/hscontrol/templates"
 	"github.com/juanfont/headscale/hscontrol/types"
-	"github.com/juanfont/headscale/hscontrol/util"
+	"github.com/juanfont/headscale/hscontrol/types/change"
 	"github.com/rs/zerolog/log"
 )
 
@@ -72,11 +72,38 @@ type session struct {
 	passwordFP string
 	username   string
 	csrf       string
+
+	// flash is shown once on the page after a POST-redirect-GET. It lives
+	// here rather than in the URL so nothing the admin typed is reflected
+	// from a query string, and a new pre-auth key never lands in a URL.
+	mu    sync.Mutex
+	flash *templates.AdminFlash
+}
+
+func (s *session) setFlash(f *templates.AdminFlash) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.flash = f
+}
+
+// takeFlash returns the pending flash and clears it.
+func (s *session) takeFlash() *templates.AdminFlash {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	f := s.flash
+	s.flash = nil
+
+	return f
 }
 
 // Handler serves the dashboard.
 type Handler struct {
 	state *state.State
+	// change distributes state changes to connected nodes, like
+	// apiv1.Backend.Change.
+	change func(...change.Change)
 
 	// publicPath is BasePath as the browser sees it, including any path
 	// prefix of server_url. Cookies and redirects use it.
@@ -92,8 +119,9 @@ type Handler struct {
 	failures   *expirable.LRU[string, int]
 }
 
-// New builds the dashboard handler for cfg.
-func New(st *state.State, cfg *types.Config) *Handler {
+// New builds the dashboard handler for cfg. notify receives the changes of
+// every dashboard action, so connected nodes see them.
+func New(st *state.State, cfg *types.Config, notify func(...change.Change)) *Handler {
 	publicPath := BasePath
 	secure := false
 
@@ -104,6 +132,7 @@ func New(st *state.State, cfg *types.Config) *Handler {
 
 	return &Handler{
 		state:         st,
+		change:        notify,
 		publicPath:    publicPath,
 		serverURL:     strings.TrimSuffix(cfg.ServerURL, "/"),
 		secureCookies: secure,
@@ -124,8 +153,32 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Use(h.requireSession)
 			r.Get("/", h.overview)
 			r.Get("/users", h.users)
+			r.Post("/users", h.createUser)
+			r.Get("/users/{id}", h.userDetail)
+			r.Post("/users/{id}/rename", h.renameUser)
+			r.Get("/users/{id}/delete", h.confirmDeleteUser)
+			r.Post("/users/{id}/delete", h.deleteUser)
+
 			r.Get("/nodes", h.nodes)
+			r.Get("/nodes/{id}", h.nodeDetail)
+			r.Post("/nodes/{id}/rename", h.renameNode)
+			r.Post("/nodes/{id}/tags", h.setNodeTags)
+			r.Get("/nodes/{id}/expire", h.confirmExpireNode)
+			r.Post("/nodes/{id}/expire", h.expireNode)
+			r.Get("/nodes/{id}/delete", h.confirmDeleteNode)
+			r.Post("/nodes/{id}/delete", h.deleteNode)
+
 			r.Get("/pending", h.pending)
+			r.Get("/pending/{authID}", h.pendingReview)
+			r.Post("/pending/{authID}/assign", h.assignPending)
+			r.Post("/pending/{authID}/approve", h.approvePending)
+			r.Post("/pending/{authID}/reject", h.rejectPending)
+
+			r.Get("/keys", h.keys)
+			r.Post("/keys", h.createKey)
+			r.Get("/keys/{id}/expire", h.confirmExpireKey)
+			r.Post("/keys/{id}/expire", h.expireKey)
+
 			r.Post("/logout", h.logout)
 		})
 	})
@@ -272,10 +325,11 @@ func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
 		UserCount:    len(users),
 		NodeCount:    nodes.Len(),
 		OnlineCount:  online,
-		PendingCount: len(h.state.ListAuthCacheEntries()),
+		PendingCount: len(h.openAuthRequests()),
 	}).Render())
 }
 
+// pageInfo returns the shared page data and consumes the session's flash.
 func (h *Handler) pageInfo(r *http.Request) templates.AdminPageInfo {
 	sess := sessionFrom(r)
 
@@ -283,7 +337,16 @@ func (h *Handler) pageInfo(r *http.Request) templates.AdminPageInfo {
 		Base:      h.publicPath,
 		Username:  sess.username,
 		CSRFToken: sess.csrf,
+		Flash:     sess.takeFlash(),
 	}
+}
+
+// openAuthRequests returns the pending auth requests nobody has decided on
+// yet. Decided ones stay cached until their client picks up the verdict.
+func (h *Handler) openAuthRequests() []state.AuthCacheEntry {
+	return slices.DeleteFunc(h.state.ListAuthCacheEntries(), func(e state.AuthCacheEntry) bool {
+		return e.Request.IsFinished()
+	})
 }
 
 func (h *Handler) users(w http.ResponseWriter, r *http.Request) {
@@ -307,20 +370,7 @@ func (h *Handler) users(w http.ResponseWriter, r *http.Request) {
 	rows := make([]templates.AdminUserRow, 0, len(users))
 	for i := range users {
 		u := users[i].View()
-
-		provider := "CLI"
-		if u.Provider() == util.RegisterMethodOIDC {
-			provider = "OIDC"
-		}
-
-		rows = append(rows, templates.AdminUserRow{
-			Name:        u.Name(),
-			DisplayName: u.DisplayName(),
-			Email:       u.Email(),
-			Provider:    provider,
-			NodeCount:   nodesPerUser[types.UserID(u.ID())],
-			CreatedAt:   u.Model().CreatedAt,
-		})
+		rows = append(rows, userRow(u, nodesPerUser[types.UserID(u.ID())]))
 	}
 
 	writeHTML(w, http.StatusOK, templates.AdminUsers(h.pageInfo(r), rows).Render())
@@ -331,38 +381,7 @@ func (h *Handler) nodes(w http.ResponseWriter, r *http.Request) {
 	rows := make([]templates.AdminNodeRow, 0, nodes.Len())
 
 	for _, n := range nodes.All() {
-		row := templates.AdminNodeRow{
-			GivenName: n.GivenName(),
-			Hostname:  n.Hostname(),
-			Expired:   n.IsExpired(),
-		}
-
-		if n.IsTagged() {
-			row.Tags = n.Tags().AsSlice()
-		} else {
-			row.Owner = n.User().Username()
-		}
-
-		if ip, ok := n.IPv4().GetOk(); ok {
-			row.IPv4 = ip.String()
-		}
-
-		if ip, ok := n.IPv6().GetOk(); ok {
-			row.IPv6 = ip.String()
-		}
-
-		if online, ok := n.IsOnline().GetOk(); ok {
-			row.Online = &online
-		}
-
-		row.LastSeen, _ = n.LastSeen().GetOk()
-		row.Expiry, _ = n.Expiry().GetOk()
-
-		if hi := n.Hostinfo(); hi.Valid() {
-			row.OS = hi.OS()
-		}
-
-		rows = append(rows, row)
+		rows = append(rows, nodeRow(n))
 	}
 
 	slices.SortFunc(rows, func(a, b templates.AdminNodeRow) int {
@@ -372,34 +391,81 @@ func (h *Handler) nodes(w http.ResponseWriter, r *http.Request) {
 	writeHTML(w, http.StatusOK, templates.AdminNodes(h.pageInfo(r), rows).Render())
 }
 
+func nodeRow(n types.NodeView) templates.AdminNodeRow {
+	row := templates.AdminNodeRow{
+		ID:        n.ID().Uint64(),
+		GivenName: n.GivenName(),
+		Hostname:  n.Hostname(),
+		Expired:   n.IsExpired(),
+	}
+
+	if n.IsTagged() {
+		row.Tags = n.Tags().AsSlice()
+	} else {
+		row.Owner = n.User().Username()
+	}
+
+	if ip, ok := n.IPv4().GetOk(); ok {
+		row.IPv4 = ip.String()
+	}
+
+	if ip, ok := n.IPv6().GetOk(); ok {
+		row.IPv6 = ip.String()
+	}
+
+	if online, ok := n.IsOnline().GetOk(); ok {
+		row.Online = &online
+	}
+
+	row.LastSeen, _ = n.LastSeen().GetOk()
+	row.Expiry, _ = n.Expiry().GetOk()
+
+	if hi := n.Hostinfo(); hi.Valid() {
+		row.OS = hi.OS()
+	}
+
+	return row
+}
+
 func (h *Handler) pending(w http.ResponseWriter, r *http.Request) {
-	entries := h.state.ListAuthCacheEntries()
+	entries := h.openAuthRequests()
 	rows := make([]templates.AdminPendingRow, 0, len(entries))
 
 	for _, e := range entries {
-		row := templates.AdminPendingRow{CreatedAt: e.Request.CreatedAt()}
-
-		switch {
-		case e.Request.IsRegistration():
-			reg := e.Request.RegistrationData()
-			row.Hostname = reg.Hostname
-			row.MachineKey = shortMachineKey(reg.MachineKey.String())
-
-			if reg.Hostinfo != nil {
-				row.OS = reg.Hostinfo.OS
-			}
-		case e.Request.IsSSHCheck():
-			binding := e.Request.SSHCheckBinding()
-			row.SSHCheck = true
-			row.Hostname = h.nodeName(binding.SrcNodeID) + " → " + h.nodeName(binding.DstNodeID)
-		default:
-			continue
+		if row, ok := h.pendingRow(e); ok {
+			rows = append(rows, row)
 		}
-
-		rows = append(rows, row)
 	}
 
 	writeHTML(w, http.StatusOK, templates.AdminPending(h.pageInfo(r), rows).Render())
+}
+
+// pendingRow describes a pending auth request; ok is false for request kinds
+// the dashboard cannot show.
+func (h *Handler) pendingRow(e state.AuthCacheEntry) (templates.AdminPendingRow, bool) {
+	row := templates.AdminPendingRow{
+		AuthID:    e.ID.String(),
+		CreatedAt: e.Request.CreatedAt(),
+	}
+
+	switch {
+	case e.Request.IsRegistration():
+		reg := e.Request.RegistrationData()
+		row.Hostname = reg.Hostname
+		row.MachineKey = shortMachineKey(reg.MachineKey.String())
+
+		if reg.Hostinfo != nil {
+			row.OS = reg.Hostinfo.OS
+		}
+	case e.Request.IsSSHCheck():
+		binding := e.Request.SSHCheckBinding()
+		row.SSHCheck = true
+		row.Hostname = h.nodeName(binding.SrcNodeID) + " → " + h.nodeName(binding.DstNodeID)
+	default:
+		return row, false
+	}
+
+	return row, true
 }
 
 func (h *Handler) nodeName(id types.NodeID) string {

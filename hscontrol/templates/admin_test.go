@@ -58,6 +58,25 @@ func TestAdminPagesHaveNoInlineStyles(t *testing.T) {
 			{Hostname: "laptop", OS: "linux", MachineKey: "mkey:abcd1234…", CreatedAt: now},
 			{SSHCheck: true, Hostname: "a → b", CreatedAt: now},
 		}).Render(),
+		AdminUsers(AdminPageInfo{Base: "/admin", Flash: &AdminFlash{Error: true, Message: "nope"}}, nil).Render(),
+		AdminUserDetail(info, AdminUserRow{ID: 1, Name: "bob", Provider: "CLI"}, nil).Render(),
+		AdminUserDetail(info, AdminUserRow{ID: 1, Name: "bob", Provider: "OIDC"}, []AdminNodeRow{
+			{ID: 2, GivenName: "laptop", Owner: "bob"},
+		}).Render(),
+		AdminNodeDetail(info, AdminNodeRow{ID: 2, GivenName: "laptop", Online: &online}, AdminNodeExtra{}).Render(),
+		AdminNodeDetail(info, AdminNodeRow{ID: 3, Tags: []string{"tag:a"}}, AdminNodeExtra{CreatedAt: now}).Render(),
+		AdminPendingReview(info, AdminPendingRow{AuthID: "x", Hostname: "pc"}, nil).Render(),
+		AdminPendingReview(info, AdminPendingRow{AuthID: "x", Hostname: "pc"},
+			[]AdminChoice{{Value: "1", Label: "bob"}}).Render(),
+		AdminPendingReview(info, AdminPendingRow{AuthID: "x", SSHCheck: true}, nil).Render(),
+		AdminKeys(info, nil, nil, []AdminChoice{{Value: "1h", Label: "1 hour"}}).Render(),
+		//nolint:gosec // G101: test fixture, not a credential
+		AdminKeys(AdminPageInfo{Base: "/admin", Flash: &AdminFlash{Message: "new", Secret: "hskey-auth-x"}},
+			[]AdminKeyRow{
+				{ID: 1, Prefix: "hskey-auth-a-***", User: "bob", Reusable: true, Status: "Active"},
+				{ID: 2, Prefix: "hskey-auth-b-***", Tags: []string{"tag:ci"}, Ephemeral: true, Status: "Expired"},
+			}, nil, nil).Render(),
+		AdminConfirm(info, AdminConfirmInfo{Section: "Nodes", Title: "Delete", Action: "/nodes/1/delete"}).Render(),
 	}
 
 	for _, page := range pages {

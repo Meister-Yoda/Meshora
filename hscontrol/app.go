@@ -507,7 +507,7 @@ func (h *Headscale) createRouter(apiV1Mux, apiV2Mux http.Handler) *chi.Mux {
 	}
 
 	if h.cfg.WebAdmin.Enabled {
-		webui.New(h.state, h.cfg).Routes(r)
+		webui.New(h.state, h.cfg, h.Change).Routes(r)
 	}
 
 	r.Get("/apple", h.AppleConfigMessage)

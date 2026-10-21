@@ -188,6 +188,12 @@ func (rn *AuthRequest) CreatedAt() time.Time {
 	return rn.created
 }
 
+// IsFinished reports whether a verdict has already been handed to the
+// request via [AuthRequest.FinishAuth].
+func (rn *AuthRequest) IsFinished() bool {
+	return rn.closed.Load()
+}
+
 // RegistrationData returns the cached registration payload. It panics if
 // called on an [AuthRequest] that was not created via
 // [NewRegisterAuthRequest].
