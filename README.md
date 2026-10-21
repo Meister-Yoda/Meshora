@@ -1,186 +1,142 @@
-![headscale logo](./docs/assets/logo/headscale3_header_stacked_left.png)
+# Meshora
 
-![ci](https://github.com/juanfont/headscale/actions/workflows/test.yml/badge.svg)
+**English** · [Deutsch](README.de.md)
 
-An open source, self-hosted implementation of the Tailscale control server.
+Meshora is a self-hosted Tailscale control server built on
+[Headscale](https://github.com/juanfont/headscale). It keeps everything
+Headscale does and adds a web dashboard, so day-to-day administration no
+longer needs the command line:
 
-Join our [Discord server](https://discord.gg/c84AZQhmpx) for a chat.
+- **End users** connect the regular Tailscale client and sign in with your
+  identity provider (OIDC).
+- **Admins** sign in to a web dashboard at `/admin` with a local admin
+  account and manage users, devices and pending registrations there.
 
-**Note:** Always select the same GitHub tag as the released version you use
-to ensure you have the correct example configuration. The `main` branch might
-contain unreleased changes. The documentation is available for stable and
-development versions:
-
-- [Documentation for the stable version](https://headscale.net/stable/)
-- [Documentation for the development version](https://headscale.net/development/)
-
-## What is Tailscale
-
-Tailscale is [a modern VPN](https://tailscale.com/) built on top of
-[Wireguard](https://www.wireguard.com/).
-It [works like an overlay network](https://tailscale.com/blog/how-tailscale-works/)
-between the computers of your networks - using
-[NAT traversal](https://tailscale.com/blog/how-nat-traversal-works/).
-
-Everything in Tailscale is Open Source, except the GUI clients for proprietary OS
-(Windows and macOS/iOS), and the control server.
-
-The control server works as an exchange point of Wireguard public keys for the
-nodes in the Tailscale network. It assigns the IP addresses of the clients,
-creates the boundaries between each user, enables sharing machines between users,
-and exposes the advertised routes of your nodes.
-
-A [Tailscale network (tailnet)](https://tailscale.com/docs/concepts/tailnet) is
-private network which Tailscale assigns to a user in terms of private users or an
-organisation.
-
-## Design goal
-
-Headscale aims to implement a self-hosted, open source alternative to the
-[Tailscale](https://tailscale.com/) control server. Headscale's goal is to
-provide self-hosters and hobbyists with an open-source server they can use for
-their projects and labs. It implements a narrow scope, a _single_ Tailscale
-network (tailnet), suitable for a personal use, or a small open-source
-organisation.
-
-## Supporting Headscale
-
-If you like `headscale` and find it useful, there is a sponsorship and donation
-buttons available in the repo.
+> Meshora is an independent fork. It is not affiliated with Tailscale Inc. or
+> the Headscale project. Please do not report Meshora issues to Headscale.
 
 ## Features
 
-Please see ["Features" in the documentation](https://headscale.net/stable/about/features/).
+Everything Headscale provides (node registration, IP allocation, ACL policy,
+MagicDNS, DERP, OIDC, …), plus:
 
-## Client OS support
+- **Admin dashboard** at `/admin`
+  - overview of users, nodes and online devices
+  - lists of users, nodes and pending registrations
+- **Local admin accounts**, separate from tailnet users
+  - Argon2id password hashes
+  - in-memory sessions that end on password change, account deletion or restart
+  - CSRF protection on every form and a login rate limit per IP and username
+  - strict Content Security Policy: no scripts, no inline styles, no
+    third-party requests
+- **Meshora design** for the dashboard and for all end-user pages
+  (registration, sign-in result, client setup), with light and dark mode and
+  a mobile layout
+- **CLI and API** to manage admin accounts (`headscale webadmins …`,
+  `/api/v1/webadmin`)
 
-Please see ["Client and operating system support" in the documentation](https://headscale.net/stable/about/clients/).
+## Status
 
-## Running headscale
+| Phase | Content                                                                                            | State       |
+| ----- | -------------------------------------------------------------------------------------------------- | ----------- |
+| 1     | Admin accounts, login, sessions, Meshora design                                                    | done        |
+| 2     | Dashboard lists: users, nodes, pending registrations                                               | done        |
+| 3     | Dashboard actions: assign registrations, approve SSH checks, manage nodes, users and pre-auth keys | in progress |
+| 4     | Sign-in comfort for end users: Meshora start page before OIDC, optional remembered session         | planned     |
+| 5     | Documentation and a Docker Compose example (Meshora + reverse proxy + Keycloak)                    | planned     |
 
-**Please note that we do not support nor encourage the use of reverse proxies
-and container to run Headscale.**
+## Quick start
 
-Please have a look at the [`documentation`](https://headscale.net/stable/).
+Meshora is configured like Headscale. Start from
+[`config-example.yaml`](config-example.yaml) and enable the dashboard:
 
-For NixOS users, a module is available in [`nix/`](./nix/).
+```yaml
+server_url: https://vpn.example.com
 
-## Builds from `main`
+web_admin:
+  enabled: true
+  # How long an admin stays signed in. Sessions are kept in memory.
+  session_ttl: 12h
 
-Development builds from the `main` branch are available as container images and
-binaries. See the [development builds](https://headscale.net/stable/setup/install/main/)
-documentation for details.
-
-## Talks
-
-- Fosdem 2026 (video): [Headscale & Tailscale: The complementary open source clone](https://fosdem.org/2026/schedule/event/KYQ3LL-headscale-the-complementary-open-source-clone/)
-  - presented by Kristoffer Dalby
-- Fosdem 2023 (video): [Headscale: How we are using integration testing to reimplement Tailscale](https://fosdem.org/2023/schedule/event/goheadscale/)
-  - presented by Juan Font Alonso and Kristoffer Dalby
-
-## Disclaimer
-
-This project is not associated with Tailscale Inc.
-
-However, one of the active maintainers for Headscale [is employed by Tailscale](https://tailscale.com/blog/opensource) and he is allowed to spend work hours contributing to the project. Contributions from this maintainer are reviewed by other maintainers.
-
-The maintainers work together on setting the direction for the project. The underlying principle is to serve the community of self-hosters, enthusiasts and hobbyists - while having a sustainable project.
-
-## Contributing
-
-Please read the [CONTRIBUTING.md](./CONTRIBUTING.md) file.
-
-Have also a look at our [AI_POLICY.md](./AI_POLICY.md).
-
-### Requirements
-
-To contribute to headscale you would need the latest version of [Go](https://golang.org)
-and [Buf](https://buf.build) (Protobuf generator).
-
-We recommend using [Nix](https://nixos.org/) to setup a development environment. This can
-be done with `nix develop`, which will install the tools and give you a shell.
-This guarantees that you will have the same dev env as `headscale` maintainers.
-
-### Code style
-
-To ensure we have some consistency with a growing number of contributions,
-this project has adopted linting and style/formatting rules:
-
-The **Go** code is linted with [`golangci-lint`](https://golangci-lint.run) and
-formatted with [`golines`](https://github.com/segmentio/golines) (width 88) and
-[`gofumpt`](https://github.com/mvdan/gofumpt).
-Please configure your editor to run the tools while developing and make sure to
-run `make lint` and `make fmt` before committing any code.
-
-The **Proto** code is linted with [`buf`](https://docs.buf.build/lint/overview) and
-formatted with [`clang-format`](https://clang.llvm.org/docs/ClangFormat.html).
-
-The **docs** are formatted with [`mdformat`](https://mdformat.readthedocs.io).
-
-The **rest** (Markdown, YAML, etc) is formatted with [`prettier`](https://prettier.io).
-
-Check out the `.golangci.yaml` and `Makefile` to see the specific configuration.
-
-### Install development tools
-
-- Go
-- Buf
-- Protobuf tools
-
-Install and activate:
-
-```shell
-nix develop
+# Optional, but intended: end users sign in through your identity provider.
+oidc:
+  issuer: https://idp.example.com/realms/example
+  client_id: meshora
+  client_secret_path: /etc/meshora/oidc_client_secret
 ```
 
-### Testing and building
+Build and run:
 
-Some parts of the project require the generation of Go code from Protobuf
-(if changes are made in `proto/`) and it must be (re-)generated with:
-
-```shell
-make generate
-```
-
-**Note**: Please check in changes from `gen/` in a separate commit to make it easier to review.
-
-To run the tests:
-
-```shell
-make test
-```
-
-To build the program:
-
-```shell
+```bash
 make build
+./headscale serve -c /etc/meshora/config.yaml
 ```
 
-### Development workflow
+Create the first admin account. The password is prompted twice, or read from
+`--password-file` or piped stdin. It is never accepted as a flag value.
 
-We recommend using Nix for dependency management to ensure you have all required tools. If you prefer to manage dependencies yourself, you can use Make directly:
-
-**With Nix (recommended):**
-
-```shell
-nix develop
-make test
-make build
+```bash
+./headscale webadmins create admin
 ```
 
-**With your own dependencies:**
+Then open `https://vpn.example.com/admin`.
 
-```shell
-make test
-make build
+### Connecting a device
+
+On the device, point the Tailscale client at your server:
+
+```bash
+tailscale login --login-server https://vpn.example.com
 ```
 
-The Makefile will warn you if any required tools are missing and suggest running `nix develop`. Run `make help` to see all available targets.
+With OIDC configured, the user signs in with the identity provider and
+confirms the device. Without OIDC, an admin assigns the device to a user (from
+the dashboard once phase 3 is done, or today with
+`headscale auth register --auth-id … --user …`).
 
-## Contributors
+## Managing admin accounts
 
-<a href="https://github.com/juanfont/headscale/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=juanfont/headscale" />
-</a>
+```bash
+headscale webadmins list
+headscale webadmins create <username> [--password-file FILE]
+headscale webadmins set-password <username> [--password-file FILE]
+headscale webadmins delete <username>
+```
 
-Made with [contrib.rocks](https://contrib.rocks).
+Passwords need at least 12 characters. Changing a password or deleting an
+account ends that admin's open sessions.
+
+## Development
+
+Meshora is developed like Headscale. Read [`AGENTS.md`](AGENTS.md) for the
+code conventions, database migration rules and test procedures.
+
+- Go 1.27.2 or newer. `nix develop` provides the full toolchain.
+- `make build`, `make test`, `make lint`
+- After changing the API: `make client` regenerates `gen/client/`. Commit the
+  generated code separately.
+- On Windows, work inside WSL: one upstream test fixture has a `>` in its file
+  name, which a Windows checkout cannot create.
+
+Dashboard code lives in:
+
+| Path                             | Purpose                                        |
+| -------------------------------- | ---------------------------------------------- |
+| `hscontrol/webui/`               | dashboard handlers, sessions, CSRF, rate limit |
+| `hscontrol/templates/admin.go`   | dashboard pages                                |
+| `hscontrol/assets/admin.css`     | dashboard stylesheet                           |
+| `hscontrol/assets/style.css`     | stylesheet of the end-user pages               |
+| `hscontrol/db/web_admin.go`      | admin accounts and password hashing            |
+| `hscontrol/api/v1/webadmins.go`  | admin account API                              |
+| `cmd/headscale/cli/web_admin.go` | `headscale webadmins` command                  |
+
+## Based on Headscale
+
+Meshora is built on [Headscale](https://github.com/juanfont/headscale) by
+Juan Font and contributors. All core functionality comes from Headscale, and
+its [documentation](https://headscale.net/stable/) applies to everything
+except the dashboard. Thank you to everyone who works on Headscale.
+
+## License
+
+BSD 3-Clause, the same as Headscale. See [`LICENSE`](LICENSE).
