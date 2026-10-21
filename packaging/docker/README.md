@@ -1,21 +1,26 @@
 # Meshora auf dem Docker-Server testen
 
-Die Vorabversion enthält Docker-Images für Linux AMD64 und ARM64 als
-Download. Ein Registry-Konto ist nicht erforderlich. Benötigt werden Docker
-und Docker Compose v2. Die Images laufen als root im Container.
+Meshora wird für Linux AMD64 und ARM64 unter
+`ghcr.io/example-org/meshora:v0.1.0-rc.2` bereitgestellt. Docker wählt die
+passende Architektur automatisch. Benötigt werden Docker und Docker Compose
+v2. Die Images laufen als root im Container.
+
+Für Abrufe ohne Anmeldung muss das GitHub-Paket einmal auf **Public**
+gestellt werden: Paketeinstellungen auf GitHub.
+Falls es privat bleiben soll, vor dem Pull mit einem eigenen Token mit
+`read:packages` bei `docker login ghcr.io` anmelden. Keine Tokens in die
+Compose-Datei oder in Git eintragen.
 
 ## Download und Start im LAN
 
 Von der Release-Seite dieses Projekts
-`meshora-compose.tar.gz`, `SHA256SUMS` und das passende Image herunterladen:
-`meshora_v0.1.0-rc.2_linux_amd64.docker.tar.gz` für Intel/AMD oder
-`meshora_v0.1.0-rc.2_linux_arm64.docker.tar.gz` für ARM64.
+`meshora-compose-ghcr.tar.gz` und `meshora-compose-ghcr.sha256`
+herunterladen:
 
 ```bash
-sha256sum --ignore-missing -c SHA256SUMS
-docker load -i meshora_v0.1.0-rc.2_linux_amd64.docker.tar.gz
+sha256sum -c meshora-compose-ghcr.sha256
 mkdir meshora
-tar -xzf meshora-compose.tar.gz -C meshora
+tar -xzf meshora-compose-ghcr.tar.gz -C meshora
 cd meshora
 mkdir -p config data
 cp config.yaml config/config.yaml
@@ -23,6 +28,7 @@ cat > .env <<'EOF'
 MESHORA_VERSION=v0.1.0-rc.2
 MESHORA_SERVER_URL=http://192.168.1.100:8080
 EOF
+docker compose pull
 ```
 
 In `.env` die Beispiel-IP durch die IP des Docker-Servers ersetzen. Optional
@@ -81,10 +87,30 @@ docker compose restart meshora
 Neustarts beenden bestehende Admin-Sitzungen. Tailscale-Clients verbinden
 sich anschließend mit `tailscale up --login-server=https://mesh.example.com`.
 
+## Alternativ: Image-Archive ohne Registry
+
+Die ursprünglichen Dateien `meshora-compose.tar.gz`, `SHA256SUMS` und
+`meshora_v0.1.0-rc.2_linux_amd64.docker.tar.gz` bzw.
+`meshora_v0.1.0-rc.2_linux_arm64.docker.tar.gz` bleiben auf der Release-Seite.
+
+```bash
+sha256sum --ignore-missing -c SHA256SUMS
+docker load -i meshora_v0.1.0-rc.2_linux_amd64.docker.tar.gz
+```
+
+Bei Verwendung des neuen GHCR-Compose-Pakets für lokal geladene Images
+zusätzlich in `.env` setzen:
+
+```dotenv
+MESHORA_IMAGE=meshora
+MESHORA_PULL_POLICY=never
+```
+
 ## Selbst bauen
 
 ```bash
 docker build -f Dockerfile.meshora --build-arg VERSION=dev -t meshora:dev .
 ```
 
-Beim Wechsel auf dieses Image `MESHORA_VERSION=dev` in `.env` setzen.
+Beim Wechsel auf dieses Image in `.env` `MESHORA_VERSION=dev`,
+`MESHORA_IMAGE=meshora` und `MESHORA_PULL_POLICY=never` setzen.

@@ -2,11 +2,17 @@ name: Meshora Release
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing release tag to publish to GHCR
+        required: true
+        default: v0.1.0-rc.2
 permissions:
   contents: write
 jobs:
   release:
-    if: github.repository == 'Meister-Yoda/Meshora'
+    if: github.repository == 'Meister-Yoda/Meshora' && github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -75,3 +81,49 @@ jobs:
           if [[ "$TAG" == *-* ]]; then prerelease+=(--prerelease); fi
           gh release create "$TAG" dist/* --verify-tag --title "Meshora $TAG" \
             --notes-file packaging/docker/README.md "${prerelease[@]}"
+
+  registry:
+    needs: release
+    if: >-
+      always() && github.repository == 'Meister-Yoda/Meshora' &&
+      (github.event_name == 'workflow_dispatch' || needs.release.result == 'success')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
+      - name: Publish existing release images to GHCR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.release_tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          mkdir -p /tmp/meshora-ghcr
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern "*.docker.tar.gz" --pattern SHA256SUMS --dir /tmp/meshora-ghcr
+          (cd /tmp/meshora-ghcr && sha256sum --ignore-missing -c SHA256SUMS)
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          for arch in amd64 arm64; do
+            docker load -i "/tmp/meshora-ghcr/meshora_${TAG}_linux_${arch}.docker.tar.gz"
+            docker tag "meshora:$TAG" "$image:$TAG-$arch"
+            docker push "$image:$TAG-$arch"
+          done
+          docker buildx imagetools create -t "$image:$TAG" "$image:$TAG-amd64" "$image:$TAG-arm64"
+          docker buildx imagetools inspect "$image:$TAG"
+          if [[ "$TAG" != *-* ]]; then
+            docker buildx imagetools create -t "$image:latest" "$image:$TAG"
+          fi
+      - name: Attach GHCR Compose bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.release_tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          tar -czf /tmp/meshora-ghcr/meshora-compose-ghcr.tar.gz -C packaging/docker compose.yaml compose.traefik.yaml config.yaml README.md
+          cd /tmp/meshora-ghcr
+          sha256sum meshora-compose-ghcr.tar.gz > meshora-compose-ghcr.sha256
+          gh release upload "$TAG" meshora-compose-ghcr.tar.gz meshora-compose-ghcr.sha256 --repo "$GITHUB_REPOSITORY"

@@ -1,7 +1,7 @@
 services:
   meshora:
-    image: meshora:${MESHORA_VERSION:-v0.1.0-rc.2}
-    pull_policy: never
+    image: ${MESHORA_IMAGE:-ghcr.io/meister-yoda/meshora}:${MESHORA_VERSION:-v0.1.0-rc.2}
+    pull_policy: ${MESHORA_PULL_POLICY:-missing}
     restart: unless-stopped
     read_only: true
     environment:
