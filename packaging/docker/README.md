@@ -1,12 +1,12 @@
 # Meshora auf dem Docker-Server testen
 
-Meshora wird für Linux AMD64 und ARM64 unter
-`ghcr.io/example-org/meshora:v0.1.0-rc.2` bereitgestellt. Docker wählt die
-passende Architektur automatisch. Benötigt werden Docker und Docker Compose
+Meshora wird für Linux AMD64 und ARM64 über GHCR bereitgestellt. Die
+Image-Adresse ist in der Compose-Konfiguration voreingestellt. Docker
+wählt die passende Architektur automatisch. Benötigt werden Docker und Docker Compose
 v2. Die Images laufen als root im Container.
 
 Für Abrufe ohne Anmeldung muss das GitHub-Paket einmal auf **Public**
-gestellt werden: Paketeinstellungen auf GitHub.
+gestellt werden (GitHub: Packages → Paket → Package settings).
 Falls es privat bleiben soll, vor dem Pull mit einem eigenen Token mit
 `read:packages` bei `docker login ghcr.io` anmelden. Keine Tokens in die
 Compose-Datei oder in Git eintragen.
@@ -55,12 +55,16 @@ Für Authentik bevorzugt zuerst HTTPS über Traefik einschalten. In `.env`:
 
 ```dotenv
 MESHORA_SERVER_URL=https://mesh.example.com
+MESHORA_HOST=mesh.example.com
 TRAEFIK_NETWORK=traefik
 TRAEFIK_ENTRYPOINT=websecure
 MESHORA_BIND_IP=127.0.0.1
 ```
 
-Netzwerk und Entrypoint an die vorhandene Traefik-Installation anpassen.
+Die Beispieldomains `mesh.example.com` und `auth.example.com` durch eigene
+Domains ersetzen. `MESHORA_HOST` enthält nur den Hostnamen, ohne
+`https://`; er muss zum Host in `MESHORA_SERVER_URL` passen. Netzwerk und
+Entrypoint an die vorhandene Traefik-Installation anpassen.
 DNS muss auf Traefik zeigen. Das Overlay verwendet den Standard-TLS-Resolver
 von Traefik. Falls keiner konfiguriert ist, im Overlay das Label
 `traefik.http.routers.meshora.tls.certresolver` mit dem eigenen Resolvernamen
