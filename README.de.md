@@ -149,3 +149,7 @@ gilt für alles außer dem Dashboard. Danke an alle, die an Headscale arbeiten.
 ## Lizenz
 
 BSD 3-Clause, wie Headscale. Siehe [`LICENSE`](LICENSE).
+
+## Docker test release
+
+Docker images, LAN setup and Traefik instructions: [Docker release guide](packaging/docker/README.md).

@@ -1,0 +1,22 @@
+services:
+  meshora:
+    image: meshora:${MESHORA_VERSION:-v0.1.0-rc.1}
+    pull_policy: never
+    restart: unless-stopped
+    read_only: true
+    environment:
+      HEADSCALE_SERVER_URL: ${MESHORA_SERVER_URL:?Set MESHORA_SERVER_URL in .env}
+    ports:
+      - "${MESHORA_BIND_IP:-0.0.0.0}:${MESHORA_PORT:-8080}:8080"
+    volumes:
+      - ./config:/etc/meshora
+      - ./data:/var/lib/meshora
+    tmpfs:
+      - /tmp
+      - /var/run/meshora
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/headscale", "health", "--config", "/etc/meshora/config.yaml"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s

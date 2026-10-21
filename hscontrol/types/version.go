@@ -40,6 +40,13 @@ func (v *VersionInfo) String() string {
 
 var buildInfo = sync.OnceValues(debug.ReadBuildInfo)
 
+// Release builds set these values through linker flags.
+var (
+	buildVersion string
+	buildCommit  string
+	buildTime    string
+)
+
 var GetVersionInfo = sync.OnceValue(func() *VersionInfo {
 	info := &VersionInfo{
 		Version:   "dev",
@@ -72,6 +79,19 @@ var GetVersionInfo = sync.OnceValue(func() *VersionInfo {
 		case "vcs.time":
 			info.BuildTime = setting.Value
 		}
+	}
+
+	if buildVersion != "" {
+		info.Version = buildVersion
+	}
+
+	if buildCommit != "" {
+		info.Commit = buildCommit
+		info.Dirty = false
+	}
+
+	if buildTime != "" {
+		info.BuildTime = buildTime
 	}
 
 	return info

@@ -13,8 +13,12 @@ docker-compose*
 .github
 .gitignore
 README.md
-LICENSE
 .vscode
+.codex
+.claude
+control_logs
+headscale
+dist
 
 *.sock
 

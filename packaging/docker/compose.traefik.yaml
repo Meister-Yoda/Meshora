@@ -1,0 +1,16 @@
+services:
+  meshora:
+    networks:
+      - traefik
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: ${TRAEFIK_NETWORK:-traefik}
+      traefik.http.routers.meshora.rule: Host(`mesh.example.com`)
+      traefik.http.routers.meshora.entrypoints: ${TRAEFIK_ENTRYPOINT:-websecure}
+      traefik.http.routers.meshora.tls: "true"
+      traefik.http.services.meshora.loadbalancer.server.port: "8080"
+
+networks:
+  traefik:
+    external: true
+    name: ${TRAEFIK_NETWORK:-traefik}
