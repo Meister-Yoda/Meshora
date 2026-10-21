@@ -170,19 +170,19 @@ func nextDNSProfileFromCapMap(capMap tailcfg.NodeCapMap) string {
 
 	candidates := make([]string, 0, len(capMap))
 
-	for cap := range capMap {
-		if cap == nextDNSAttrNoInfo {
+	for capability := range capMap {
+		if capability == nextDNSAttrNoInfo {
 			continue
 		}
 
-		profile, ok := strings.CutPrefix(string(cap), nextDNSAttrPrefix)
+		profile, ok := strings.CutPrefix(string(capability), nextDNSAttrPrefix)
 		if !ok || profile == "" {
 			continue
 		}
 
 		if !nextDNSProfileRE.MatchString(profile) {
 			log.Warn().
-				Str("cap", string(cap)).
+				Str("cap", string(capability)).
 				Msg("nextdns profile rejected: must match [A-Za-z0-9._-]{1,64}")
 
 			continue
