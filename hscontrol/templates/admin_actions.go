@@ -391,3 +391,63 @@ func AdminConfirm(info AdminPageInfo, c AdminConfirmInfo) *elem.Element {
 		),
 	)
 }
+
+// AdminOIDCSettings contains public settings only; secrets never enter templates.
+type AdminOIDCSettings struct {
+	Issuer         string
+	ClientID       string
+	CallbackURL    string
+	HasSecret      bool
+	Writable       bool
+	PendingRestart bool
+}
+
+// AdminSettings renders the identity-provider form in the admin dashboard.
+func AdminSettings(info AdminPageInfo, settings AdminOIDCSettings) *elem.Element {
+	status := "Noch nicht eingerichtet."
+	if settings.Issuer != "" {
+		status = "Einstellungen gespeichert."
+	}
+
+	if settings.PendingRestart {
+		status = "Neustart erforderlich: Die gespeicherten Einstellungen werden beim nächsten Serverstart übernommen."
+	}
+
+	hint := "Trage das Client-Secret aus deinem Authentik-Provider ein."
+	secretProps := attrs.Props{
+		attrs.ID: "f-client_secret", attrs.Name: "client_secret", attrs.Type: "password",
+		attrs.Autocomplete: "new-password", "aria-describedby": "secret-hint",
+	}
+
+	if settings.HasSecret {
+		hint = "Ein Secret ist gespeichert. Leer lassen, um es beizubehalten. Es wird nicht wieder angezeigt."
+	} else {
+		secretProps[attrs.Required] = "true"
+	}
+
+	var form elem.Node = elem.P(attrs.Props{attrs.Class: "muted"},
+		elem.Text("Diese Instanz benötigt eine lesbare YAML-Konfigurationsdatei, um Einstellungen hier zu speichern."))
+	if settings.Writable {
+		form = postForm(info, "/settings/oidc", "stack",
+			textField("Issuer-URL", "issuer", settings.Issuer, true),
+			elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text("Authentik: https://auth.example.com/application/o/meshora/")),
+			textField("Client-ID", "client_id", settings.ClientID, true),
+			elem.Div(attrs.Props{attrs.Class: "field"},
+				elem.Label(attrs.Props{attrs.For: "f-client_secret"}, elem.Text("Client-Secret")),
+				elem.Input(secretProps),
+				elem.P(attrs.Props{attrs.ID: "secret-hint", attrs.Class: "muted"}, elem.Text(hint)),
+			),
+			elem.P(attrs.Props{attrs.Class: "muted"},
+				elem.Text("Speichern ändert die Anmeldung nach einem Neustart. Bestehende Zugriffsbeschränkungen und OIDC-Optionen bleiben erhalten.")),
+			submitButton("Speichern", "btn-primary"),
+		)
+	}
+
+	return info.shell("Settings",
+		pageHead("Einstellungen", "Authentik / OpenID Connect für die Anmeldung deiner Geräte."),
+		cardSection("Anmeldestatus", status),
+		cardSection("Authentik-Provider", "Die Client-Zugangsdaten findest du im OAuth2/OpenID-Connect-Provider von Authentik.", form),
+		cardSection("Rückleitungs-URL", "Diese URL in Authentik als Redirect-URI mit Strict-Abgleich eintragen.",
+			elem.Pre(attrs.Props{attrs.Class: "codeblock"}, elem.Code(nil, elem.Text(settings.CallbackURL)))),
+	)
+}

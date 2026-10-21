@@ -107,6 +107,8 @@ type NodeConfig struct {
 
 // Config contains the initial Headscale configuration.
 type Config struct {
+	// ConfigFilePath identifies the source file for admin-managed settings.
+	ConfigFilePath      string `json:"-"`
 	ServerURL           string
 	Addr                string
 	MetricsAddr         string
@@ -1417,6 +1419,7 @@ func LoadServerConfig() (*Config, error) {
 	}
 
 	return &Config{
+		ConfigFilePath:     viper.ConfigFileUsed(),
 		ServerURL:          serverURL,
 		Addr:               viper.GetString("listen_addr"),
 		MetricsAddr:        viper.GetString("metrics_listen_addr"),

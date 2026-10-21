@@ -110,6 +110,9 @@ type Handler struct {
 	publicPath    string
 	serverURL     string
 	secureCookies bool
+	configPath    string
+	activeOIDC    types.OIDCConfig
+	settingsMu    sync.Mutex
 
 	// sessions is keyed by the SHA-256 of the session token, so the tokens
 	// themselves are never held in memory after they are handed out.
@@ -136,6 +139,8 @@ func New(st *state.State, cfg *types.Config, notify func(...change.Change)) *Han
 		publicPath:    publicPath,
 		serverURL:     strings.TrimSuffix(cfg.ServerURL, "/"),
 		secureCookies: secure,
+		configPath:    cfg.ConfigFilePath,
+		activeOIDC:    cfg.OIDC,
 		sessions:      expirable.NewLRU[string, *session](maxSessions, nil, cfg.WebAdmin.SessionTTL),
 		failures:      expirable.NewLRU[string, int](maxFailureKeys, nil, loginFailureWindow),
 	}
@@ -178,6 +183,9 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Post("/keys", h.createKey)
 			r.Get("/keys/{id}/expire", h.confirmExpireKey)
 			r.Post("/keys/{id}/expire", h.expireKey)
+
+			r.Get("/settings", h.settingsPage)
+			r.Post("/settings/oidc", h.saveOIDCSettings)
 
 			r.Post("/logout", h.logout)
 		})

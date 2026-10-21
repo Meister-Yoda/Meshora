@@ -41,7 +41,7 @@ var adminCSSVersion = func() string {
 // Presentation attributes only, so it renders under the strict CSP.
 const meshoraMark = `<svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">` +
 	`<defs><linearGradient id="mg" x1="0" y1="0" x2="1" y2="1">` +
-	`<stop offset="0" stop-color="#7c7cf0"/><stop offset="1" stop-color="#4f46e5"/>` +
+	`<stop offset="0" stop-color="#0a84ff"/><stop offset="1" stop-color="#64d2ff"/>` +
 	`</linearGradient></defs>` +
 	`<rect width="32" height="32" rx="9" fill="url(#mg)"/>` +
 	`<path d="M10 21 16 10l6 11z" fill="none" stroke="#fff" stroke-opacity=".55" stroke-width="1.6" stroke-linejoin="round"/>` +
@@ -49,6 +49,11 @@ const meshoraMark = `<svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="tr
 	`<circle cx="10" cy="21" r="3.2" fill="#fff"/>` +
 	`<circle cx="22" cy="21" r="3.2" fill="#fff"/>` +
 	`</svg>`
+
+// meshoraBackdrop uses the same four ambient colours as PicGen.
+const meshoraBackdrop = `<div class="meshora-backdrop" aria-hidden="true">` +
+	`<span class="ambient ambient-blue"></span><span class="ambient ambient-violet"></span>` +
+	`<span class="ambient ambient-peach"></span><span class="ambient ambient-green"></span></div>`
 
 // AdminLoginInfo is the data rendered by [AdminLogin].
 type AdminLoginInfo struct {
@@ -573,14 +578,6 @@ func adminShell(base, username, csrf, title string, flash *AdminFlash, content .
 				elem.Span(nil, elem.Text("Meshora")),
 				elem.Span(attrs.Props{attrs.Class: "brand-tag"}, elem.Text("Admin")),
 			),
-			elem.Nav(
-				attrs.Props{attrs.Class: "nav", "aria-label": "Main"},
-				navLink(base+"/", "Overview", title == "Overview"),
-				navLink(base+"/users", "Users", title == "Users"),
-				navLink(base+"/nodes", "Nodes", title == "Nodes"),
-				navLink(base+"/pending", "Pending", title == "Pending"),
-				navLink(base+"/keys", "Keys", title == "Keys"),
-			),
 			elem.Div(
 				attrs.Props{attrs.Class: "account"},
 				elem.Span(attrs.Props{attrs.Class: "avatar", "aria-hidden": "true"}, elem.Text(initial)),
@@ -599,6 +596,15 @@ func adminShell(base, username, csrf, title string, flash *AdminFlash, content .
 
 	return adminDocument(base, title+" · Meshora", "app",
 		topbar,
+		elem.Nav(
+			attrs.Props{attrs.Class: "nav", "aria-label": "Main"},
+			navLink(base+"/", "Overview", title == "Overview"),
+			navLink(base+"/users", "Users", title == "Users"),
+			navLink(base+"/nodes", "Nodes", title == "Nodes"),
+			navLink(base+"/pending", "Pending", title == "Pending"),
+			navLink(base+"/keys", "Keys", title == "Keys"),
+			navLink(base+"/settings", "Settings", title == "Settings"),
+		),
 		elem.Main(attrs.Props{attrs.Class: "content"}, append([]elem.Node{flashBanner(flash)}, content...)...),
 		elem.Footer(attrs.Props{attrs.Class: "app-footer"}, poweredBy()...),
 	)
@@ -620,7 +626,8 @@ func adminDocument(base, title, bodyClass string, body ...elem.Node) *elem.Eleme
 				attrs.Href: base + AdminStylesheetPath + "?v=" + adminCSSVersion,
 			}),
 		),
-		elem.Body(attrs.Props{attrs.Class: bodyClass, "translate": "no"}, body...),
+		elem.Body(attrs.Props{attrs.Class: bodyClass, "translate": "no"},
+			append([]elem.Node{elem.Raw(meshoraBackdrop)}, body...)...),
 	)
 }
 

@@ -31,10 +31,11 @@ const (
 var csrfRe = regexp.MustCompile(`name="csrf_token"[^>]*value="([^"]+)"`)
 
 type testEnv struct {
-	t      *testing.T
-	state  *state.State
-	server *httptest.Server
-	client *http.Client
+	t       *testing.T
+	state   *state.State
+	server  *httptest.Server
+	client  *http.Client
+	handler *Handler
 
 	changesMu sync.Mutex
 	changes   []change.Change
@@ -76,12 +77,13 @@ func newTestEnv(t *testing.T) *testEnv {
 	env := &testEnv{t: t, state: st, client: newClient(t)}
 
 	r := chi.NewRouter()
-	New(st, cfg, func(cs ...change.Change) {
+	env.handler = New(st, cfg, func(cs ...change.Change) {
 		env.changesMu.Lock()
 		defer env.changesMu.Unlock()
 
 		env.changes = append(env.changes, cs...)
-	}).Routes(r)
+	})
+	env.handler.Routes(r)
 
 	env.server = httptest.NewServer(r)
 	t.Cleanup(env.server.Close)
