@@ -1,9 +1,7 @@
 services:
   meshora:
-    image: ${MESHORA_IMAGE:-ghcr.io/meister-yoda/meshora}:${MESHORA_VERSION:-v0.1.0-rc.3}
+    image: ${MESHORA_IMAGE:-ghcr.io/meister-yoda/meshora}:${MESHORA_VERSION:-v0.1.0-rc.4}
     restart: unless-stopped
-    environment:
-      HEADSCALE_SERVER_URL: ${MESHORA_SERVER_URL:?Set MESHORA_SERVER_URL to the public server URL}
     ports:
       - "${MESHORA_BIND_IP:-0.0.0.0}:${MESHORA_PORT:-8080}:8080"
     volumes:
@@ -14,7 +12,7 @@ services:
       - /tmp
       - /var/run/meshora
     healthcheck:
-      test: ["CMD", "/usr/local/bin/headscale", "health", "--config", "/etc/meshora/config.yaml"]
+      test: ["CMD", "/usr/local/bin/headscale", "health", "--http", "--config", "/etc/meshora/config.yaml"]
       interval: 30s
       timeout: 10s
       retries: 3

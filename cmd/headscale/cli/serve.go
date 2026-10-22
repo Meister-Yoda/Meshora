@@ -1,12 +1,16 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"os/signal"
 	"syscall"
 
 	"github.com/juanfont/headscale/hscontrol/types"
+	"github.com/juanfont/headscale/hscontrol/webui"
 	"github.com/spf13/cobra"
 	"github.com/tailscale/squibble"
 )
@@ -19,6 +23,32 @@ var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Launches the headscale server",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, err := types.LoadServerConfig()
+		if err != nil {
+			return fmt.Errorf("loading configuration: %w", err)
+		}
+
+		setupCtx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+		finishSetup, err := webui.RunInitialSetup(setupCtx, cfg)
+
+		stop()
+
+		if errors.Is(err, context.Canceled) {
+			return nil
+		}
+
+		if err != nil {
+			return fmt.Errorf("initial setup: %w", err)
+		}
+
+		if finishSetup != nil {
+			defer func() { _ = finishSetup() }()
+
+			err := types.LoadConfig(cfg.ConfigFilePath, true)
+			if err != nil {
+				return fmt.Errorf("reloading setup configuration: %w", err)
+			}
+		}
 		app, err := newHeadscaleServerWithConfig()
 		if err != nil {
 			if squibbleErr, ok := errors.AsType[squibble.ValidationError](err); ok {
@@ -29,6 +59,12 @@ var serveCmd = &cobra.Command{
 			return fmt.Errorf("initializing: %w", err)
 		}
 
+		if finishSetup != nil {
+			err := finishSetup()
+			if err != nil {
+				return fmt.Errorf("finishing initial setup: %w", err)
+			}
+		}
 		err = app.Serve()
 		if err == nil || errors.Is(err, http.ErrServerClosed) {
 			return nil

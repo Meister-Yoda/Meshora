@@ -7,7 +7,7 @@ on:
       release_tag:
         description: Existing release tag to publish to GHCR
         required: true
-        default: v0.1.0-rc.3
+        default: v0.1.0-rc.4
 permissions:
   contents: write
 jobs:
@@ -49,7 +49,6 @@ jobs:
               grep -F "$TAG" dist/version.txt
               docker run -d --name meshora-release-smoke --read-only \
                 --tmpfs /tmp --tmpfs /var/run/meshora \
-                -e HEADSCALE_SERVER_URL=http://127.0.0.1:18080 \
                 -v meshora-release-config:/etc/meshora \
                 -v meshora-release-data:/var/lib/meshora \
                 -p 127.0.0.1:18080:8080 "meshora:$TAG"
@@ -60,8 +59,8 @@ jobs:
               done
               docker logs meshora-release-smoke
               test "$ready" = true
-              docker exec meshora-release-smoke /usr/local/bin/headscale health --config /etc/meshora/config.yaml
-              curl -fsS http://127.0.0.1:18080/admin/login | grep -q Meshora
+              docker exec meshora-release-smoke /usr/local/bin/headscale health --http --config /etc/meshora/config.yaml
+              curl -fsS http://127.0.0.1:18080/setup | grep -q Meshora
               docker rm -f meshora-release-smoke
               docker volume rm meshora-release-config meshora-release-data
             fi

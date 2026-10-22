@@ -249,8 +249,9 @@ type OIDCConfig struct {
 // WebAdminConfig configures the built-in admin dashboard served under
 // /admin, where local admin accounts (not tailnet users) log in.
 type WebAdminConfig struct {
-	Enabled    bool
-	SessionTTL time.Duration
+	SetupEnabled bool
+	Enabled      bool
+	SessionTTL   time.Duration
 }
 
 type DERPConfig struct {
@@ -1488,8 +1489,9 @@ func LoadServerConfig() (*Config, error) {
 		},
 
 		WebAdmin: WebAdminConfig{
-			Enabled:    viper.GetBool("web_admin.enabled"),
-			SessionTTL: viper.GetDuration("web_admin.session_ttl"),
+			SetupEnabled: viper.GetBool("web_admin.setup_enabled"),
+			Enabled:      viper.GetBool("web_admin.enabled"),
+			SessionTTL:   viper.GetDuration("web_admin.session_ttl"),
 		},
 
 		LogTail: logTailConfig,

@@ -28,6 +28,7 @@ const (
 )
 
 var (
+	ErrInitialSetupClosed         = errors.New("initial setup is no longer available")
 	ErrWebAdminExists             = errors.New("web admin already exists")
 	ErrWebAdminNotFound           = errors.New("web admin not found")
 	ErrWebAdminInvalidCredentials = errors.New("invalid username or password")
@@ -270,4 +271,68 @@ func (hsdb *HSDatabase) AuthenticateWebAdmin(username, password string) (*types.
 	admin.LastLoginAt = &now
 
 	return &admin, nil
+}
+
+// InitialSetupAvailable excludes existing admins and tailnets from unauthenticated setup.
+func (hsdb *HSDatabase) InitialSetupAvailable() (bool, error) {
+	return Read(hsdb.DB, initialSetupAvailable)
+}
+
+func initialSetupAvailable(tx *gorm.DB) (bool, error) {
+	for _, model := range []any{&types.WebAdmin{}, &types.User{}, &types.Node{}} {
+		var count int64
+
+		err := tx.Model(model).Count(&count).Error
+		if err != nil {
+			return false, err
+		}
+
+		if count != 0 {
+			return false, nil
+		}
+	}
+
+	return true, nil
+}
+
+// CreateInitialWebAdmin serializes the first-account claim and configuration
+// write. A failed config write rolls back the account. The config remains
+// setup-enabled until the database commit succeeds, allowing crash recovery.
+func (hsdb *HSDatabase) CreateInitialWebAdmin(username, password string, configure func() error) error {
+	err := util.ValidateUsername(username)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrWebAdminUsernameInvalid, err)
+	}
+
+	err = validateWebAdminPassword(password)
+	if err != nil {
+		return err
+	}
+
+	admin := types.WebAdmin{Username: username, PasswordHash: hashWebAdminPassword(password)}
+
+	return hsdb.Write(func(tx *gorm.DB) error {
+		if hsdb.cfg.Database.Type == types.DatabasePostgres {
+			err := tx.Exec("LOCK TABLE web_admins IN EXCLUSIVE MODE").Error
+			if err != nil {
+				return err
+			}
+		}
+
+		available, err := initialSetupAvailable(tx)
+		if err != nil {
+			return err
+		}
+
+		if !available {
+			return ErrInitialSetupClosed
+		}
+
+		createErr := tx.Create(&admin).Error
+		if createErr != nil {
+			return createErr
+		}
+
+		return configure()
+	})
 }

@@ -1,110 +1,95 @@
-# Meshora mit Docker Compose
+# Meshora starten und im Browser einrichten
 
-Benötigt werden Docker und Docker Compose v2 auf einem Linux-Server
-(AMD64 oder ARM64). Das Image bringt die Grundkonfiguration bereits mit.
-Beim ersten Start kopiert Docker sie automatisch in ein eigenes Volume.
-Weitere Konfigurationsdateien oder Initialisierungscontainer sind nicht nötig.
+Benötigt werden Docker und Docker Compose v2 mit Linux-Containern
+(AMD64 oder ARM64).
 
-## Erste Einrichtung
+## Start
 
-Die Datei [compose.yaml](compose.yaml) herunterladen oder ihren Inhalt
-kopieren. Daneben eine `.env` mit der von den Clients erreichbaren URL anlegen:
-
-```dotenv
-MESHORA_SERVER_URL=http://192.168.1.100:8080
-```
-
-Die IP ist ein Beispiel und muss durch die Adresse des eigenen Servers
-ersetzt werden. Bei einem Reverse Proxy stattdessen die externe HTTPS-URL
-eintragen, beispielsweise `https://mesh.example.com`.
+Die Datei [compose.yaml](compose.yaml) in ein eigenes Verzeichnis kopieren:
 
 ```bash
 docker compose up -d
-docker compose ps
-docker compose exec meshora /usr/local/bin/headscale webadmins create admin --config /etc/meshora/config.yaml
 ```
 
-Beim letzten Befehl das eigene Admin-Passwort setzen. Es gibt kein
-vorgegebenes Standardpasswort. Danach `http://SERVER-IP:8080/admin/`
-beziehungsweise `https://mesh.example.com/admin/` öffnen.
+Es sind keine Pflichtvariablen, Zugangsdaten oder zusätzlichen
+Konfigurationsdateien in Compose erforderlich. Das Image enthält eine
+Grundkonfiguration, die Docker beim ersten Start in ein eigenes Volume kopiert.
 
-Jede Installation startet mit einer eigenen Datenbank und eigenen
-Schlüsseln. Konfiguration und Daten bleiben in den Volumes
-`meshora-config` und `meshora-data` bei Neustarts und Updates erhalten.
-Vor Updates die Volumes bei gestopptem Meshora sichern. `docker compose down -v`
-löscht diese Daten und ist kein normaler Neustart.
+## Ersteinrichtung im Browser
 
-## Domain, Ports und Coolify
+`http://SERVER-IP:8080` öffnen. Bei einer neuen Installation erscheint
+automatisch der Meshora-Einrichtungsassistent:
 
-Standardmäßig wird Port 8080 veröffentlicht. Optional in `.env`:
+1. Die öffentliche Server-URL eingeben, zum Beispiel
+   `http://192.168.1.100:8080` im LAN oder `https://mesh.example.com`
+   hinter einem Reverse Proxy.
+2. Eigenen Admin-Benutzernamen und ein Passwort mit mindestens 12 Zeichen
+   eingeben und das Passwort bestätigen.
+3. Optional OIDC einrichten: Issuer-URL, Client-ID und Client-Secret.
+   Zum Beispiel `https://auth.example.com/application/o/meshora/` als Issuer.
+   Die Redirect-URI ist die öffentliche Server-URL plus `/oidc/callback`.
+4. **Einrichtung abschließen** wählen. Meshora speichert die Angaben,
+   startet den Kontrollserver automatisch und leitet zur Anmeldung weiter.
 
-```dotenv
-MESHORA_PORT=8080
-MESHORA_BIND_IP=0.0.0.0
-```
+Es gibt kein Standardpasswort und es ist kein CLI-Befehl zur Kontoerstellung
+nötig. Die Ersteinrichtung ist nur auf einer neuen, leeren Installation
+verfügbar. Nach der Einrichtung können keine weiteren Admin-Konten über
+diesen Assistenten angelegt werden.
 
-URL und veröffentlichter Port müssen zusammenpassen. Hinter einem auf
-demselben Host laufenden Reverse Proxy kann `MESHORA_BIND_IP=127.0.0.1`
-verwendet werden.
-
-In Coolify die normale Compose-Datei unter **Docker Compose Empty**
-einfügen, `MESHORA_SERVER_URL` auf die eigene externe URL setzen und den
-Dienst `meshora` mit dieser Domain und dem internen Zielport 8080 verbinden.
-Coolify verwaltet die Proxy-Konfiguration. Die Datei benötigt keine
-Coolify-spezifischen Variablen oder YAML-Felder.
-
-Das Runtime-Image enthält keine Shell. Falls die Plattform keinen direkten
-CLI-Aufruf anbietet, das erste Admin-Konto auf dem Docker-Host anlegen:
-
-```bash
-docker ps
-docker exec -it CONTAINERNAME /usr/local/bin/headscale webadmins create admin --config /etc/meshora/config.yaml
-```
-
-## Authentik und OIDC
-
-Unter `/admin/settings` den eigenen Issuer eintragen, beispielsweise
-`https://auth.example.com/application/o/meshora/`, sowie Client-ID und
-Geheimnis. Die Seite zeigt die Callback-URL, im Beispiel
-`https://mesh.example.com/oidc/callback`. Diese URL im OIDC-Provider erlauben.
-Nach dem Speichern Meshora neu starten:
+OIDC kann auch später unter `/admin/settings` eingetragen werden. Nach
+Änderungen dort die Komponente neu starten:
 
 ```bash
 docker compose restart meshora
 ```
 
-Tailscale-Clients anschließend mit der eigenen Server-URL verbinden:
+Tailscale-Clients mit der eigenen Server-URL verbinden:
 
 ```bash
 tailscale up --login-server=https://mesh.example.com
 ```
 
-## Version und Image-Archive
+## Coolify und andere Reverse Proxies
 
-Die Compose-Datei verwendet ein festes Image-Release. Für ein anderes
-Release `MESHORA_VERSION` in `.env` setzen.
+Die normale Compose-Datei einfügen. Die eigene Domain auf den Dienst
+`meshora` und dessen internen Port 8080 routen. Die Domain und DNS-Zuordnung
+müssen vor dem Browserzugriff eingerichtet sein. Anschließend die
+Ersteinrichtung über diese Domain öffnen und dieselbe URL in Meshora eingeben.
 
-Die Release-Seite bietet zusätzlich Docker-Image-Archive für AMD64 und ARM64
-mit `SHA256SUMS`. Nach dem Download beispielsweise:
+Die Datei enthält keine Coolify-spezifischen Felder. Die Einrichtung meldet
+sich bereits während des Assistenten als gesund, damit der Proxy sie
+erreichen kann.
+
+## Daten und Updates
+
+Die Volumes `meshora-config` und `meshora-data` enthalten die
+Konfiguration, die Datenbank und die Schlüssel. Bei Neustarts und Updates
+beibehalten; vorhandene Einstellungen werden nicht durch die
+Grundkonfiguration überschrieben. Vor Updates beide Volumes bei gestopptem
+Meshora sichern. `docker compose down -v` löscht diese Daten.
+
+Bei bisherigen Installationen mit Bind-Mounts wie `./config` und `./data`
+diese Mounts weiterverwenden oder die Daten gezielt in die Volumes übertragen.
+Bestehende Installationen werden durch den Einrichtungsassistenten nicht
+zurückgesetzt.
+
+Optional können Image, Version und veröffentlichter Port über die vorhandenen
+Compose-Variablen angepasst werden. Standardmäßig wird Port 8080 verwendet.
+
+## Image-Archive und Selbstbau
+
+Auf der Release-Seite gibt es zusätzlich Images für AMD64 und ARM64 als
+Archive mit Prüfsummen. Beispiel:
 
 ```bash
 sha256sum --ignore-missing -c SHA256SUMS
-docker load -i meshora_v0.1.0-rc.3_linux_amd64.docker.tar.gz
+docker load -i meshora_v0.1.0-rc.4_linux_amd64.docker.tar.gz
 ```
 
-Für lokal geladene Images in `.env` zusätzlich `MESHORA_IMAGE=meshora` setzen.
-
-## Selbst bauen
+Für das lokal geladene Image `MESHORA_IMAGE=meshora` setzen.
 
 ```bash
 docker build -f Dockerfile.meshora --build-arg VERSION=dev -t meshora:dev .
 ```
 
-Danach `MESHORA_IMAGE=meshora` und `MESHORA_VERSION=dev` verwenden.
-
-## Bereits bestehende Installationen
-
-Die neue Vorlage verwendet benannte Volumes. Wer bisher Host-Verzeichnisse
-wie `./config` und `./data` eingebunden hat, muss diese Mounts weiterverwenden
-oder die bestehenden Daten vor dem Wechsel in die Volumes übertragen.
-Ein leerer neuer Datenträger führt zu einer neuen Installation.
+Beim Selbstbau `MESHORA_IMAGE=meshora` und `MESHORA_VERSION=dev` verwenden.

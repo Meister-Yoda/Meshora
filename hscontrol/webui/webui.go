@@ -148,6 +148,10 @@ func New(st *state.State, cfg *types.Config, notify func(...change.Change)) *Han
 
 // Routes mounts the dashboard on r under [BasePath].
 func (h *Handler) Routes(r chi.Router) {
+	r.Get("/setup", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, h.serverURL+"/admin/login", http.StatusSeeOther)
+	})
+
 	r.Route(BasePath, func(r chi.Router) {
 		r.Use(adminHeaders)
 		r.Get(templates.AdminStylesheetPath, stylesheet)
