@@ -1,114 +1,98 @@
-# Meshora auf dem Docker-Server testen
+# Meshora mit Docker Compose
 
-Meshora wird für Linux AMD64 und ARM64 über GHCR bereitgestellt. Die
-Image-Adresse ist in der Compose-Konfiguration voreingestellt. Docker
-wählt die passende Architektur automatisch. Benötigt werden Docker und Docker Compose
-v2. Die Images laufen als root im Container.
+Benötigt werden Docker und Docker Compose v2 auf einem Linux-Server
+(AMD64 oder ARM64). Das Image bringt die Grundkonfiguration bereits mit.
+Beim ersten Start kopiert Docker sie automatisch in ein eigenes Volume.
+Weitere Konfigurationsdateien oder Initialisierungscontainer sind nicht nötig.
 
-Für Abrufe ohne Anmeldung muss das GitHub-Paket einmal auf **Public**
-gestellt werden (GitHub: Packages → Paket → Package settings).
-Falls es privat bleiben soll, vor dem Pull mit einem eigenen Token mit
-`read:packages` bei `docker login ghcr.io` anmelden. Keine Tokens in die
-Compose-Datei oder in Git eintragen.
+## Erste Einrichtung
 
-## Download und Start im LAN
+Die Datei [compose.yaml](compose.yaml) herunterladen oder ihren Inhalt
+kopieren. Daneben eine `.env` mit der von den Clients erreichbaren URL anlegen:
 
-Von der Release-Seite dieses Projekts
-`meshora-compose-ghcr.tar.gz` und `meshora-compose-ghcr.sha256`
-herunterladen:
-
-```bash
-sha256sum -c meshora-compose-ghcr.sha256
-mkdir meshora
-tar -xzf meshora-compose-ghcr.tar.gz -C meshora
-cd meshora
-mkdir -p config data
-cp config.yaml config/config.yaml
-cat > .env <<'EOF'
-MESHORA_VERSION=v0.1.0-rc.2
+```dotenv
 MESHORA_SERVER_URL=http://192.168.1.100:8080
-EOF
-docker compose pull
 ```
 
-In `.env` die Beispiel-IP durch die IP des Docker-Servers ersetzen. Optional
-`MESHORA_BIND_IP` auf dessen LAN-IP setzen; standardmäßig wird Port 8080 auf
-allen Interfaces veröffentlicht. Den unverschlüsselten Testzugang nur im
-vertrauenswürdigen LAN verwenden.
+Die IP ist ein Beispiel und muss durch die Adresse des eigenen Servers
+ersetzt werden. Bei einem Reverse Proxy stattdessen die externe HTTPS-URL
+eintragen, beispielsweise `https://mesh.example.com`.
 
 ```bash
 docker compose up -d
 docker compose ps
-docker compose logs --tail=100 meshora
 docker compose exec meshora /usr/local/bin/headscale webadmins create admin --config /etc/meshora/config.yaml
 ```
 
-Beim Erstellen das gewünschte Admin-Passwort eingeben und `http://SERVER-IP:8080/admin/`
-öffnen. Daten, Schlüssel und Einstellungen liegen dauerhaft in `data/` und
-`config/`. Vor einem Versionswechsel beide Verzeichnisse bei gestopptem
-Container sichern. Die Konfiguration wird als beschreibbares Verzeichnis
-eingebunden, damit das Webformular sie atomar speichern kann.
+Beim letzten Befehl das eigene Admin-Passwort setzen. Es gibt kein
+vorgegebenes Standardpasswort. Danach `http://SERVER-IP:8080/admin/`
+beziehungsweise `https://mesh.example.com/admin/` öffnen.
 
-## Authentik und Traefik
+Jede Installation startet mit einer eigenen Datenbank und eigenen
+Schlüsseln. Konfiguration und Daten bleiben in den Volumes
+`meshora-config` und `meshora-data` bei Neustarts und Updates erhalten.
+Vor Updates die Volumes bei gestopptem Meshora sichern. `docker compose down -v`
+löscht diese Daten und ist kein normaler Neustart.
 
-Für Authentik bevorzugt zuerst HTTPS über Traefik einschalten. In `.env`:
+## Domain, Ports und Coolify
+
+Standardmäßig wird Port 8080 veröffentlicht. Optional in `.env`:
 
 ```dotenv
-MESHORA_SERVER_URL=https://mesh.example.com
-MESHORA_HOST=mesh.example.com
-TRAEFIK_NETWORK=traefik
-TRAEFIK_ENTRYPOINT=websecure
-MESHORA_BIND_IP=127.0.0.1
+MESHORA_PORT=8080
+MESHORA_BIND_IP=0.0.0.0
 ```
 
-Die Beispieldomains `mesh.example.com` und `auth.example.com` durch eigene
-Domains ersetzen. `MESHORA_HOST` enthält nur den Hostnamen, ohne
-`https://`; er muss zum Host in `MESHORA_SERVER_URL` passen. Netzwerk und
-Entrypoint an die vorhandene Traefik-Installation anpassen.
-DNS muss auf Traefik zeigen. Das Overlay verwendet den Standard-TLS-Resolver
-von Traefik. Falls keiner konfiguriert ist, im Overlay das Label
-`traefik.http.routers.meshora.tls.certresolver` mit dem eigenen Resolvernamen
-ergänzen.
+URL und veröffentlichter Port müssen zusammenpassen. Hinter einem auf
+demselben Host laufenden Reverse Proxy kann `MESHORA_BIND_IP=127.0.0.1`
+verwendet werden.
+
+In Coolify die normale Compose-Datei unter **Docker Compose Empty**
+einfügen, `MESHORA_SERVER_URL` auf die eigene externe URL setzen und den
+Dienst `meshora` mit dieser Domain und dem internen Zielport 8080 verbinden.
+Coolify verwaltet die Proxy-Konfiguration. Die Datei benötigt keine
+Coolify-spezifischen Variablen oder YAML-Felder.
+
+Das Runtime-Image enthält keine Shell. Falls die Plattform keinen direkten
+CLI-Aufruf anbietet, das erste Admin-Konto auf dem Docker-Host anlegen:
 
 ```bash
-docker compose -f compose.yaml -f compose.traefik.yaml up -d
+docker ps
+docker exec -it CONTAINERNAME /usr/local/bin/headscale webadmins create admin --config /etc/meshora/config.yaml
 ```
 
-Unter `/admin/settings` den Issuer
-`https://auth.example.com/application/o/meshora/` eintragen, sofern der
-Authentik-Anwendungs-Slug `meshora` lautet. Client-ID und Geheimnis selbst
-eintragen. Die Seite zeigt die gültige Callback-URL; bei HTTPS ist sie
-`https://mesh.example.com/oidc/callback`. Genau diese URL im
-Authentik-OAuth2/OIDC-Provider erlauben. Bei einem LAN-Test stattdessen die
-angezeigte Callback-URL mit Server-IP verwenden.
+## Authentik und OIDC
 
-Nach dem Speichern neu starten:
+Unter `/admin/settings` den eigenen Issuer eintragen, beispielsweise
+`https://auth.example.com/application/o/meshora/`, sowie Client-ID und
+Geheimnis. Die Seite zeigt die Callback-URL, im Beispiel
+`https://mesh.example.com/oidc/callback`. Diese URL im OIDC-Provider erlauben.
+Nach dem Speichern Meshora neu starten:
 
 ```bash
 docker compose restart meshora
 ```
 
-Neustarts beenden bestehende Admin-Sitzungen. Tailscale-Clients verbinden
-sich anschließend mit `tailscale up --login-server=https://mesh.example.com`.
+Tailscale-Clients anschließend mit der eigenen Server-URL verbinden:
 
-## Alternativ: Image-Archive ohne Registry
+```bash
+tailscale up --login-server=https://mesh.example.com
+```
 
-Die ursprünglichen Dateien `meshora-compose.tar.gz`, `SHA256SUMS` und
-`meshora_v0.1.0-rc.2_linux_amd64.docker.tar.gz` bzw.
-`meshora_v0.1.0-rc.2_linux_arm64.docker.tar.gz` bleiben auf der Release-Seite.
+## Version und Image-Archive
+
+Die Compose-Datei verwendet ein festes Image-Release. Für ein anderes
+Release `MESHORA_VERSION` in `.env` setzen.
+
+Die Release-Seite bietet zusätzlich Docker-Image-Archive für AMD64 und ARM64
+mit `SHA256SUMS`. Nach dem Download beispielsweise:
 
 ```bash
 sha256sum --ignore-missing -c SHA256SUMS
-docker load -i meshora_v0.1.0-rc.2_linux_amd64.docker.tar.gz
+docker load -i meshora_v0.1.0-rc.3_linux_amd64.docker.tar.gz
 ```
 
-Bei Verwendung des neuen GHCR-Compose-Pakets für lokal geladene Images
-zusätzlich in `.env` setzen:
-
-```dotenv
-MESHORA_IMAGE=meshora
-MESHORA_PULL_POLICY=never
-```
+Für lokal geladene Images in `.env` zusätzlich `MESHORA_IMAGE=meshora` setzen.
 
 ## Selbst bauen
 
@@ -116,5 +100,11 @@ MESHORA_PULL_POLICY=never
 docker build -f Dockerfile.meshora --build-arg VERSION=dev -t meshora:dev .
 ```
 
-Beim Wechsel auf dieses Image in `.env` `MESHORA_VERSION=dev`,
-`MESHORA_IMAGE=meshora` und `MESHORA_PULL_POLICY=never` setzen.
+Danach `MESHORA_IMAGE=meshora` und `MESHORA_VERSION=dev` verwenden.
+
+## Bereits bestehende Installationen
+
+Die neue Vorlage verwendet benannte Volumes. Wer bisher Host-Verzeichnisse
+wie `./config` und `./data` eingebunden hat, muss diese Mounts weiterverwenden
+oder die bestehenden Daten vor dem Wechsel in die Volumes übertragen.
+Ein leerer neuer Datenträger führt zu einer neuen Installation.
