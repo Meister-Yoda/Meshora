@@ -13,6 +13,7 @@ func publicBody(children ...elem.Node) *elem.Element {
 	return elem.Body(
 		attrs.Props{attrs.Class: "public", "translate": "no"},
 		elem.Raw(meshoraBackdrop),
+		languageSwitcher(),
 		elem.Header(attrs.Props{attrs.Class: "public-header"}, brand("")),
 		elem.Main(attrs.Props{attrs.Class: "md-typeset public-card"}, children...),
 		pageFooter(),
@@ -106,7 +107,7 @@ func HtmlStructure(head, body *elem.Element) *elem.Element {
 			}),
 			elem.Link(attrs.Props{
 				attrs.Rel:  "icon",
-				attrs.Href: "/favicon.ico",
+				attrs.Href: "/favicon.ico?v=meshora",
 			}),
 			elem.Meta(attrs.Props{
 				attrs.Name:    "color-scheme",
@@ -131,7 +132,7 @@ func BlankPage() *elem.Element {
 			}),
 			elem.Link(attrs.Props{
 				attrs.Rel:  "icon",
-				attrs.Href: "/favicon.ico",
+				attrs.Href: "/favicon.ico?v=meshora",
 			}),
 		),
 		elem.Body(nil),

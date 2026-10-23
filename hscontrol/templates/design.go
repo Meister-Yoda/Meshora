@@ -73,7 +73,7 @@ func orDivider() *elem.Element {
 				"text-transform":  "uppercase",
 				"letter-spacing":  "0.05em",
 			}.ToInline(),
-		}, elem.Text("or")),
+		}, i18nText("or")),
 		elem.Div(attrs.Props{attrs.Style: lineStyle}),
 	)
 }
@@ -116,7 +116,7 @@ func feedbackBox(
 						styles.FontWeight:   "700",
 						styles.MarginBottom: spaceXS,
 					}.ToInline(),
-				}, elem.Text(heading)),
+				}, i18nText(heading)),
 			}, children...)...,
 		),
 	)

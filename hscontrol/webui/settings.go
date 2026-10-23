@@ -2,6 +2,7 @@ package webui
 
 import (
 	"bytes"
+	"cmp"
 	"errors"
 	"net"
 	"net/http"
@@ -33,18 +34,50 @@ func (h *Handler) settingsPage(w http.ResponseWriter, r *http.Request) {
 
 	settings := templates.AdminOIDCSettings{
 		Issuer: h.activeOIDC.Issuer, ClientID: h.activeOIDC.ClientID,
-		HasSecret:   h.activeOIDC.ClientSecret != "",
-		CallbackURL: h.serverURL + "/oidc/callback",
+		HasSecret:        h.activeOIDC.ClientSecret != "",
+		CallbackURL:      h.serverURL + "/oidc/callback",
+		AdminCallbackURL: h.serverURL + "/admin/oidc/callback",
+		AdminGroups:      strings.Join(h.adminOIDCGroups, ", "),
+		AdminRoles:       strings.Join(h.adminOIDCRoles, ", "),
+		RolesClaim:       h.adminOIDCRolesClaim,
+		OIDCButtonText:   h.oidcButtonText,
 	}
 
-	_, _, saved, err := readOIDCSettings(h.configPath)
+	_, document, saved, err := readOIDCSettings(h.configPath)
 	if err == nil {
 		settings.Issuer = saved.Issuer
 		settings.ClientID = saved.ClientID
 		settings.HasSecret = saved.Secret != ""
 		settings.Writable = true
+		settings.AdminGroups = ""
+		settings.AdminRoles = ""
+		settings.RolesClaim = "roles"
+
+		if webAdmin := settingsMappingValue(document.Content[0], "web_admin"); webAdmin != nil && webAdmin.Kind == yaml.MappingNode {
+			if adminOIDC := settingsMappingValue(webAdmin, "oidc"); adminOIDC != nil && adminOIDC.Kind == yaml.MappingNode {
+				if roles := settingsMappingValue(adminOIDC, "allowed_roles"); roles != nil {
+					var values []string
+					if roles.Decode(&values) == nil {
+						settings.AdminRoles = strings.Join(values, ", ")
+					}
+				}
+
+				if claim := settingsMappingValue(adminOIDC, "roles_claim"); claim != nil && claim.Value != "" {
+					settings.RolesClaim = claim.Value
+				}
+
+				if groups := settingsMappingValue(adminOIDC, "allowed_groups"); groups != nil {
+					var values []string
+					if groups.Decode(&values) == nil {
+						settings.AdminGroups = strings.Join(values, ", ")
+					}
+				}
+			}
+		}
 		settings.PendingRestart = saved.Issuer != h.activeOIDC.Issuer ||
-			saved.ClientID != h.activeOIDC.ClientID || saved.Secret != h.activeOIDC.ClientSecret
+			saved.ClientID != h.activeOIDC.ClientID || saved.Secret != h.activeOIDC.ClientSecret ||
+			settings.AdminGroups != strings.Join(h.adminOIDCGroups, ", ") ||
+			settings.AdminRoles != strings.Join(h.adminOIDCRoles, ", ") || settings.RolesClaim != cmp.Or(h.adminOIDCRolesClaim, "roles")
 	}
 
 	writeHTML(w, http.StatusOK, templates.AdminSettings(h.pageInfo(r), settings).Render())
@@ -109,6 +142,55 @@ func (h *Handler) saveOIDCSettings(w http.ResponseWriter, r *http.Request) {
 		}
 
 		setSettingsValue(oidc, "scope", scope)
+	}
+
+	// Omitted fields preserve authorization settings from older clients.
+	if r.PostForm.Has("admin_groups") || r.PostForm.Has("admin_roles") || r.PostForm.Has("roles_claim") {
+		webAdmin := settingsMappingValue(root, "web_admin")
+		if webAdmin == nil || webAdmin.Tag == "!!null" {
+			webAdmin = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+			setSettingsValue(root, "web_admin", webAdmin)
+		}
+
+		if webAdmin.Kind != yaml.MappingNode {
+			h.redirect(w, r, "/settings", failure("Invalid web_admin configuration."))
+			return
+		}
+
+		adminOIDC := settingsMappingValue(webAdmin, "oidc")
+		if adminOIDC == nil || adminOIDC.Tag == "!!null" {
+			adminOIDC = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+			setSettingsValue(webAdmin, "oidc", adminOIDC)
+		}
+
+		if adminOIDC.Kind != yaml.MappingNode {
+			h.redirect(w, r, "/settings", failure("Invalid admin OIDC configuration."))
+			return
+		}
+
+		for formKey, yamlKey := range map[string]string{"admin_groups": "allowed_groups", "admin_roles": "allowed_roles"} {
+			if r.PostForm.Has(formKey) {
+				values := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+
+				for value := range strings.SplitSeq(formValue(r, formKey), ",") {
+					if value = strings.TrimSpace(value); value != "" {
+						values.Content = append(values.Content, settingsString(value))
+					}
+				}
+
+				setSettingsValue(adminOIDC, yamlKey, values)
+			}
+		}
+
+		if r.PostForm.Has("roles_claim") {
+			claim := cmp.Or(formValue(r, "roles_claim"), "roles")
+			if len(claim) > 128 || strings.ContainsAny(claim, " \t\r\n") {
+				h.redirect(w, r, "/settings", failure("Enter a valid roles claim name (maximum 128 characters)."))
+				return
+			}
+
+			setSettingsValue(adminOIDC, "roles_claim", settingsString(claim))
+		}
 	}
 
 	err = writeSettingsConfig(path, document)
@@ -266,4 +348,60 @@ func writeSettingsConfig(path string, document *yaml.Node) error {
 	}
 
 	return os.Rename(file.Name(), path)
+}
+
+// saveOIDCButtonText persists presentation independently of provider credentials.
+// requireSession enforces admin authentication and CSRF on this POST.
+func (h *Handler) saveOIDCButtonText(w http.ResponseWriter, r *http.Request) {
+	text := strings.TrimSpace(r.PostForm.Get("button_text"))
+	if len([]rune(text)) > 100 || strings.ContainsAny(text, "\r\n\t") {
+		h.redirect(w, r, "/settings", failure("Der Button-Text darf maximal 100 Zeichen und keine Zeilenumbrueche enthalten."))
+		return
+	}
+
+	h.settingsMu.Lock()
+	defer h.settingsMu.Unlock()
+
+	path, document, _, err := readOIDCSettings(h.configPath)
+	if err != nil {
+		h.redirect(w, r, "/settings", failure("Die YAML-Configuration konnte nicht gelesen werden."))
+		return
+	}
+
+	root := document.Content[0]
+
+	admin := settingsMappingValue(root, "web_admin")
+	if admin == nil || admin.Tag == "!!null" {
+		admin = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+		setSettingsValue(root, "web_admin", admin)
+	}
+
+	if admin.Kind != yaml.MappingNode {
+		h.redirect(w, r, "/settings", failure("Invalid web_admin configuration."))
+		return
+	}
+
+	provider := settingsMappingValue(admin, "oidc")
+	if provider == nil || provider.Tag == "!!null" {
+		provider = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+		setSettingsValue(admin, "oidc", provider)
+	}
+
+	if provider.Kind != yaml.MappingNode {
+		h.redirect(w, r, "/settings", failure("Invalid admin OIDC configuration."))
+		return
+	}
+
+	setSettingsValue(provider, "button_text", settingsString(text))
+
+	err = writeSettingsConfig(path, document)
+	if err != nil {
+		log.Error().Err(err).Msg("web admin: saving OIDC button text")
+		h.redirect(w, r, "/settings", failure("Speichern fehlgeschlagen. Pruefe die Schreibrechte der YAML-Datei."))
+
+		return
+	}
+
+	h.oidcButtonText = text
+	h.redirect(w, r, "/settings", success("Button-Text gespeichert. Die Aenderung ist sofort aktiv."))
 }

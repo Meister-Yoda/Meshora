@@ -396,6 +396,17 @@ func FaviconHandler(writer http.ResponseWriter, req *http.Request) {
 	http.ServeContent(writer, req, "favicon.ico", time.Unix(0, 0), bytes.NewReader(assets.Favicon))
 }
 
+// LogoHandler serves the shared wordmark without requiring an admin session.
+func LogoHandler(writer http.ResponseWriter, req *http.Request) {
+	logo := assets.Logo
+	if req.URL.Path == "/assets/meshora-logo-dark.png" {
+		logo = assets.LogoDark
+	}
+
+	writer.Header().Set("Content-Type", "image/png")
+	http.ServeContent(writer, req, "meshora-logo.png", time.Unix(0, 0), bytes.NewReader(logo))
+}
+
 // BlankHandler returns a blank page with favicon linked.
 func BlankHandler(writer http.ResponseWriter, res *http.Request) {
 	writer.Header().Set("Content-Type", "text/html; charset=utf-8")

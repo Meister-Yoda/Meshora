@@ -65,7 +65,9 @@ var (
 
 // session is the server-side state of a logged-in admin.
 type session struct {
-	adminID uint64
+	oidcSubject string
+	expires     time.Time
+	adminID     uint64
 	// passwordFP fingerprints the account's password hash at login. Setting a
 	// password always draws a new salt, so a password change ends every
 	// session started with the old one.
@@ -107,12 +109,18 @@ type Handler struct {
 
 	// publicPath is BasePath as the browser sees it, including any path
 	// prefix of server_url. Cookies and redirects use it.
-	publicPath    string
-	serverURL     string
-	secureCookies bool
-	configPath    string
-	activeOIDC    types.OIDCConfig
-	settingsMu    sync.Mutex
+	publicPath          string
+	serverURL           string
+	secureCookies       bool
+	configPath          string
+	activeOIDC          types.OIDCConfig
+	adminOIDCGroups     []string
+	adminOIDCRoles      []string
+	adminOIDCRolesClaim string
+	oidcButtonText      string
+	oidcFlows           *expirable.LRU[string, adminOIDCFlow]
+	oidcFlowsMu         sync.Mutex
+	settingsMu          sync.Mutex
 
 	// sessions is keyed by the SHA-256 of the session token, so the tokens
 	// themselves are never held in memory after they are handed out.
@@ -134,15 +142,20 @@ func New(st *state.State, cfg *types.Config, notify func(...change.Change)) *Han
 	}
 
 	return &Handler{
-		state:         st,
-		change:        notify,
-		publicPath:    publicPath,
-		serverURL:     strings.TrimSuffix(cfg.ServerURL, "/"),
-		secureCookies: secure,
-		configPath:    cfg.ConfigFilePath,
-		activeOIDC:    cfg.OIDC,
-		sessions:      expirable.NewLRU[string, *session](maxSessions, nil, cfg.WebAdmin.SessionTTL),
-		failures:      expirable.NewLRU[string, int](maxFailureKeys, nil, loginFailureWindow),
+		state:               st,
+		change:              notify,
+		publicPath:          publicPath,
+		serverURL:           strings.TrimSuffix(cfg.ServerURL, "/"),
+		secureCookies:       secure,
+		configPath:          cfg.ConfigFilePath,
+		activeOIDC:          cfg.OIDC,
+		adminOIDCGroups:     slices.Clone(cfg.WebAdmin.OIDCAllowedGroups),
+		adminOIDCRoles:      slices.Clone(cfg.WebAdmin.OIDCAllowedRoles),
+		adminOIDCRolesClaim: cmp.Or(cfg.WebAdmin.OIDCRolesClaim, "roles"),
+		oidcButtonText:      strings.TrimSpace(cfg.WebAdmin.OIDCButtonText),
+		oidcFlows:           expirable.NewLRU[string, adminOIDCFlow](maxSessions, nil, 10*time.Minute),
+		sessions:            expirable.NewLRU[string, *session](maxSessions, nil, cfg.WebAdmin.SessionTTL),
+		failures:            expirable.NewLRU[string, int](maxFailureKeys, nil, loginFailureWindow),
 	}
 }
 
@@ -157,6 +170,8 @@ func (h *Handler) Routes(r chi.Router) {
 		r.Get(templates.AdminStylesheetPath, stylesheet)
 		r.Get("/login", h.loginPage)
 		r.Post("/login", h.login)
+		r.Post("/login/oidc", h.oidcLogin)
+		r.Get("/oidc/callback", h.oidcCallback)
 
 		r.Group(func(r chi.Router) {
 			r.Use(h.requireSession)
@@ -190,6 +205,7 @@ func (h *Handler) Routes(r chi.Router) {
 
 			r.Get("/settings", h.settingsPage)
 			r.Post("/settings/oidc", h.saveOIDCSettings)
+			r.Post("/settings/oidc-button", h.saveOIDCButtonText)
 
 			r.Post("/logout", h.logout)
 		})
@@ -197,11 +213,11 @@ func (h *Handler) Routes(r chi.Router) {
 }
 
 func adminHeaders(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return templates.LanguageMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Security-Policy", adminCSP)
 		w.Header().Set("Cache-Control", "no-store")
 		next.ServeHTTP(w, r)
-	})
+	}))
 }
 
 // stylesheet serves assets.AdminCSS. It is public: the login page needs it.
@@ -222,20 +238,29 @@ func (h *Handler) loginPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.adminOIDCEnabled() && r.URL.Query().Get("local") != "1" && r.URL.Query().Get("lang") == "" {
+		h.startOIDC(w, r, true)
+		return
+	}
 	h.renderLogin(w, r, http.StatusOK, "", "")
 }
 
 // renderLogin issues a fresh login CSRF token (double-submit cookie) and
 // renders the login form.
 func (h *Handler) renderLogin(w http.ResponseWriter, r *http.Request, status int, username, msg string) {
+	h.settingsMu.Lock()
+	buttonText := h.oidcButtonText
+	h.settingsMu.Unlock()
 	token := randomToken()
 	h.setCookie(w, r, loginCSRFCookie, token, int(loginFailureWindow.Seconds()))
 
 	writeHTML(w, status, templates.AdminLogin(templates.AdminLoginInfo{
-		Base:      h.publicPath,
-		CSRFToken: token,
-		Username:  username,
-		Error:     msg,
+		Base:           h.publicPath,
+		CSRFToken:      token,
+		OIDCEnabled:    h.adminOIDCEnabled(),
+		OIDCButtonText: buttonText,
+		Username:       username,
+		Error:          msg,
 	}).Render())
 }
 
@@ -305,7 +330,7 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.setCookie(w, r, sessionCookie, "", -1)
-	http.Redirect(w, r, h.publicPath+"/login", http.StatusSeeOther)
+	http.Redirect(w, r, h.publicPath+"/login?local=1", http.StatusSeeOther)
 }
 
 func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
@@ -545,6 +570,15 @@ func (h *Handler) currentSession(r *http.Request) (*session, bool) {
 	sess, ok := h.sessions.Get(key)
 	if !ok {
 		return nil, false
+	}
+
+	if sess.oidcSubject != "" {
+		if !h.adminOIDCEnabled() || !time.Now().Before(sess.expires) {
+			h.sessions.Remove(key)
+			return nil, false
+		}
+
+		return sess, true
 	}
 
 	admin, err := h.state.GetWebAdminByID(sess.adminID)

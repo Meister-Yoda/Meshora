@@ -37,18 +37,11 @@ var adminCSSVersion = func() string {
 	return hex.EncodeToString(sum[:4])
 }()
 
-// meshoraMark is the Meshora logo: three linked nodes on a gradient tile.
-// Presentation attributes only, so it renders under the strict CSP.
-const meshoraMark = `<svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">` +
-	`<defs><linearGradient id="mg" x1="0" y1="0" x2="1" y2="1">` +
-	`<stop offset="0" stop-color="#0a84ff"/><stop offset="1" stop-color="#64d2ff"/>` +
-	`</linearGradient></defs>` +
-	`<rect width="32" height="32" rx="9" fill="url(#mg)"/>` +
-	`<path d="M10 21 16 10l6 11z" fill="none" stroke="#fff" stroke-opacity=".55" stroke-width="1.6" stroke-linejoin="round"/>` +
-	`<circle cx="16" cy="10" r="3.2" fill="#fff"/>` +
-	`<circle cx="10" cy="21" r="3.2" fill="#fff"/>` +
-	`<circle cx="22" cy="21" r="3.2" fill="#fff"/>` +
-	`</svg>`
+// meshoraMark uses the generated logo, with a legible wordmark in either theme.
+const meshoraMark = `<picture class="brand-logo">` +
+	` <source media="(prefers-color-scheme: dark)" srcset="/assets/meshora-logo-dark.png"/>` +
+	`<img src="/assets/meshora-logo.png" alt="Meshora" width="192" height="35"/>` +
+	`</picture>`
 
 // meshoraBackdrop uses the same four ambient colours as PicGen.
 const meshoraBackdrop = `<div class="meshora-backdrop" aria-hidden="true">` +
@@ -57,6 +50,8 @@ const meshoraBackdrop = `<div class="meshora-backdrop" aria-hidden="true">` +
 
 // AdminLoginInfo is the data rendered by [AdminLogin].
 type AdminLoginInfo struct {
+	OIDCEnabled    bool
+	OIDCButtonText string
 	// Base is the dashboard's public base path, e.g. "/admin".
 	Base      string
 	CSRFToken string
@@ -70,14 +65,14 @@ type AdminLoginInfo struct {
 func AdminLogin(info AdminLoginInfo) *elem.Element {
 	card := []elem.Node{
 		brand("Admin"),
-		elem.H1(nil, elem.Text("Sign in")),
-		elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text("Use your Meshora admin account.")),
+		elem.H1(nil, i18nText("Sign in")),
+		elem.P(attrs.Props{attrs.Class: "muted"}, i18nText("Use your Meshora admin account.")),
 	}
 
 	if info.Error != "" {
 		card = append(card, elem.Div(
 			attrs.Props{attrs.Class: "alert", attrs.Role: "alert"},
-			elem.Text(info.Error),
+			i18nText(info.Error),
 		))
 	}
 
@@ -92,10 +87,27 @@ func AdminLogin(info AdminLoginInfo) *elem.Element {
 		adminField("Password", "password", "password", "", "current-password"),
 		elem.Button(
 			attrs.Props{attrs.Type: submitType, attrs.Class: "btn btn-primary btn-block"},
-			elem.Text("Sign in"),
+			i18nText("Sign in"),
 		),
 	))
 
+	if info.OIDCEnabled {
+		var buttonLabel elem.Node = elem.Text(info.OIDCButtonText)
+		if strings.TrimSpace(info.OIDCButtonText) == "" {
+			buttonLabel = i18nText("Sign in with Authentik")
+		}
+
+		card = append(card, elem.Form(attrs.Props{
+			attrs.Method: "POST", attrs.Action: info.Base + "/login/oidc", attrs.Class: "stack",
+		}, adminCSRFInput(info.CSRFToken), elem.Button(attrs.Props{
+			attrs.Type: submitType, attrs.Class: "btn btn-ghost btn-block",
+		}, buttonLabel)))
+	}
+
+	if info.OIDCEnabled {
+		card = append(card, elem.P(attrs.Props{attrs.Class: "muted"},
+			elem.A(attrs.Props{attrs.Href: info.Base + "/login?local=1"}, i18nText("Use local admin login"))))
+	}
 	return adminDocument(info.Base, "Sign in · Meshora", "auth",
 		elem.Main(attrs.Props{attrs.Class: "auth-card"}, card...),
 		elem.P(attrs.Props{attrs.Class: "auth-footer"}, poweredBy()...),
@@ -124,28 +136,28 @@ func AdminOverview(info AdminOverviewInfo) *elem.Element {
 
 	stats := elem.Section(
 		attrs.Props{attrs.Class: "stats"},
-		statCard(info.Base+"/users", "Users", info.UserCount, elem.Text("Tailnet users")),
-		statCard(info.Base+"/nodes", "Nodes", info.NodeCount, elem.Text("Registered devices")),
+		statCard(info.Base+"/users", "Users", info.UserCount, i18nText("Tailnet users")),
+		statCard(info.Base+"/nodes", "Nodes", info.NodeCount, i18nText("Registered devices")),
 		elem.A(
 			attrs.Props{attrs.Href: info.Base + "/nodes", attrs.Class: "card card-link"},
-			elem.Div(attrs.Props{attrs.Class: "stat-label"}, elem.Text("Online")),
+			elem.Div(attrs.Props{attrs.Class: "stat-label"}, i18nText("Online")),
 			elem.Div(attrs.Props{attrs.Class: "stat-value"}, elem.Text(strconv.Itoa(info.OnlineCount))),
 			elem.Div(
 				attrs.Props{attrs.Class: "stat-hint"},
 				elem.Span(attrs.Props{attrs.Class: "dot"}),
-				elem.Text(strconv.Itoa(onlinePct)+"% of nodes connected"),
+				i18nText(strconv.Itoa(onlinePct)+"% of nodes connected"),
 			),
 			elem.Div(
 				attrs.Props{attrs.Class: "meter", attrs.Role: "presentation"},
 				elem.Div(attrs.Props{attrs.Class: "meter-fill " + meterWidthClass(onlinePct)}),
 			),
 		),
-		statCard(info.Base+"/pending", "Pending", info.PendingCount, elem.Text("Logins in progress")),
+		statCard(info.Base+"/pending", "Pending", info.PendingCount, i18nText("Logins in progress")),
 	)
 
 	addDevice := elem.Section(
 		attrs.Props{attrs.Class: "card"},
-		elem.H2(nil, elem.Text("Add a device")),
+		elem.H2(nil, i18nText("Add a device")),
 		elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text(
 			"Run this on the device. The user then signs in with their identity provider.",
 		)),
@@ -157,8 +169,8 @@ func AdminOverview(info AdminOverviewInfo) *elem.Element {
 	return adminShell(info.Base, info.Username, info.CSRFToken, "Overview", nil,
 		elem.Div(
 			attrs.Props{attrs.Class: "page-head"},
-			elem.H1(nil, elem.Text("Overview")),
-			elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text("Your tailnet at a glance.")),
+			elem.H1(nil, i18nText("Overview")),
+			elem.P(attrs.Props{attrs.Class: "muted"}, i18nText("Your tailnet at a glance.")),
 		),
 		stats,
 		addDevice,
@@ -237,8 +249,8 @@ func AdminUsers(info AdminPageInfo, users []AdminUserRow) *elem.Element {
 
 	create := elem.Section(
 		attrs.Props{attrs.Class: "card"},
-		elem.H2(nil, elem.Text("Add a user")),
-		elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text(
+		elem.H2(nil, i18nText("Add a user")),
+		elem.P(attrs.Props{attrs.Class: "muted"}, i18nText(
 			"Users who sign in with your identity provider are created automatically. "+
 				"Add one here to register devices for them before they sign in.",
 		)),
@@ -344,9 +356,9 @@ func AdminPending(info AdminPageInfo, pending []AdminPendingRow) *elem.Element {
 
 		rows := make([]elem.Node, 0, len(pending))
 		for _, p := range pending {
-			kind := elem.Span(attrs.Props{attrs.Class: "pill pill-accent"}, elem.Text("Registration"))
+			kind := elem.Span(attrs.Props{attrs.Class: "pill pill-accent"}, i18nText("Registration"))
 			if p.SSHCheck {
-				kind = elem.Span(attrs.Props{attrs.Class: "pill"}, elem.Text("SSH check"))
+				kind = elem.Span(attrs.Props{attrs.Class: "pill"}, i18nText("SSH check"))
 			}
 
 			rows = append(rows, elem.Tr(nil,
@@ -358,7 +370,7 @@ func AdminPending(info AdminPageInfo, pending []AdminPendingRow) *elem.Element {
 				elem.Td(attrs.Props{attrs.Class: "cell-action"}, elem.A(attrs.Props{
 					attrs.Href:  pendingHref(info.Base, p.AuthID),
 					attrs.Class: "btn btn-primary btn-sm",
-				}, elem.Text("Review"))),
+				}, i18nText("Review"))),
 			))
 		}
 
@@ -373,10 +385,14 @@ func AdminPending(info AdminPageInfo, pending []AdminPendingRow) *elem.Element {
 }
 
 func pageHead(title, subtitle string) *elem.Element {
+	return pageHeadNodes(i18nText(title), i18nText(subtitle))
+}
+
+func pageHeadNodes(title, subtitle elem.Node) *elem.Element {
 	return elem.Div(
 		attrs.Props{attrs.Class: "page-head"},
-		elem.H1(nil, elem.Text(title)),
-		elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text(subtitle)),
+		elem.H1(nil, title),
+		elem.P(attrs.Props{attrs.Class: "muted"}, subtitle),
 	)
 }
 
@@ -393,14 +409,14 @@ func countLabel(n int, one, many string) string {
 func dataTable(caption string, headers []string, rows []elem.Node) *elem.Element {
 	head := make([]elem.Node, 0, len(headers))
 	for _, h := range headers {
-		head = append(head, elem.Th(attrs.Props{attrs.Scope: "col"}, elem.Text(h)))
+		head = append(head, elem.Th(attrs.Props{attrs.Scope: "col"}, i18nText(h)))
 	}
 
 	return elem.Div(
 		attrs.Props{attrs.Class: "table-wrap"},
 		elem.Table(
 			attrs.Props{attrs.Class: "table"},
-			elem.Caption(attrs.Props{attrs.Class: "sr-only"}, elem.Text(caption)),
+			elem.Caption(attrs.Props{attrs.Class: "sr-only"}, i18nText(caption)),
 			elem.THead(nil, elem.Tr(nil, head...)),
 			elem.TBody(nil, rows...),
 		),
@@ -410,8 +426,8 @@ func dataTable(caption string, headers []string, rows []elem.Node) *elem.Element
 func emptyState(title, hint string) *elem.Element {
 	return elem.Div(
 		attrs.Props{attrs.Class: "card empty"},
-		elem.H2(nil, elem.Text(title)),
-		elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text(hint)),
+		elem.H2(nil, i18nText(title)),
+		elem.P(attrs.Props{attrs.Class: "muted"}, i18nText(hint)),
 	)
 }
 
@@ -447,7 +463,7 @@ func twoLine(href, primary, secondary string) *elem.Element {
 
 func textOrDash(s string) elem.Node {
 	if s == "" {
-		return elem.Span(attrs.Props{attrs.Class: "faint"}, elem.Text("—"))
+		return elem.Span(attrs.Props{attrs.Class: "faint"}, i18nText("—"))
 	}
 
 	return elem.Text(s)
@@ -495,7 +511,7 @@ func statusCell(online *bool) elem.Node {
 
 	return elem.Span(attrs.Props{attrs.Class: "status"},
 		elem.Span(attrs.Props{attrs.Class: dot, "aria-hidden": "true"}),
-		elem.Text(label),
+		i18nText(label),
 	)
 }
 
@@ -512,22 +528,22 @@ func dateCell(t time.Time) elem.Node {
 
 func relCell(t, now time.Time) elem.Node {
 	if t.IsZero() {
-		return elem.Span(attrs.Props{attrs.Class: "faint"}, elem.Text("Never"))
+		return elem.Span(attrs.Props{attrs.Class: "faint"}, i18nText("Never"))
 	}
 
 	return elem.Time(
 		attrs.Props{attrs.Datetime: t.UTC().Format(time.RFC3339), attrs.Title: t.UTC().Format(time.RFC1123)},
-		elem.Text(relativeTime(t, now)),
+		i18nText(relativeTime(t, now)),
 	)
 }
 
 func expiryCell(t time.Time, expired bool) elem.Node {
 	if expired {
-		return elem.Span(attrs.Props{attrs.Class: "pill pill-danger"}, elem.Text("Expired"))
+		return elem.Span(attrs.Props{attrs.Class: "pill pill-danger"}, i18nText("Expired"))
 	}
 
 	if t.IsZero() {
-		return elem.Span(attrs.Props{attrs.Class: "faint"}, elem.Text("Never"))
+		return elem.Span(attrs.Props{attrs.Class: "faint"}, i18nText("Never"))
 	}
 
 	return dateCell(t)
@@ -575,8 +591,7 @@ func adminShell(base, username, csrf, title string, flash *AdminFlash, content .
 			attrs.Props{attrs.Class: "topbar-inner"},
 			elem.A(attrs.Props{attrs.Href: base + "/", attrs.Class: "brand"},
 				elem.Raw(meshoraMark),
-				elem.Span(nil, elem.Text("Meshora")),
-				elem.Span(attrs.Props{attrs.Class: "brand-tag"}, elem.Text("Admin")),
+				elem.Span(attrs.Props{attrs.Class: "brand-tag"}, i18nText("Admin")),
 			),
 			elem.Div(
 				attrs.Props{attrs.Class: "account"},
@@ -587,7 +602,7 @@ func adminShell(base, username, csrf, title string, flash *AdminFlash, content .
 					adminCSRFInput(csrf),
 					elem.Button(
 						attrs.Props{attrs.Type: submitType, attrs.Class: "btn btn-ghost btn-sm"},
-						elem.Text("Sign out"),
+						i18nText("Sign out"),
 					),
 				),
 			),
@@ -620,14 +635,14 @@ func adminDocument(base, title, bodyClass string, body ...elem.Node) *elem.Eleme
 			elem.Meta(attrs.Props{attrs.Name: "color-scheme", attrs.Content: "light dark"}),
 			elem.Meta(attrs.Props{attrs.Name: "robots", attrs.Content: "noindex"}),
 			elem.Title(nil, elem.Text(title)),
-			elem.Link(attrs.Props{attrs.Rel: "icon", attrs.Href: "/favicon.ico"}),
+			elem.Link(attrs.Props{attrs.Rel: "icon", attrs.Href: "/favicon.ico?v=meshora"}),
 			elem.Link(attrs.Props{
 				attrs.Rel:  "stylesheet",
 				attrs.Href: base + AdminStylesheetPath + "?v=" + adminCSSVersion,
 			}),
 		),
 		elem.Body(attrs.Props{attrs.Class: bodyClass, "translate": "no"},
-			append([]elem.Node{elem.Raw(meshoraBackdrop)}, body...)...),
+			append([]elem.Node{languageSwitcher(), elem.Raw(meshoraBackdrop)}, body...)...),
 	)
 }
 
@@ -636,10 +651,9 @@ func adminDocument(base, title, bodyClass string, body ...elem.Node) *elem.Eleme
 func brand(tag string) *elem.Element {
 	children := []elem.Node{
 		elem.Raw(meshoraMark),
-		elem.Span(nil, elem.Text("Meshora")),
 	}
 	if tag != "" {
-		children = append(children, elem.Span(attrs.Props{attrs.Class: "brand-tag"}, elem.Text(tag)))
+		children = append(children, elem.Span(attrs.Props{attrs.Class: "brand-tag"}, i18nText(tag)))
 	}
 
 	return elem.Div(attrs.Props{attrs.Class: "brand"}, children...)
@@ -647,12 +661,12 @@ func brand(tag string) *elem.Element {
 
 func poweredBy() []elem.Node {
 	return []elem.Node{
-		elem.Text("Meshora · powered by "),
+		i18nText("Meshora · powered by "),
 		elem.A(attrs.Props{
 			attrs.Href:   "https://github.com/juanfont/headscale",
 			attrs.Rel:    "noreferrer noopener",
 			attrs.Target: "_blank",
-		}, elem.Text("Headscale")),
+		}, i18nText("Headscale")),
 	}
 }
 
@@ -662,13 +676,13 @@ func navLink(href, label string, current bool) *elem.Element {
 		props["aria-current"] = "page"
 	}
 
-	return elem.A(props, elem.Text(label))
+	return elem.A(props, i18nText(label))
 }
 
 func statCard(href, label string, value int, hint elem.Node) *elem.Element {
 	return elem.A(
 		attrs.Props{attrs.Href: href, attrs.Class: "card card-link"},
-		elem.Div(attrs.Props{attrs.Class: "stat-label"}, elem.Text(label)),
+		elem.Div(attrs.Props{attrs.Class: "stat-label"}, i18nText(label)),
 		elem.Div(attrs.Props{attrs.Class: "stat-value"}, elem.Text(strconv.Itoa(value))),
 		elem.Div(attrs.Props{attrs.Class: "stat-hint"}, hint),
 	)
@@ -692,7 +706,7 @@ func adminCSRFInput(token string) *elem.Element {
 func adminField(label, name, inputType, value, autocomplete string) *elem.Element {
 	return elem.Div(
 		attrs.Props{attrs.Class: "field"},
-		elem.Label(attrs.Props{attrs.For: name}, elem.Text(label)),
+		elem.Label(attrs.Props{attrs.For: name}, i18nText(label)),
 		elem.Input(attrs.Props{
 			attrs.ID:           name,
 			attrs.Name:         name,

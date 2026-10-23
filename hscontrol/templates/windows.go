@@ -7,14 +7,14 @@ import (
 func Windows(url string) *elem.Element {
 	return page(
 		"headscale - Windows",
-		H1(elem.Text("Windows configuration")),
+		H1(i18nText("Windows configuration")),
 		P(
-			elem.Text("Download "),
+			i18nText("Download "),
 			externalLink("https://tailscale.com/download/windows", "Tailscale for Windows"),
-			elem.Text(" and install it."),
+			i18nText(" and install it."),
 		),
 		P(
-			elem.Text("Open a Command Prompt or PowerShell and use Tailscale's login command to connect with headscale:"),
+			i18nText("Open a Command Prompt or PowerShell and use Tailscale's login command to connect with headscale:"),
 		),
 		codeBlockText("tailscale login --login-server "+url),
 	)

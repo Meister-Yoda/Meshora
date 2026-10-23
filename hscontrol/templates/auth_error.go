@@ -27,7 +27,7 @@ type AuthErrorResult struct {
 func AuthError(result AuthErrorResult) *elem.Element {
 	box := errorBox(
 		result.Heading,
-		elem.Text(result.Message),
+		i18nText(result.Message),
 	)
 
 	return page(

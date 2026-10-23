@@ -84,3 +84,25 @@ func TestAdminPagesHaveNoInlineStyles(t *testing.T) {
 		assert.NotContains(t, page, "<style")
 	}
 }
+
+func TestLocalizedDocumentsPreserveRecordsAndSecrets(t *testing.T) {
+	info := AdminPageInfo{Base: "/admin", Username: "Settings", CSRFToken: "secret-token"}
+	page := Localize(AdminUsers(info, []AdminUserRow{{Name: "Overview", DisplayName: "Settings", Email: "Users"}}).Render(), "de")
+	assert.Contains(t, page, ">Benutzer<")
+	assert.Contains(t, page, ">Settings<")
+	assert.Contains(t, page, ">Users<")
+	assert.Contains(t, page, `value="secret-token"`)
+	assert.NotContains(t, page, "<!--meshora-i18n-->")
+
+	login := Localize(AdminLogin(AdminLoginInfo{Base: "/admin", OIDCEnabled: true}).Render(), "de")
+	assert.Contains(t, login, ">Mit Authentik anmelden</button>")
+
+	setup := Localize(InitialSetup(SetupInfo{ServerURL: "http://localhost:8080"}).Render(), "en")
+	assert.Contains(t, setup, ">Welcome to Meshora<")
+	assert.Contains(t, setup, ">Complete setup<")
+	assert.NotContains(t, setup, "<!--meshora-i18n-->")
+	// The user's raw text must stay escaped even when it resembles a localization marker.
+	hostile := Localize(AdminLogin(AdminLoginInfo{Base: "/admin", OIDCEnabled: true, OIDCButtonText: `<script>alert(1)</script><!--meshora-i18n-->Settings`}).Render(), "de")
+	assert.NotContains(t, hostile, "<script>")
+	assert.Contains(t, hostile, "&lt;script&gt;")
+}

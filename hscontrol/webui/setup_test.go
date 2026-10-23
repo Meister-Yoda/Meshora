@@ -66,7 +66,7 @@ func TestInitialSetupPersistsFirstAdminAndConfig(t *testing.T) {
 	e := newSetupTest(t)
 	response, body := e.do(e.client, http.MethodPost, "/setup", e.form())
 	require.Equal(t, http.StatusOK, response.StatusCode, body)
-	assert.Contains(t, body, "Einrichtung abgeschlossen")
+	assert.Contains(t, body, "Setup complete")
 	assert.NotContains(t, body, testPassword)
 	admin, err := e.database.AuthenticateWebAdmin("owner", testPassword)
 	require.NoError(t, err)

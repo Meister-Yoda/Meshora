@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## Meshora v0.1.0-rc.5 (2026-10-23)
+
+- Add German/English UI selection with a saved language preference.
+- Add Authentik admin OIDC sign-in with a silent automatic attempt and local-login fallback.
+- Restrict admin SSO by signed groups and roles claims, configurable in the dashboard.
+- Allow immediate customization of the OIDC button label.
+- Apply the Meshora wordmark, dark-mode variant and symbol favicon across setup and dashboard pages.
+- Update Docker Compose defaults and document provider setup and recovery.
+
+
 ## 0.30.0 (202x-xx-xx)
 
 **Minimum supported Tailscale client version: v1.84.0**

@@ -28,3 +28,13 @@ var AdminCSS []byte
 //
 //go:embed headscale.svg
 var SVG string
+
+// Logo is the Meshora wordmark for light backgrounds.
+//
+//go:embed meshora-logo.png
+var Logo []byte
+
+// LogoDark is the Meshora wordmark for dark backgrounds.
+//
+//go:embed meshora-logo-dark.png
+var LogoDark []byte

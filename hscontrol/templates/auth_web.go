@@ -10,8 +10,8 @@ import (
 func AuthWeb(title, description, command string) *elem.Element {
 	return page(
 		title+" - Headscale",
-		H1(elem.Text(title)),
-		P(elem.Text(description)),
+		H1(i18nText(title)),
+		P(i18nText(description)),
 		codeBlockText(command),
 	)
 }

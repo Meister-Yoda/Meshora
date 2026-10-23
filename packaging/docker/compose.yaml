@@ -1,6 +1,6 @@
 services:
   meshora:
-    image: ${MESHORA_IMAGE:-ghcr.io/meister-yoda/meshora}:${MESHORA_VERSION:-v0.1.0-rc.4}
+    image: ${MESHORA_IMAGE:-ghcr.io/meister-yoda/meshora}:${MESHORA_VERSION:-v0.1.0-rc.5}
     restart: unless-stopped
     ports:
       - "${MESHORA_BIND_IP:-0.0.0.0}:${MESHORA_PORT:-8080}:8080"

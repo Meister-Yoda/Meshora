@@ -7,7 +7,7 @@ on:
       release_tag:
         description: Existing release tag to publish to GHCR
         required: true
-        default: v0.1.0-rc.4
+        default: v0.1.0-rc.5
 permissions:
   contents: write
 jobs:

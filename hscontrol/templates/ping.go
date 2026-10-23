@@ -39,8 +39,8 @@ type ConnectedNode struct {
 // and a list of connected nodes ([ConnectedNode]) as quick-ping links.
 func PingPage(query string, result *PingResult, nodes []ConnectedNode) *elem.Element {
 	children := []elem.Node{
-		H1(elem.Text("Ping Node")),
-		P(elem.Text("Check if a connected node responds to a PingRequest.")),
+		H1(i18nText("Ping Node")),
+		P(i18nText("Check if a connected node responds to a PingRequest.")),
 		pingExplanation(),
 		pingForm(query),
 	}
@@ -113,7 +113,7 @@ func pingForm(query string) *elem.Element {
 		}),
 		elem.Button(attrs.Props{
 			attrs.Type: "submit",
-		}, elem.Text("Ping")),
+		}, i18nText("Ping")),
 	)
 }
 
@@ -124,7 +124,7 @@ func connectedNodeList(nodes []ConnectedNode) *elem.Element {
 		label := fmt.Sprintf("%s (ID: %d, %s)", n.Hostname, n.ID, strings.Join(n.IPs, ", "))
 		href := fmt.Sprintf("/debug/ping?node=%d", n.ID)
 
-		items = append(items, elem.Li(nil, A(href, elem.Text(label))))
+		items = append(items, elem.Li(nil, A(href, i18nText(label))))
 	}
 
 	return elem.Div(
@@ -133,7 +133,7 @@ func connectedNodeList(nodes []ConnectedNode) *elem.Element {
 				styles.MarginTop: space2XL,
 			}.ToInline(),
 		},
-		H2(elem.Text("Connected Nodes")),
+		H2(i18nText("Connected Nodes")),
 		Ul(items...),
 	)
 }

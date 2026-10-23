@@ -444,6 +444,14 @@ web_admin:
   # How long an admin stays logged in. Sessions are kept in memory and end
   # when headscale restarts.
   session_ttl: 12h
+  # Optional admin SSO using the oidc provider below. Empty disables admin SSO.
+  # Requires membership in one of these groups in the signed ID-token groups claim.
+  # Add a strict redirect URI in Authentik: <server_url>/admin/oidc/callback
+  oidc:
+    allowed_groups: [] # e.g. [meshora-admins]
+    button_text: "" # default follows the selected language (English/German)
+    allowed_roles: [] # e.g. [meshora-admin]; ANDed with allowed_groups when both set
+    roles_claim: roles # top-level signed ID-token claim containing an array of strings
 
 # Logtail configuration
 # Logtail is Tailscales logging and auditing infrastructure, it allows the

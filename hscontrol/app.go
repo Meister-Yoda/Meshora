@@ -40,6 +40,7 @@ import (
 	"github.com/juanfont/headscale/hscontrol/dns"
 	"github.com/juanfont/headscale/hscontrol/mapper"
 	"github.com/juanfont/headscale/hscontrol/state"
+	"github.com/juanfont/headscale/hscontrol/templates"
 	"github.com/juanfont/headscale/hscontrol/types"
 	"github.com/juanfont/headscale/hscontrol/types/change"
 	"github.com/juanfont/headscale/hscontrol/util"
@@ -485,6 +486,7 @@ func (h *Headscale) createRouter(apiV1Mux, apiV2Mux http.Handler) *chi.Mux {
 	r.Use(middleware.RequestLogger(&zerologRequestLogger{}))
 	r.Use(middleware.Recoverer)
 	r.Use(securityHeaders)
+	r.Use(templates.PublicLanguageMiddleware)
 
 	// TS2021 accepts both the native client's HTTP POST upgrade and the
 	// browser/WASM client's WebSocket GET upgrade; NoiseUpgradeHandler
@@ -536,6 +538,8 @@ func (h *Headscale) createRouter(apiV1Mux, apiV2Mux http.Handler) *chi.Mux {
 	r.Head("/machine/ping-response", h.PingResponseHandler)
 
 	r.Get("/favicon.ico", FaviconHandler)
+	r.Get("/assets/meshora-logo.png", LogoHandler)
+	r.Get("/assets/meshora-logo-dark.png", LogoHandler)
 	r.Get("/", BlankHandler)
 
 	return r

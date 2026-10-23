@@ -1,6 +1,7 @@
 package webui
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/juanfont/headscale/hscontrol/assets"
 	"github.com/juanfont/headscale/hscontrol/db"
 	"github.com/juanfont/headscale/hscontrol/templates"
 	"github.com/juanfont/headscale/hscontrol/types"
@@ -110,6 +112,18 @@ func (h *setupHandler) routes() http.Handler {
 		_, _ = io.WriteString(w, `{"status":"pass","setup_required":true}`)
 	})
 	mux.HandleFunc("GET /admin"+templates.AdminStylesheetPath, stylesheet)
+
+	for path, data := range map[string][]byte{
+		"/assets/meshora-logo.png":      assets.Logo,
+		"/assets/meshora-logo-dark.png": assets.LogoDark,
+		"/favicon.ico":                  assets.Favicon,
+	} {
+		mux.HandleFunc("GET "+path, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "image/png")
+			http.ServeContent(w, r, path, time.Unix(0, 0), bytes.NewReader(data))
+		})
+	}
+
 	mux.HandleFunc("GET /setup", h.page)
 	mux.HandleFunc("POST /setup", h.save)
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {

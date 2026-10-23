@@ -73,20 +73,20 @@ func RegisterConfirm(info RegisterConfirmInfo) *elem.Element {
 		}),
 		elem.Button(
 			attrs.Props{attrs.Type: "submit"},
-			elem.Text("Confirm registration"),
+			i18nText("Confirm registration"),
 		),
 	)
 
 	return page(
 		"Headscale - Confirm node registration",
-		H2(elem.Text("Confirm node registration")),
-		P(elem.Text(
+		H2(i18nText("Confirm node registration")),
+		P(i18nText(
 			"A device is asking to be added to your tailnet. "+
 				"Please review the details below and confirm that this device is yours.",
 		)),
 		deviceList,
 		form,
-		P(elem.Text(
+		P(i18nText(
 			"If you do not recognise this device, close this window. "+
 				"The registration request will expire automatically.",
 		)),
@@ -111,7 +111,7 @@ func deviceTable(rows []deviceRow) *elem.Element {
 					styles.Color:        "var(--md-default-fg-color--light)",
 					styles.BorderBottom: cssBorderHS,
 				}.ToInline(),
-			}, elem.Text(row.label)),
+			}, i18nText(row.label)),
 			elem.Td(attrs.Props{
 				attrs.Style: styles.Props{
 					styles.Padding:      "0.5rem 0",

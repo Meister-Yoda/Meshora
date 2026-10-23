@@ -18,7 +18,7 @@ import (
 // flashBanner renders the one-time message of an action, or nothing.
 func flashBanner(f *AdminFlash) elem.Node {
 	if f == nil {
-		return elem.Text("")
+		return i18nText("")
 	}
 
 	class, role := "flash flash-success", "status"
@@ -26,7 +26,7 @@ func flashBanner(f *AdminFlash) elem.Node {
 		class, role = "flash flash-error", "alert"
 	}
 
-	children := []elem.Node{elem.P(nil, elem.Text(f.Message))}
+	children := []elem.Node{elem.P(nil, i18nText(f.Message))}
 	if f.Secret != "" {
 		children = append(children, elem.Pre(
 			attrs.Props{attrs.Class: "codeblock secret"},
@@ -51,7 +51,7 @@ func textField(label, name, value string, required bool) *elem.Element {
 
 	return elem.Div(
 		attrs.Props{attrs.Class: "field"},
-		elem.Label(attrs.Props{attrs.For: "f-" + name}, elem.Text(label)),
+		elem.Label(attrs.Props{attrs.For: "f-" + name}, i18nText(label)),
 		elem.Input(props),
 	)
 }
@@ -59,7 +59,9 @@ func textField(label, name, value string, required bool) *elem.Element {
 func selectField(label, name string, choices []AdminChoice, placeholder string) *elem.Element {
 	options := make([]elem.Node, 0, len(choices)+1)
 	if placeholder != "" {
-		options = append(options, elem.Option(attrs.Props{attrs.Value: ""}, elem.Text(placeholder)))
+		option := elem.Option(attrs.Props{attrs.Value: ""}, elem.Text(placeholder))
+		option.Children = []elem.Node{i18nText(placeholder)}
+		options = append(options, option)
 	}
 
 	for _, c := range choices {
@@ -68,12 +70,19 @@ func selectField(label, name string, choices []AdminChoice, placeholder string) 
 			props[attrs.Selected] = "true"
 		}
 
-		options = append(options, elem.Option(props, elem.Text(c.Label)))
+		var label elem.Node = elem.Text(c.Label)
+		if name == "expiry" {
+			label = i18nText(c.Label)
+		}
+
+		option := elem.Option(props, elem.Text(c.Label))
+		option.Children = []elem.Node{label}
+		options = append(options, option)
 	}
 
 	return elem.Div(
 		attrs.Props{attrs.Class: "field"},
-		elem.Label(attrs.Props{attrs.For: "f-" + name}, elem.Text(label)),
+		elem.Label(attrs.Props{attrs.For: "f-" + name}, i18nText(label)),
 		elem.Select(attrs.Props{attrs.ID: "f-" + name, attrs.Name: name}, options...),
 	)
 }
@@ -82,12 +91,12 @@ func checkboxField(label, name string) *elem.Element {
 	return elem.Label(
 		attrs.Props{attrs.Class: "check"},
 		elem.Input(attrs.Props{attrs.Type: "checkbox", attrs.Name: name}),
-		elem.Span(nil, elem.Text(label)),
+		elem.Span(nil, i18nText(label)),
 	)
 }
 
 func submitButton(label, variant string) *elem.Element {
-	return elem.Button(attrs.Props{attrs.Type: submitType, attrs.Class: "btn " + variant}, elem.Text(label))
+	return elem.Button(attrs.Props{attrs.Type: submitType, attrs.Class: "btn " + variant}, i18nText(label))
 }
 
 // postForm is a form that POSTs to path with the session's CSRF token.
@@ -99,11 +108,11 @@ func postForm(info AdminPageInfo, path, class string, children ...elem.Node) *el
 }
 
 func linkButton(href, label, variant string) *elem.Element {
-	return elem.A(attrs.Props{attrs.Href: href, attrs.Class: "btn " + variant}, elem.Text(label))
+	return elem.A(attrs.Props{attrs.Href: href, attrs.Class: "btn " + variant}, i18nText(label))
 }
 
 func backLink(href, label string) *elem.Element {
-	return elem.A(attrs.Props{attrs.Href: href, attrs.Class: "back"}, elem.Text("← "+label))
+	return elem.A(attrs.Props{attrs.Href: href, attrs.Class: "back"}, i18nText("← "+label))
 }
 
 // detailList renders label/value pairs.
@@ -112,13 +121,13 @@ func detailList(pairs ...elem.Node) *elem.Element {
 }
 
 func detail(label string, value elem.Node) elem.Node {
-	return elem.Div(nil, elem.Dt(nil, elem.Text(label)), elem.Dd(nil, value))
+	return elem.Div(nil, elem.Dt(nil, i18nText(label)), elem.Dd(nil, value))
 }
 
 func cardSection(title, hint string, children ...elem.Node) *elem.Element {
-	head := []elem.Node{elem.H2(nil, elem.Text(title))}
+	head := []elem.Node{elem.H2(nil, i18nText(title))}
 	if hint != "" {
-		head = append(head, elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text(hint)))
+		head = append(head, elem.P(attrs.Props{attrs.Class: "muted"}, i18nText(hint)))
 	}
 
 	return elem.Section(attrs.Props{attrs.Class: "card"}, append(head, children...)...)
@@ -128,21 +137,21 @@ func cardSection(title, hint string, children ...elem.Node) *elem.Element {
 func AdminUserDetail(info AdminPageInfo, user AdminUserRow, nodes []AdminNodeRow) *elem.Element {
 	path := "/users/" + strconv.FormatUint(uint64(user.ID), 10)
 
-	var nodeList elem.Node = elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text("No devices yet."))
+	var nodeList elem.Node = elem.P(attrs.Props{attrs.Class: "muted"}, i18nText("No devices yet."))
 	if len(nodes) > 0 {
 		nodeList = nodeTable(info, nodes)
 	}
 
 	return info.shell("Users",
 		backLink(info.Base+"/users", "Users"),
-		pageHead(user.displayName(), user.Provider+" user"),
+		pageHeadNodes(elem.Text(user.displayName()), elem.Text(user.Provider+" user")),
 		elem.Section(attrs.Props{attrs.Class: "card"}, detailList(
 			detail("Username", textOrDash(user.Name)),
 			detail("Display name", textOrDash(user.DisplayName)),
 			detail("Email", textOrDash(user.Email)),
 			detail("Created", dateCell(user.CreatedAt)),
 		)),
-		elem.H2(attrs.Props{attrs.Class: "section-title"}, elem.Text("Devices")),
+		elem.H2(attrs.Props{attrs.Class: "section-title"}, i18nText("Devices")),
 		nodeList,
 		cardSection("Rename", "Changes the username used in ACL policies.",
 			postForm(info, path+"/rename", "form-inline",
@@ -184,7 +193,7 @@ func AdminNodeDetail(info AdminPageInfo, node AdminNodeRow, extra AdminNodeExtra
 
 	return info.shell("Nodes",
 		backLink(info.Base+"/nodes", "Nodes"),
-		pageHead(node.GivenName, node.Hostname),
+		pageHeadNodes(elem.Text(node.GivenName), elem.Text(node.Hostname)),
 		elem.Section(attrs.Props{attrs.Class: "card"}, detailList(
 			detail("Owner", ownerCell(node.Tags, node.Owner)),
 			detail("Status", statusCell(node.Online)),
@@ -229,9 +238,9 @@ func AdminPendingReview(info AdminPageInfo, req AdminPendingRow, users []AdminCh
 
 	sections := []elem.Node{
 		backLink(info.Base+"/pending", "Pending"),
-		pageHead(req.Hostname, kind),
+		pageHeadNodes(elem.Text(req.Hostname), i18nText(kind)),
 		elem.Section(attrs.Props{attrs.Class: "card"}, detailList(
-			detail("Type", elem.Text(kind)),
+			detail("Type", i18nText(kind)),
 			detail("Device", textOrDash(req.Hostname)),
 			detail("OS", textOrDash(req.OS)),
 			detail("Machine key", elem.Span(attrs.Props{attrs.Class: "mono"}, textOrDash(req.MachineKey))),
@@ -254,7 +263,7 @@ func AdminPendingReview(info AdminPageInfo, req AdminPendingRow, users []AdminCh
 	}
 
 	var assign elem.Node = elem.P(attrs.Props{attrs.Class: "muted"},
-		elem.Text("There are no users yet. Add one on the Users page first."))
+		i18nText("There are no users yet. Add one on the Users page first."))
 	if len(users) > 0 {
 		assign = postForm(info, path+"/assign", "form-inline",
 			selectField("User", "user_id", users, ""),
@@ -302,14 +311,14 @@ func AdminKeys(info AdminPageInfo, keys []AdminKeyRow, users, expiries []AdminCh
 		for _, k := range keys {
 			flags := []elem.Node{}
 			if k.Reusable {
-				flags = append(flags, elem.Span(attrs.Props{attrs.Class: "pill"}, elem.Text("reusable")))
+				flags = append(flags, elem.Span(attrs.Props{attrs.Class: "pill"}, i18nText("reusable")))
 			}
 
 			if k.Ephemeral {
-				flags = append(flags, elem.Span(attrs.Props{attrs.Class: "pill"}, elem.Text("ephemeral")))
+				flags = append(flags, elem.Span(attrs.Props{attrs.Class: "pill"}, i18nText("ephemeral")))
 			}
 
-			var action elem.Node = elem.Text("")
+			action := i18nText("")
 			if k.Status == "Active" {
 				action = linkButton(info.Base+"/keys/"+strconv.FormatUint(k.ID, 10)+"/expire", "Expire…", "btn-ghost btn-sm")
 			}
@@ -359,7 +368,7 @@ func keyStatus(status string) elem.Node {
 		class = "pill pill-danger"
 	}
 
-	return elem.Span(attrs.Props{attrs.Class: class}, elem.Text(status))
+	return elem.Span(attrs.Props{attrs.Class: class}, i18nText(status))
 }
 
 // AdminConfirmInfo describes a destructive action awaiting confirmation.
@@ -381,9 +390,9 @@ func AdminConfirm(info AdminPageInfo, c AdminConfirmInfo) *elem.Element {
 	return info.shell(c.Section,
 		elem.Section(
 			attrs.Props{attrs.Class: "card confirm"},
-			elem.H1(nil, elem.Text(c.Title)),
+			elem.H1(nil, i18nText(c.Title)),
 			elem.P(attrs.Props{attrs.Class: "confirm-subject"}, elem.Text(c.Subject)),
-			elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text(c.Message)),
+			elem.P(attrs.Props{attrs.Class: "muted"}, i18nText(c.Message)),
 			elem.Div(attrs.Props{attrs.Class: "actions"},
 				postForm(info, c.Action, "form-plain", submitButton(c.Button, "btn-danger")),
 				linkButton(info.Base+c.Cancel, "Cancel", "btn-ghost"),
@@ -394,12 +403,17 @@ func AdminConfirm(info AdminPageInfo, c AdminConfirmInfo) *elem.Element {
 
 // AdminOIDCSettings contains public settings only; secrets never enter templates.
 type AdminOIDCSettings struct {
-	Issuer         string
-	ClientID       string
-	CallbackURL    string
-	HasSecret      bool
-	Writable       bool
-	PendingRestart bool
+	AdminGroups      string
+	AdminRoles       string
+	RolesClaim       string
+	OIDCButtonText   string
+	AdminCallbackURL string
+	Issuer           string
+	ClientID         string
+	CallbackURL      string
+	HasSecret        bool
+	Writable         bool
+	PendingRestart   bool
 }
 
 // AdminSettings renders the identity-provider form in the admin dashboard.
@@ -426,28 +440,45 @@ func AdminSettings(info AdminPageInfo, settings AdminOIDCSettings) *elem.Element
 	}
 
 	var form elem.Node = elem.P(attrs.Props{attrs.Class: "muted"},
-		elem.Text("Diese Instanz benötigt eine lesbare YAML-Konfigurationsdatei, um Einstellungen hier zu speichern."))
+		i18nText("Diese Instanz benötigt eine lesbare YAML-Konfigurationsdatei, um Einstellungen hier zu speichern."))
 	if settings.Writable {
 		form = postForm(info, "/settings/oidc", "stack",
 			textField("Issuer-URL", "issuer", settings.Issuer, true),
-			elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text("Authentik: https://auth.example.com/application/o/meshora/")),
+			elem.P(attrs.Props{attrs.Class: "muted"}, i18nText("Authentik: https://auth.example.com/application/o/meshora/")),
 			textField("Client-ID", "client_id", settings.ClientID, true),
+			textField("Authentik-Gruppen mit Admin-Zugriff", "admin_groups", settings.AdminGroups, false),
+			textField("Admin roles", "admin_roles", settings.AdminRoles, false),
+			textField("Roles claim", "roles_claim", settings.RolesClaim, false),
+			elem.P(attrs.Props{attrs.Class: "muted"}, i18nText("Comma-separated admin roles from a signed ID-token claim (default: roles). If both groups and roles are configured, both restrictions must match. Empty groups and roles disable admin OIDC.")),
+			elem.P(attrs.Props{attrs.Class: "muted"}, i18nText("Comma-separated groups, e.g. meshora-admins. Device OIDC groups never grant admin access.")),
 			elem.Div(attrs.Props{attrs.Class: "field"},
-				elem.Label(attrs.Props{attrs.For: "f-client_secret"}, elem.Text("Client-Secret")),
+				elem.Label(attrs.Props{attrs.For: "f-client_secret"}, i18nText("Client-Secret")),
 				elem.Input(secretProps),
-				elem.P(attrs.Props{attrs.ID: "secret-hint", attrs.Class: "muted"}, elem.Text(hint)),
+				elem.P(attrs.Props{attrs.ID: "secret-hint", attrs.Class: "muted"}, i18nText(hint)),
 			),
 			elem.P(attrs.Props{attrs.Class: "muted"},
-				elem.Text("Speichern ändert die Anmeldung nach einem Neustart. Bestehende Zugriffsbeschränkungen und OIDC-Optionen bleiben erhalten.")),
+				i18nText("Speichern ändert die Anmeldung nach einem Neustart. Bestehende Zugriffsbeschränkungen und OIDC-Optionen bleiben erhalten.")),
 			submitButton("Speichern", "btn-primary"),
+		)
+	}
+
+	var buttonForm elem.Node = elem.P(attrs.Props{attrs.Class: "muted"}, i18nText("Zum Speichern wird eine beschreibbare YAML-Configuration benoetigt."))
+	if settings.Writable {
+		buttonForm = postForm(info, "/settings/oidc-button", "stack",
+			textField("Text des OIDC-Login-Buttons", "button_text", settings.OIDCButtonText, false),
+			elem.P(attrs.Props{attrs.Class: "muted"}, i18nText("Leer lassen fuer den Standard: Mit Authentik anmelden. Maximal 100 Zeichen. Die Aenderung gilt sofort, ohne Neustart.")),
+			submitButton("Button-Text speichern", "btn-primary"),
 		)
 	}
 
 	return info.shell("Settings",
 		pageHead("Einstellungen", "Authentik / OpenID Connect für die Anmeldung deiner Geräte."),
 		cardSection("Anmeldestatus", status),
+		cardSection("OIDC-Login-Button", "Passe die Beschriftung auf der Admin-Anmeldeseite an.", buttonForm),
 		cardSection("Authentik-Provider", "Die Client-Zugangsdaten findest du im OAuth2/OpenID-Connect-Provider von Authentik.", form),
 		cardSection("Rückleitungs-URL", "Diese URL in Authentik als Redirect-URI mit Strict-Abgleich eintragen.",
 			elem.Pre(attrs.Props{attrs.Class: "codeblock"}, elem.Code(nil, elem.Text(settings.CallbackURL)))),
+		cardSection("Admin-Redirect-URI", "In Authentik ebenfalls mit Strict-Abgleich eintragen. Der signierte ID-Token muss den groups-Claim mit den freigegebenen Gruppennamen enthalten.",
+			elem.Pre(attrs.Props{attrs.Class: "codeblock"}, elem.Code(nil, elem.Text(settings.AdminCallbackURL)))),
 	)
 }

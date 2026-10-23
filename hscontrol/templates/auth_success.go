@@ -36,16 +36,16 @@ type AuthSuccessResult struct {
 func AuthSuccess(result AuthSuccessResult) *elem.Element {
 	box := successBox(
 		result.Heading,
-		elem.Text(result.Verb+" as "),
+		i18nText(result.Verb+" as "),
 		elem.Strong(nil, elem.Text(result.User)),
-		elem.Text(". "+result.Message),
+		elem.Text(". "), i18nText(result.Message),
 	)
 
 	return page(
 		result.Title,
 		box,
-		H2(elem.Text("Getting started")),
-		P(elem.Text("Check out the documentation to learn more about headscale and Tailscale:")),
+		H2(i18nText("Getting started")),
+		P(i18nText("Check out the documentation to learn more about headscale and Tailscale:")),
 		Ul(
 			elem.Li(
 				nil,

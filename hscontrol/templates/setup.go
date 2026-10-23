@@ -25,7 +25,7 @@ func InitialSetup(info SetupInfo) *elem.Element {
 		pageHead("Willkommen bei Meshora", "Richte deine eigene Instanz ein. Alle Angaben werden dauerhaft gespeichert."),
 	}
 	if info.Error != "" {
-		children = append(children, elem.Div(attrs.Props{attrs.Class: "alert", attrs.Role: "alert"}, elem.Text(info.Error)))
+		children = append(children, elem.Div(attrs.Props{attrs.Class: "alert", attrs.Role: "alert"}, i18nText(info.Error)))
 	}
 
 	oidcHint := "Optional: Alle OIDC-Felder leer lassen, um den Anbieter später einzurichten."
@@ -47,14 +47,14 @@ func InitialSetup(info SetupInfo) *elem.Element {
 			setupPassword("Passwort", "password", true),
 			setupPassword("Passwort wiederholen", "password_confirm", true)),
 		elem.Details(oidcProps,
-			elem.Summary(nil, elem.Text("3 · OpenID Connect (optional)")),
-			elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text("Zum Beispiel Authentik. Client-ID und Secret stammen aus deinem OIDC-Provider.")),
+			elem.Summary(nil, i18nText("3 · OpenID Connect (optional)")),
+			elem.P(attrs.Props{attrs.Class: "muted"}, i18nText("Zum Beispiel Authentik. Client-ID und Secret stammen aus deinem OIDC-Provider.")),
 			textField("Issuer-URL", "issuer", info.Issuer, false),
 			textField("Client-ID", "client_id", info.ClientID, false),
 			setupPassword("Client-Secret", "client_secret", false),
-			elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text(oidcHint)),
-			elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text("Redirect-URI beim Provider: öffentliche Server-URL plus /oidc/callback."))),
-		elem.Button(attrs.Props{attrs.Type: submitType, attrs.Class: "btn btn-primary"}, elem.Text("Einrichtung abschließen")),
+			elem.P(attrs.Props{attrs.Class: "muted"}, i18nText(oidcHint)),
+			elem.P(attrs.Props{attrs.Class: "muted"}, i18nText("Redirect-URI beim Provider: öffentliche Server-URL plus /oidc/callback."))),
+		elem.Button(attrs.Props{attrs.Type: submitType, attrs.Class: "btn btn-primary"}, i18nText("Einrichtung abschließen")),
 	))
 
 	return adminDocument("/admin", "Einrichtung · Meshora", "app",
@@ -72,16 +72,16 @@ func setupPassword(label, name string, required bool) *elem.Element {
 	}
 
 	return elem.Div(attrs.Props{attrs.Class: "field"},
-		elem.Label(attrs.Props{attrs.For: "setup-" + name}, elem.Text(label)), elem.Input(props))
+		elem.Label(attrs.Props{attrs.For: "setup-" + name}, i18nText(label)), elem.Input(props))
 }
 
 // InitialSetupDone refreshes through the handoff until the normal server is ready.
 func InitialSetupDone() *elem.Element {
 	page := adminDocument("/admin", "Einrichtung abgeschlossen · Meshora", "auth",
 		elem.Main(attrs.Props{attrs.Class: "auth-card"}, brand("Einrichtung"),
-			elem.H1(nil, elem.Text("Einrichtung abgeschlossen")),
-			elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text("Meshora startet jetzt mit deinen Einstellungen. Du wirst automatisch zur Anmeldung weitergeleitet.")),
-			elem.A(attrs.Props{attrs.Href: html.EscapeString("/setup"), attrs.Class: "btn btn-primary"}, elem.Text("Zur Anmeldung"))))
+			elem.H1(nil, i18nText("Einrichtung abgeschlossen")),
+			elem.P(attrs.Props{attrs.Class: "muted"}, i18nText("Meshora startet jetzt mit deinen Einstellungen. Du wirst automatisch zur Anmeldung weitergeleitet.")),
+			elem.A(attrs.Props{attrs.Href: html.EscapeString("/setup"), attrs.Class: "btn btn-primary"}, i18nText("Zur Anmeldung"))))
 	// The meta refresh works without JavaScript and under the strict admin CSP.
 	head, ok := page.Children[0].(*elem.Element)
 	if ok {

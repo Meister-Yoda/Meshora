@@ -205,13 +205,19 @@ body.public {
   letter-spacing: -0.01em;
 }
 
-.brand-mark {
-  width: 38px;
-  height: 38px;
-  flex: none;
-  border-radius: 11px;
-  box-shadow: 0 6px 18px rgba(10, 132, 255, 0.25);
+.brand-logo {
+  display: block;
+  width: 192px;
+  max-width: 100%;
+  flex: 0 1 192px;
 }
+
+.brand-logo img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
 
 .brand-tag {
   padding: 2px 8px;
@@ -409,4 +415,43 @@ body.public {
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* Native language controls remain keyboard accessible without scripts. */
+.language-switcher {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  margin: 12px auto 20px;
+  padding: 4px;
+  width: max-content;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+}
+.language-switcher a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 6px 16px;
+  color: var(--text);
+  border-radius: 999px;
+  text-decoration: none;
+}
+html[lang="de"] .language-switcher a[lang="de"],
+html[lang="en"] .language-switcher a[lang="en"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 650;
+}
+.language-switcher a:hover {
+  background: var(--accent-soft);
+}
+.language-switcher a:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
 }

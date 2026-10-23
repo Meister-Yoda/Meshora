@@ -179,7 +179,7 @@ func TestDashboardRequiresLogin(t *testing.T) {
 
 	resp, _ := env.get(env.client, "/admin/")
 	assert.Equal(t, http.StatusSeeOther, resp.StatusCode)
-	assert.Equal(t, "/admin/login", resp.Header.Get("Location"))
+	assert.Contains(t, resp.Header.Get("Location"), "/admin/login")
 }
 
 func TestStylesheetIsPublic(t *testing.T) {
@@ -449,4 +449,36 @@ func TestPendingPage(t *testing.T) {
 	_, overview := env.get(env.client, "/admin/")
 	assert.Contains(t, overview, `href="/admin/pending"`)
 	assert.Regexp(t, `Pending</div><div class="stat-value">2<`, overview)
+}
+
+func TestLanguageSwitchPersistsAndPreservesUserText(t *testing.T) {
+	env := newTestEnv(t)
+	resp, page := env.get(env.client, "/admin/login?lang=de")
+	assert.Equal(t, "de", resp.Header.Get("Content-Language"))
+	assert.Contains(t, page, `<html lang="de">`)
+	assert.Contains(t, page, ">Anmelden<")
+	assert.Contains(t, page, ">Benutzername<")
+	assert.NotContains(t, page, "<!--meshora-i18n-->")
+	resp, page = env.get(env.client, "/admin/login")
+	assert.Equal(t, "de", resp.Header.Get("Content-Language"))
+	assert.Contains(t, page, ">Anmelden<")
+	resp, page = env.get(env.client, "/admin/login?lang=en")
+	assert.Equal(t, "en", resp.Header.Get("Content-Language"))
+	assert.Contains(t, page, ">Sign in<")
+	// Browser language is used only in the absence of a saved selection.
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, env.server.URL+"/admin/login", nil)
+	require.NoError(t, err)
+	req.Header.Set("Accept-Language", "de-DE,de;q=0.9,en;q=0.5")
+	result, err := newClient(t).Do(req)
+	require.NoError(t, err)
+
+	defer result.Body.Close()
+
+	assert.Equal(t, "de", result.Header.Get("Content-Language"))
+
+	env.handler.activeOIDC = types.OIDCConfig{Issuer: "https://auth.example.com", ClientID: "meshora"}
+	env.handler.adminOIDCGroups = []string{"admins"}
+	env.handler.oidcButtonText = "Settings"
+	_, page = env.get(env.client, "/admin/login?lang=de")
+	assert.Contains(t, page, ">Settings</button>", "Custom button text is not a translation key")
 }

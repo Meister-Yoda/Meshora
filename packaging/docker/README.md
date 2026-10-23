@@ -1,5 +1,18 @@
 # Meshora starten und im Browser einrichten
 
+## Neu in v0.1.0-rc.5
+
+- Deutsch/English-Umschalter mit gespeicherter Sprachwahl.
+- Automatischer stiller Authentik-Login für Admins mit Rückfall auf das lokale Formular.
+- Admin-Zugriff an signierte Rollen und/oder Gruppen binden.
+- OIDC-Button im Admin-Panel frei beschriften; Änderungen gelten sofort.
+- Neues Meshora-Logo, Dunkelmodus-Variante und Symbol-Favicon.
+
+Die Einrichtung von Claims und Scopes beschreibt die
+[Admin-OIDC-Anleitung](https://github.com/Meister-Yoda/Meshora/blob/v0.1.0-rc.5/README.de.md#admin-anmeldung-mit-authentik).
+Bei OIDC-Problemen kann der lokale Admin-Login immer direkt unter
+`/admin/login?local=1` geöffnet werden.
+
 Benötigt werden Docker und Docker Compose v2 mit Linux-Containern
 (AMD64 oder ARM64).
 
@@ -83,7 +96,7 @@ Archive mit Prüfsummen. Beispiel:
 
 ```bash
 sha256sum --ignore-missing -c SHA256SUMS
-docker load -i meshora_v0.1.0-rc.4_linux_amd64.docker.tar.gz
+docker load -i meshora_v0.1.0-rc.5_linux_amd64.docker.tar.gz
 ```
 
 Für das lokal geladene Image `MESHORA_IMAGE=meshora` setzen.
