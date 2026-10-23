@@ -660,7 +660,7 @@ func (node *Node) PeerChangeFromMapRequest(req tailcfg.MapRequest) tailcfg.PeerC
 
 	// Compare endpoints using order-independent comparison
 	if EndpointsChanged(node.Endpoints, req.Endpoints) {
-		ret.Endpoints = req.Endpoints
+		ret.Endpoints = slices.Clone(req.Endpoints)
 	}
 
 	now := time.Now()

@@ -154,7 +154,7 @@ Inline-Styles oder externe Assets.
 
 ## Entwicklung
 
-Go 1.27.2 oder neuer; `nix develop` liefert die vollständige Toolchain.
+Go 1.27.3 oder neuer; `nix develop` liefert die vollständige Toolchain.
 Konventionen und Testverfahren stehen in [AGENTS.md](AGENTS.md).
 Verwende `make build`, `make test` und `make lint`. Unter Windows in WSL bauen.
 

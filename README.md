@@ -146,7 +146,7 @@ dashboard uses a strict CSP without scripts, inline styles or external assets.
 
 ## Development
 
-Go 1.27.2 or newer; `nix develop` provides the full toolchain. Read
+Go 1.27.3 or newer; `nix develop` provides the full toolchain. Read
 [AGENTS.md](AGENTS.md) for conventions and test procedures. Use `make build`,
 `make test`, and `make lint`. On Windows, build inside WSL.
 

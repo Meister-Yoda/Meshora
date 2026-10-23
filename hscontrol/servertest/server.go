@@ -39,16 +39,17 @@ type TestServer struct {
 type ServerOption func(*serverConfig)
 
 type serverConfig struct {
-	batchDelay       time.Duration
-	bufferedChanSize int
-	ephemeralTimeout time.Duration
-	nodeExpiry       time.Duration
-	batcherWorkers   int
-	taildropEnabled  bool
-	logTailEnabled   bool
-	realListener     bool
-	magicDNSDomain   string
-	dnsResolvers     []string
+	batchDelay            time.Duration
+	bufferedChanSize      int
+	ephemeralTimeout      time.Duration
+	nodeExpiry            time.Duration
+	batcherWorkers        int
+	nodeStoreBatchTimeout time.Duration
+	taildropEnabled       bool
+	logTailEnabled        bool
+	realListener          bool
+	magicDNSDomain        string
+	dnsResolvers          []string
 }
 
 func defaultServerConfig() *serverConfig {
@@ -76,6 +77,11 @@ func WithBufferedChanSize(n int) ServerOption {
 // [types.DefaultBatcherWorkers] to match production concurrency.
 func WithBatcherWorkers(n int) ServerOption {
 	return func(c *serverConfig) { c.batcherWorkers = n }
+}
+
+// WithNodeStoreBatchTimeout overrides the server's default write-batch wait.
+func WithNodeStoreBatchTimeout(d time.Duration) ServerOption {
+	return func(c *serverConfig) { c.nodeStoreBatchTimeout = d }
 }
 
 // WithEphemeralTimeout sets the ephemeral node inactivity timeout.
@@ -167,6 +173,7 @@ func NewServer(tb testing.TB, opts ...ServerOption) *TestServer {
 			BatchChangeDelay:               sc.batchDelay,
 			BatcherWorkers:                 sc.batcherWorkers,
 			NodeMapSessionBufferedChanSize: sc.bufferedChanSize,
+			NodeStoreBatchTimeout:          sc.nodeStoreBatchTimeout,
 		},
 	}
 
@@ -188,6 +195,14 @@ func NewServer(tb testing.TB, opts ...ServerOption) *TestServer {
 	if err != nil {
 		tb.Fatalf("servertest: NewHeadscale: %v", err)
 	}
+
+	// Registered first so clients, HTTP, and background subsystems stop first.
+	tb.Cleanup(func() {
+		err := app.GetState().Close()
+		if err != nil {
+			tb.Errorf("servertest: close state: %v", err)
+		}
+	})
 
 	// Set a minimal DERP map so MapResponse generation works.
 	app.GetState().SetDERPMap(&tailcfg.DERPMap{

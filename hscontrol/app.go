@@ -104,7 +104,10 @@ type Headscale struct {
 	extraRecordMan *dns.ExtraRecordsMan
 	authProvider   AuthProvider
 	mapBatcher     *mapper.Batcher
+	adminUI        *webui.Handler
 
+	// One per long-poll session, held through its Disconnect cleanup, so
+	// shutdown can close state after waiting on it.
 	clientStreamsOpen sync.WaitGroup
 }
 
@@ -152,8 +155,8 @@ func NewHeadscale(cfg *types.Config) (*Headscale, error) {
 	ephemeralGC := db.NewEphemeralGarbageCollector(func(ni types.NodeID) {
 		node, ok := app.state.GetNodeByID(ni)
 		if !ok {
-			log.Error().Uint64("node.id", ni.Uint64()).Msg("ephemeral node deletion failed")
-			log.Debug().Caller().Uint64("node.id", ni.Uint64()).Msg("ephemeral node deletion failed because node not found in NodeStore")
+			// A delete that raced this timer already did its job.
+			log.Debug().Caller().Uint64("node.id", ni.Uint64()).Msg("ephemeral node already deleted, skipping garbage collection")
 
 			return
 		}
@@ -509,7 +512,11 @@ func (h *Headscale) createRouter(apiV1Mux, apiV2Mux http.Handler) *chi.Mux {
 	}
 
 	if h.cfg.WebAdmin.Enabled {
-		webui.New(h.state, h.cfg, h.Change).Routes(r)
+		if h.adminUI == nil {
+			h.adminUI = webui.New(h.state, h.cfg, h.Change)
+		}
+
+		h.adminUI.Routes(r)
 	}
 
 	r.Get("/apple", h.AppleConfigMessage)
@@ -978,6 +985,15 @@ func (h *Headscale) Serve() error {
 				info("closing socket listener")
 				socketListener.Close()
 
+				// The OIDC state cache runs its own TTL sweeper goroutine.
+				if p, ok := h.authProvider.(*AuthProviderOIDC); ok {
+					p.authCache.Close()
+				}
+
+				if h.adminUI != nil {
+					h.adminUI.Close()
+				}
+
 				// Close state connections
 				info("closing state and database")
 
@@ -1174,6 +1190,14 @@ func readOrCreatePrivateKey(path string) (*key.MachinePrivate, error) {
 // All change should be enqueued here and empty will be automatically
 // ignored.
 func (h *Headscale) Change(cs ...change.Change) {
+	// Every delete path publishes its removal here; a deleted node's
+	// inactivity timer has nothing left to collect.
+	for _, c := range cs {
+		for _, id := range c.DeletedNodes {
+			h.ephemeralGC.Cancel(id)
+		}
+	}
+
 	h.mapBatcher.AddWork(slices.Concat(cs, h.state.DrainSelfRefreshes())...)
 }
 
@@ -1218,14 +1242,17 @@ func (h *Headscale) SetServerURLForTest(tb testing.TB, url string) {
 }
 
 // StartBatcherForTest initialises and starts the map response batcher.
-// It registers a cleanup function on tb to stop the batcher.
+// It registers a cleanup function on tb to stop the batcher and wait for map sessions.
 // It panics when called outside of tests.
 func (h *Headscale) StartBatcherForTest(tb testing.TB) {
 	tb.Helper()
 
 	h.mapBatcher = mapper.NewBatcherAndMapper(h.cfg, h.state)
 	h.mapBatcher.Start()
-	tb.Cleanup(func() { h.mapBatcher.Close() })
+	tb.Cleanup(func() {
+		h.mapBatcher.Close()
+		h.clientStreamsOpen.Wait()
+	})
 }
 
 // MapBatcher returns the map response batcher (for test use).

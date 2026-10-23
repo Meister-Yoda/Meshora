@@ -1,12 +1,15 @@
 package webui
 
 import (
+	"bytes"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
 	"regexp"
+	"runtime"
+	"runtime/pprof"
 	"strings"
 	"sync"
 	"testing"
@@ -83,6 +86,7 @@ func newTestEnv(t *testing.T) *testEnv {
 
 		env.changes = append(env.changes, cs...)
 	})
+	t.Cleanup(env.handler.Close)
 	env.handler.Routes(r)
 
 	env.server = httptest.NewServer(r)
@@ -481,4 +485,35 @@ func TestLanguageSwitchPersistsAndPreservesUserText(t *testing.T) {
 	env.handler.oidcButtonText = "Settings"
 	_, page = env.get(env.client, "/admin/login?lang=de")
 	assert.Contains(t, page, ">Settings</button>", "Custom button text is not a translation key")
+}
+
+func TestCloseStopsDashboardCacheSweepers(t *testing.T) {
+	stack := make([]byte, 64)
+	n := runtime.Stack(stack, false)
+	gid := strings.Fields(string(stack[:n]))[1]
+	count := func() int {
+		var out bytes.Buffer
+
+		require.NoError(t, pprof.Lookup("goroutine").WriteTo(&out, 2))
+
+		total := 0
+
+		for g := range strings.SplitSeq(out.String(), "\n\n") {
+			if strings.Contains(g, "golang-lru/v2/expirable") &&
+				strings.Contains(g, " in goroutine "+gid+"\n") {
+				total++
+			}
+		}
+
+		return total
+	}
+	baseline := count()
+	h := New(nil, &types.Config{WebAdmin: types.WebAdminConfig{SessionTTL: time.Hour}}, nil)
+	t.Cleanup(h.Close)
+	require.Equal(t, baseline+3, count())
+
+	h.Close()
+	h.Close()
+	assert.Eventually(t, func() bool { return count() == baseline },
+		5*time.Second, 10*time.Millisecond)
 }

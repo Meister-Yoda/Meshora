@@ -63,7 +63,9 @@ func TestAuthErrorTemplate(t *testing.T) {
 
 			// Verify SVG elements are present
 			assert.Contains(t, html, "<svg")
-			assert.Contains(t, html, "class=\"brand-mark\"")
+			assert.Contains(t, html, "class=\"brand-logo\"")
+			assert.Contains(t, html, "src=\"/assets/meshora-logo.png\"")
+			assert.Contains(t, html, "alt=\"Meshora\"")
 			assert.Contains(t, html, "id=\"error-icon\"")
 
 			// Verify no success checkbox icon
@@ -128,7 +130,9 @@ func TestAuthSuccessTemplate(t *testing.T) {
 
 			// Verify SVG elements are present
 			assert.Contains(t, html, "<svg")
-			assert.Contains(t, html, "class=\"brand-mark\"")
+			assert.Contains(t, html, "class=\"brand-logo\"")
+			assert.Contains(t, html, "src=\"/assets/meshora-logo.png\"")
+			assert.Contains(t, html, "alt=\"Meshora\"")
 			assert.Contains(t, html, "id=\"checkbox\"")
 		})
 	}

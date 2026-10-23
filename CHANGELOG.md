@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## Meshora unreleased
+
+- Sync selected Headscale stability fixes through upstream `30ff8df9`.
+- Handle database-open errors and escape PostgreSQL connection parameters.
+- Fix request-memory ownership, policy refresh ordering and DNS updates after node renames.
+- Coalesce peer updates, bound pending work and retry slow map sessions without premature disconnects.
+- Finish map-session cleanup and stop authentication-cache sweepers during shutdown.
+- Update Go builds to 1.27.3 and align Tailscale, SQLite and cache dependencies.
+- Keep DNS-01 node certificates and the CertMagic migration deferred.
+
 ## Meshora v0.1.0-rc.5 (2026-10-23)
 
 - Add German/English UI selection with a saved language preference.

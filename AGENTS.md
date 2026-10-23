@@ -66,7 +66,7 @@ similar lines of code is better than a premature abstraction.
 ## Quick Start
 
 ```bash
-# Enter the nix dev shell (Go 1.27.2, buf, golangci-lint, prek)
+# Enter the nix dev shell (Go 1.27.3, buf, golangci-lint, prek)
 nix develop
 
 # Full development workflow: fmt + lint + test + build
@@ -82,7 +82,10 @@ make clean           # remove build artefacts
 
 # Direct go test invocations
 go test ./...
-go test -race ./...
+CGO_ENABLED=1 go test -race ./...
+
+# CI race check
+nix build -L .#checks.x86_64-linux.gorace
 
 # Integration tests — read cmd/hi/README.md first
 go run ./cmd/hi doctor
@@ -93,8 +96,11 @@ go run ./tools/bump plan     # what is stale, changes nothing
 go run ./tools/bump verify   # do the pins still agree
 ```
 
-Go 1.27.2 minimum (per `go.mod:3`). `nix develop` pins the exact toolchain
+Go 1.27.3 minimum (per `go.mod:3`). `nix develop` pins the exact toolchain
 used in CI.
+
+The dev shell exports `CGO_ENABLED=0`; `-race` needs cgo, and CI runs the
+`gorace` flake check (package selection in `flake.nix`).
 
 ## Pre-Commit with prek
 
@@ -304,8 +310,9 @@ a broken one.
 - **Protobuf regeneration**: changes under `proto/` require
   `make generate` (which runs `buf generate`) and should land in a
   **separate commit** from the callers that use the regenerated types.
-- **Formatting** is enforced by `golangci-lint` with `golines` (width 88)
-  and `gofumpt`. Run `make fmt` or rely on the pre-commit hook.
+- **Formatting** is enforced by the `golangci-lint` formatters in
+  `.golangci.yaml` (`gofumpt`, `gci`, `goimports`). No line-length limit is
+  enforced. Run `make fmt` or rely on the pre-commit hook.
 - **Logging** uses `zerolog`. Prefer single-line chains
   (`log.Info().Str(...).Msg(...)`). For 4+ fields or conditional fields,
   build incrementally and **reassign** the event variable:

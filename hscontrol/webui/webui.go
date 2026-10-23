@@ -159,6 +159,13 @@ func New(st *state.State, cfg *types.Config, notify func(...change.Change)) *Han
 	}
 }
 
+// Close stops the dashboard caches' background TTL sweepers after HTTP shutdown.
+func (h *Handler) Close() {
+	h.oidcFlows.Close()
+	h.sessions.Close()
+	h.failures.Close()
+}
+
 // Routes mounts the dashboard on r under [BasePath].
 func (h *Handler) Routes(r chi.Router) {
 	r.Get("/setup", func(w http.ResponseWriter, r *http.Request) {
