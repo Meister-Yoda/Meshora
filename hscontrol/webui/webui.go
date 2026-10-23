@@ -211,6 +211,7 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Post("/keys/{id}/expire", h.expireKey)
 
 			r.Get("/settings", h.settingsPage)
+			r.Get("/settings/{section}", h.settingsPage)
 			r.Post("/settings/oidc", h.saveOIDCSettings)
 			r.Post("/settings/oidc-button", h.saveOIDCButtonText)
 

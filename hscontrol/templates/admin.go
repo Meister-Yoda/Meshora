@@ -595,6 +595,7 @@ func adminShell(base, username, csrf, title string, flash *AdminFlash, content .
 			),
 			elem.Div(
 				attrs.Props{attrs.Class: "account"},
+				languageSwitcher(),
 				elem.Span(attrs.Props{attrs.Class: "avatar", "aria-hidden": "true"}, elem.Text(initial)),
 				elem.Span(attrs.Props{attrs.Class: "account-name"}, elem.Text(username)),
 				elem.Form(
@@ -611,21 +612,42 @@ func adminShell(base, username, csrf, title string, flash *AdminFlash, content .
 
 	return adminDocument(base, title+" · Meshora", "app",
 		topbar,
-		elem.Nav(
-			attrs.Props{attrs.Class: "nav", "aria-label": "Main"},
-			navLink(base+"/", "Overview", title == "Overview"),
-			navLink(base+"/users", "Users", title == "Users"),
-			navLink(base+"/nodes", "Nodes", title == "Nodes"),
-			navLink(base+"/pending", "Pending", title == "Pending"),
-			navLink(base+"/keys", "Keys", title == "Keys"),
-			navLink(base+"/settings", "Settings", title == "Settings"),
-		),
-		elem.Main(attrs.Props{attrs.Class: "content"}, append([]elem.Node{flashBanner(flash)}, content...)...),
-		elem.Footer(attrs.Props{attrs.Class: "app-footer"}, poweredBy()...),
+		elem.Div(attrs.Props{attrs.Class: "workspace"},
+			elem.Aside(attrs.Props{attrs.Class: "sidebar"}, mainNavigation(base, title)),
+			elem.Div(attrs.Props{attrs.Class: "workspace-main"},
+				elem.Details(attrs.Props{attrs.Class: "mobile-navigation"},
+					elem.Summary(nil, i18nText("Navigation"), elem.Span(attrs.Props{"aria-hidden": "true"}, elem.Text("☰"))),
+					mainNavigation(base, title)),
+				elem.Main(attrs.Props{attrs.Class: "content", attrs.ID: "main-content"}, append([]elem.Node{flashBanner(flash)}, content...)...),
+				elem.Footer(attrs.Props{attrs.Class: "app-footer"}, poweredBy()...))),
 	)
 }
 
+func mainNavigation(base, current string) elem.Node {
+	items := []elem.Node{
+		elem.P(attrs.Props{attrs.Class: "sidebar-label"}, i18nText("Workspace")),
+		navLink(base+"/", "Overview", current == "Overview"),
+		navLink(base+"/users", "Users", current == "Users"),
+		navLink(base+"/nodes", "Nodes", current == "Nodes"),
+		navLink(base+"/pending", "Pending", current == "Pending"),
+		navLink(base+"/keys", "Keys", current == "Keys"),
+		elem.P(attrs.Props{attrs.Class: "sidebar-label"}, i18nText("Administration")),
+		navLink(base+"/settings", "Settings", current == "Settings"),
+	}
+	if current == "Settings" {
+		items = append(items, elem.Div(attrs.Props{attrs.Class: "settings-subnav"},
+			elem.A(attrs.Props{attrs.Href: base + "/settings/provider"}, i18nText("Identity provider")),
+			elem.A(attrs.Props{attrs.Href: base + "/settings/access"}, i18nText("Access rules")),
+			elem.A(attrs.Props{attrs.Href: base + "/settings/appearance"}, i18nText("Appearance"))))
+	}
+
+	return elem.Nav(attrs.Props{attrs.Class: "side-nav", "aria-label": "Main / Hauptmenü"}, items...)
+}
+
 func adminDocument(base, title, bodyClass string, body ...elem.Node) *elem.Element {
+	if bodyClass == "auth" && len(body) > 0 {
+		body = append([]elem.Node{body[0], languageSwitcher()}, body[1:]...)
+	}
 	return elem.Html(
 		attrs.Props{attrs.Lang: "en"},
 		elem.Head(
@@ -642,7 +664,7 @@ func adminDocument(base, title, bodyClass string, body ...elem.Node) *elem.Eleme
 			}),
 		),
 		elem.Body(attrs.Props{attrs.Class: bodyClass, "translate": "no"},
-			append([]elem.Node{languageSwitcher(), elem.Raw(meshoraBackdrop)}, body...)...),
+			append([]elem.Node{elem.Raw(meshoraBackdrop)}, body...)...),
 	)
 }
 
@@ -676,7 +698,17 @@ func navLink(href, label string, current bool) *elem.Element {
 		props["aria-current"] = "page"
 	}
 
-	return elem.A(props, i18nText(label))
+	paths := map[string]string{
+		"Overview": "M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z",
+		"Users":    "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8 M20 21v-2a4 4 0 0 0-3-3.87 M16 3.13a4 4 0 0 1 0 7.75",
+		"Nodes":    "M3 4h18v12H3z M8 21h8 M12 16v5",
+		"Pending":  "M12 8v4l3 2 M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0",
+		"Keys":     "M15 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10 M10 12H2 M5 12v4 M8 12v3",
+		"Settings": "M4 6h16 M4 12h16 M4 18h16 M8 3v6 M16 9v6 M10 15v6",
+	}
+	icon := `<svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="` + paths[label] + `"/></svg>`
+
+	return elem.A(props, elem.Raw(icon), i18nText(label))
 }
 
 func statCard(href, label string, value int, hint elem.Node) *elem.Element {

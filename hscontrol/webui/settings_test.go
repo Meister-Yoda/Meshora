@@ -45,7 +45,9 @@ oidc:
 	assert.Equal(t, "/admin/settings", location)
 	assert.Contains(t, page, "Settings saved.")
 	assert.Contains(t, page, "Restart required")
-	assert.Contains(t, page, "http://localhost:8080/oidc/callback")
+
+	_, callbacks := env.get(env.client, "/admin/settings/provider")
+	assert.Contains(t, callbacks, "http://localhost:8080/oidc/callback")
 	assert.Contains(t, page, `type="password"`)
 	assert.NotContains(t, page, secret)
 	assert.NotContains(t, location, secret)
@@ -231,11 +233,14 @@ oidc:
 	csrf := env.signedIn()
 	form := url.Values{
 		"issuer": {settingsIssuer}, "client_id": {"meshora"},
-		"admin_groups": {" meshora-admins, operators, "},
+		"admin_groups":     {" meshora-admins, operators, "},
+		"settings_section": {"access"},
 	}
 	_, page := env.action(csrf, "/admin/settings/oidc", form)
 	assert.Contains(t, page, "meshora-admins, operators")
-	assert.Contains(t, page, "/admin/oidc/callback")
+
+	_, callbacks := env.get(env.client, "/admin/settings/provider")
+	assert.Contains(t, callbacks, "/admin/oidc/callback")
 
 	_, document, _, err := readOIDCSettings(path)
 	require.NoError(t, err)
@@ -278,7 +283,7 @@ web_admin:
 	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
 
 	label := `Company SSO <script>alert("x")</script>`
-	_, page := env.action(csrf, "/admin/settings/oidc-button", url.Values{"button_text": {label}})
+	_, page := env.action(csrf, "/admin/settings/oidc-button", url.Values{"button_text": {label}, "settings_section": {"appearance"}})
 	assert.Contains(t, page, "active immediately")
 	assert.NotContains(t, page, "<script>")
 	assert.Contains(t, page, "&lt;script&gt;")
@@ -367,4 +372,27 @@ oidc:
 	current, err := os.ReadFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, previous, current)
+}
+
+func TestSettingsSubpages(t *testing.T) {
+	env, _ := settingsTestEnv(t, "server_url: http://localhost:8080\n")
+	env.signedIn()
+
+	for _, tc := range []struct{ section, want, absent string }{
+		{"provider", `id="f-issuer"`, `id="f-admin_roles"`},
+		{"access", `id="f-admin_roles"`, `id="f-issuer"`},
+		{"appearance", `id="f-button_text"`, `id="f-admin_roles"`},
+	} {
+		resp, page := env.get(env.client, "/admin/settings/"+tc.section)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.Contains(t, page, tc.want)
+		assert.NotContains(t, page, tc.absent)
+		assert.Contains(t, page, `id="settings-`+tc.section+`"`)
+	}
+
+	resp, _ := env.get(env.client, "/admin/settings/callbacks")
+	assert.Equal(t, http.StatusSeeOther, resp.StatusCode)
+	assert.Equal(t, "/admin/settings/provider", resp.Header.Get("Location"))
+	resp, _ = env.get(env.client, "/admin/settings/unknown")
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 }

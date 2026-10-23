@@ -10,6 +10,8 @@ import (
 	"github.com/chasefleming/elem-go/attrs"
 )
 
+const inputTypeHidden = "hidden"
+
 // Pages and form helpers for the dashboard actions. The same rules as in
 // admin.go apply: classes only, and every attribute value carrying user
 // input goes through html.EscapeString. Form actions and links are passed as
@@ -403,6 +405,7 @@ func AdminConfirm(info AdminPageInfo, c AdminConfirmInfo) *elem.Element {
 
 // AdminOIDCSettings contains public settings only; secrets never enter templates.
 type AdminOIDCSettings struct {
+	Section          string
 	AdminGroups      string
 	AdminRoles       string
 	RolesClaim       string
@@ -439,27 +442,34 @@ func AdminSettings(info AdminPageInfo, settings AdminOIDCSettings) *elem.Element
 		secretProps[attrs.Required] = "true"
 	}
 
-	var form elem.Node = elem.P(attrs.Props{attrs.Class: "muted"},
-		i18nText("Diese Instanz benötigt eine lesbare YAML-Konfigurationsdatei, um Einstellungen hier zu speichern."))
+	var form elem.Node = elem.P(attrs.Props{attrs.Class: "muted"}, i18nText("This instance needs a readable YAML configuration file to save settings here."))
 	if settings.Writable {
-		form = postForm(info, "/settings/oidc", "stack",
-			textField("Issuer-URL", "issuer", settings.Issuer, true),
-			elem.P(attrs.Props{attrs.Class: "muted"}, i18nText("Authentik: https://auth.example.com/application/o/meshora/")),
-			textField("Client-ID", "client_id", settings.ClientID, true),
-			textField("Authentik-Gruppen mit Admin-Zugriff", "admin_groups", settings.AdminGroups, false),
-			textField("Admin roles", "admin_roles", settings.AdminRoles, false),
-			textField("Roles claim", "roles_claim", settings.RolesClaim, false),
-			elem.P(attrs.Props{attrs.Class: "muted"}, i18nText("Comma-separated admin roles from a signed ID-token claim (default: roles). If both groups and roles are configured, both restrictions must match. Empty groups and roles disable admin OIDC.")),
-			elem.P(attrs.Props{attrs.Class: "muted"}, i18nText("Comma-separated groups, e.g. meshora-admins. Device OIDC groups never grant admin access.")),
-			elem.Div(attrs.Props{attrs.Class: "field"},
-				elem.Label(attrs.Props{attrs.For: "f-client_secret"}, i18nText("Client-Secret")),
-				elem.Input(secretProps),
-				elem.P(attrs.Props{attrs.ID: "secret-hint", attrs.Class: "muted"}, i18nText(hint)),
-			),
-			elem.P(attrs.Props{attrs.Class: "muted"},
-				i18nText("Speichern ändert die Anmeldung nach einem Neustart. Bestehende Zugriffsbeschränkungen und OIDC-Optionen bleiben erhalten.")),
-			submitButton("Speichern", "btn-primary"),
-		)
+		form = postForm(info, "/settings/oidc", "settings-provider-form",
+			elem.Section(attrs.Props{attrs.Class: "card settings-section", attrs.ID: "provider"},
+				elem.P(attrs.Props{attrs.Class: "settings-eyebrow"}, i18nText("01 / Connection")),
+				elem.H2(nil, i18nText("Identity provider")),
+				elem.P(attrs.Props{attrs.Class: "muted"}, i18nText("Connect Authentik to handle device and administrator sign-in.")),
+				elem.Div(attrs.Props{attrs.Class: "settings-fields"},
+					textField("Issuer URL", "issuer", settings.Issuer, true),
+					textField("Client ID", "client_id", settings.ClientID, true)),
+				elem.Div(attrs.Props{attrs.Class: "field"},
+					elem.Label(attrs.Props{attrs.For: "f-client_secret"}, i18nText("Client secret")),
+					elem.Input(secretProps),
+					elem.P(attrs.Props{attrs.ID: "secret-hint", attrs.Class: "muted"}, i18nText(hint)))),
+			elem.Section(attrs.Props{attrs.Class: "card settings-section", attrs.ID: "access"},
+				elem.P(attrs.Props{attrs.Class: "settings-eyebrow"}, i18nText("02 / Permissions")),
+				elem.H2(nil, i18nText("Admin access")),
+				elem.P(attrs.Props{attrs.Class: "muted"}, i18nText("Choose which Authentik identities can administer this instance.")),
+				elem.Div(attrs.Props{attrs.Class: "settings-fields"},
+					textField("Authentik groups with admin access", "admin_groups", settings.AdminGroups, false),
+					textField("Admin roles", "admin_roles", settings.AdminRoles, false)),
+				elem.P(attrs.Props{attrs.Class: "settings-note"}, i18nText("Use comma-separated names. If both groups and roles are set, both must match. Leave both empty to disable admin OIDC.")),
+				elem.Details(attrs.Props{attrs.Class: "settings-advanced"},
+					elem.Summary(nil, i18nText("Advanced claim mapping")),
+					textField("Roles claim", "roles_claim", settings.RolesClaim, false))),
+			elem.Div(attrs.Props{attrs.Class: "settings-save"},
+				elem.P(attrs.Props{attrs.Class: "muted"}, i18nText("Provider and access changes require a restart.")),
+				submitButton("Save sign-in settings", "btn-primary")))
 	}
 
 	var buttonForm elem.Node = elem.P(attrs.Props{attrs.Class: "muted"}, i18nText("Zum Speichern wird eine beschreibbare YAML-Configuration benoetigt."))
@@ -471,14 +481,53 @@ func AdminSettings(info AdminPageInfo, settings AdminOIDCSettings) *elem.Element
 		)
 	}
 
+	section := settings.Section
+	if section == "" || section == "callbacks" {
+		section = "provider"
+	}
+
+	title := "Identity provider"
+
+	content := form
+
+	switch section {
+	case "appearance":
+		title = "Appearance"
+
+		if f, ok := buttonForm.(*elem.Element); ok {
+			f.Children = append(f.Children, elem.Input(attrs.Props{attrs.Type: inputTypeHidden, attrs.Name: "settings_section", attrs.Value: section}))
+		}
+
+		content = cardSection("OIDC login button", "Customize the button label on the admin sign-in page.", buttonForm)
+	default:
+		index := 1
+		if section == "access" {
+			index = 2
+			title = "Access rules"
+		}
+
+		if f, ok := form.(*elem.Element); ok && settings.Writable {
+			f.Children = []elem.Node{
+				f.Children[0], f.Children[index], f.Children[3],
+				elem.Input(attrs.Props{attrs.Type: inputTypeHidden, attrs.Name: "settings_section", attrs.Value: section}),
+			}
+			if section == "access" {
+				f.Children = append(f.Children,
+					elem.Input(attrs.Props{attrs.Type: inputTypeHidden, attrs.Name: "issuer", attrs.Value: html.EscapeString(settings.Issuer)}),
+					elem.Input(attrs.Props{attrs.Type: inputTypeHidden, attrs.Name: "client_id", attrs.Value: html.EscapeString(settings.ClientID)}))
+			}
+		}
+	}
+
+	if section == "provider" {
+		content = elem.Div(attrs.Props{attrs.Class: "settings-primary"}, content,
+			cardSection("Redirect URLs", "Add these exact URLs to Authentik using strict matching.",
+				elem.Div(attrs.Props{attrs.Class: "callback-item"}, elem.H3(nil, i18nText("Administrators")), elem.Pre(attrs.Props{attrs.Class: "codeblock"}, elem.Code(nil, elem.Text(settings.AdminCallbackURL)))),
+				elem.Div(attrs.Props{attrs.Class: "callback-item"}, elem.H3(nil, i18nText("Device registration")), elem.Pre(attrs.Props{attrs.Class: "codeblock"}, elem.Code(nil, elem.Text(settings.CallbackURL))))))
+	}
 	return info.shell("Settings",
-		pageHead("Einstellungen", "Authentik / OpenID Connect für die Anmeldung deiner Geräte."),
-		cardSection("Anmeldestatus", status),
-		cardSection("OIDC-Login-Button", "Passe die Beschriftung auf der Admin-Anmeldeseite an.", buttonForm),
-		cardSection("Authentik-Provider", "Die Client-Zugangsdaten findest du im OAuth2/OpenID-Connect-Provider von Authentik.", form),
-		cardSection("Rückleitungs-URL", "Diese URL in Authentik als Redirect-URI mit Strict-Abgleich eintragen.",
-			elem.Pre(attrs.Props{attrs.Class: "codeblock"}, elem.Code(nil, elem.Text(settings.CallbackURL)))),
-		cardSection("Admin-Redirect-URI", "In Authentik ebenfalls mit Strict-Abgleich eintragen. Der signierte ID-Token muss den groups-Claim mit den freigegebenen Gruppennamen enthalten.",
-			elem.Pre(attrs.Props{attrs.Class: "codeblock"}, elem.Code(nil, elem.Text(settings.AdminCallbackURL)))),
-	)
+		pageHead(title, "Manage sign-in, permissions and appearance."),
+		elem.Div(attrs.Props{attrs.Class: "settings-status", attrs.Role: "status"},
+			elem.Span(attrs.Props{attrs.Class: "settings-status-label"}, i18nText("Sign-in status")), elem.Span(nil, i18nText(status))),
+		elem.Div(attrs.Props{attrs.Class: "settings-page", attrs.ID: "settings-" + section}, content))
 }

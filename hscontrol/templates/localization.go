@@ -94,9 +94,19 @@ func RequestLanguage(r *http.Request) string {
 }
 
 func languageSwitcher() elem.Node {
-	return elem.Nav(attrs.Props{attrs.Class: "language-switcher", "aria-label": "Language / Sprache"},
-		elem.A(attrs.Props{attrs.Href: "?lang=de", "lang": "de", "hreflang": "de"}, elem.Text("Deutsch")),
-		elem.A(attrs.Props{attrs.Href: "?lang=en", "lang": "en", "hreflang": "en"}, elem.Text("English")),
+	const (
+		germanFlag  = `<svg class="language-flag" viewBox="0 0 24 16" aria-hidden="true"><path fill="#171717" d="M0 0h24v6H0z"/><path fill="#d52b30" d="M0 5.33h24v5.34H0z"/><path fill="#ffce32" d="M0 10.67h24V16H0z"/></svg>`
+		englishFlag = `<svg class="language-flag" viewBox="0 0 24 16" aria-hidden="true"><path fill="#173a79" d="M0 0h24v16H0z"/><path stroke="#fff" stroke-width="4" d="m0 0 24 16M24 0 0 16"/><path stroke="#cf243a" stroke-width="1.5" d="m0 0 24 16M24 0 0 16"/><path stroke="#fff" stroke-width="6" d="M12 0v16M0 8h24"/><path stroke="#cf243a" stroke-width="3" d="M12 0v16M0 8h24"/></svg>`
+	)
+
+	return elem.Div(attrs.Props{attrs.Class: "language-switcher"},
+		elem.Button(attrs.Props{attrs.Type: "button", attrs.Class: "language-trigger", "popovertarget": "language-options", "aria-label": "Sprache / Language"},
+			elem.Span(attrs.Props{attrs.Class: "language-current-de"}, elem.Raw(germanFlag), elem.Text("DE")),
+			elem.Span(attrs.Props{attrs.Class: "language-current-en"}, elem.Raw(englishFlag), elem.Text("EN")),
+			elem.Raw(`<svg class="language-chevron" viewBox="0 0 12 12" aria-hidden="true"><path d="m3 4.5 3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`)),
+		elem.Div(attrs.Props{attrs.ID: "language-options", attrs.Class: "language-options", "popover": "auto"},
+			elem.A(attrs.Props{attrs.Href: "?lang=de", "lang": "de", "hreflang": "de"}, elem.Raw(germanFlag), elem.Text("Deutsch")),
+			elem.A(attrs.Props{attrs.Href: "?lang=en", "lang": "en", "hreflang": "en"}, elem.Raw(englishFlag), elem.Text("English"))),
 	)
 }
 
@@ -478,4 +488,26 @@ var translations = [][2]string{
 	{"Registered as ", "Registriert als "},
 	{"Reauthenticated as ", "Erneut angemeldet als "},
 	{"Authorized as ", "Autorisiert als "},
+	{"Navigation", "Navigation"},
+	{"Workspace", "Arbeitsbereich"},
+	{"Administration", "Verwaltung"},
+	{"Identity provider", "Identitätsanbieter"},
+	{"Access rules", "Zugriffsrechte"},
+	{"Appearance", "Darstellung"},
+	{"Redirect URLs", "Rückleitungs-URLs"},
+	{"01 / Connection", "01 / Verbindung"},
+	{"02 / Permissions", "02 / Berechtigungen"},
+	{"03 / Appearance", "03 / Darstellung"},
+	{"Connect Authentik to handle device and administrator sign-in.", "Verbinde Authentik für die Anmeldung von Geräten und Administratoren."},
+	{"Admin access", "Admin-Zugriff"},
+	{"Choose which Authentik identities can administer this instance.", "Lege fest, welche Authentik-Benutzer diese Instanz verwalten dürfen."},
+	{"Use comma-separated names. If both groups and roles are set, both must match. Leave both empty to disable admin OIDC.", "Trenne Namen durch Kommas. Sind Gruppen und Rollen gesetzt, müssen beide passen. Lasse beide Listen leer, um Admin-OIDC zu deaktivieren."},
+	{"Advanced claim mapping", "Erweiterte Claim-Zuordnung"},
+	{"Provider and access changes require a restart.", "Änderungen an Anbieter und Zugriffsrechten benötigen einen Neustart."},
+	{"Save sign-in settings", "Anmeldeeinstellungen speichern"},
+	{"Manage sign-in, permissions and appearance.", "Verwalte Anmeldung, Zugriffsrechte und Darstellung."},
+	{"Add these exact URLs to Authentik using strict matching.", "Trage diese URLs in Authentik mit Strict-Abgleich ein."},
+	{"Administrators", "Administratoren"},
+	{"Local access", "Lokaler Zugang"},
+	{"Keep a local admin account available for recovery.", "Behalte ein lokales Admin-Konto für den Notfall."},
 }

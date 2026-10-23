@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/juanfont/headscale/hscontrol/templates"
 	"github.com/rs/zerolog/log"
 	"gopkg.in/yaml.v3"
@@ -29,11 +30,28 @@ type savedOIDCSettings struct {
 }
 
 func (h *Handler) settingsPage(w http.ResponseWriter, r *http.Request) {
+	section := chi.URLParam(r, "section")
+	if section == "callbacks" {
+		http.Redirect(w, r, h.publicPath+"/settings/provider", http.StatusSeeOther)
+		return
+	}
+
+	if section == "" {
+		section = "provider"
+	}
+
+	switch section {
+	case "provider", "access", "appearance":
+	default:
+		http.NotFound(w, r)
+		return
+	}
 	h.settingsMu.Lock()
 	defer h.settingsMu.Unlock()
 
 	settings := templates.AdminOIDCSettings{
-		Issuer: h.activeOIDC.Issuer, ClientID: h.activeOIDC.ClientID,
+		Section: section,
+		Issuer:  h.activeOIDC.Issuer, ClientID: h.activeOIDC.ClientID,
 		HasSecret:        h.activeOIDC.ClientSecret != "",
 		CallbackURL:      h.serverURL + "/oidc/callback",
 		AdminCallbackURL: h.serverURL + "/admin/oidc/callback",

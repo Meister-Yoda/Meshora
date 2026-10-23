@@ -44,6 +44,12 @@ var keyExpiries = []templates.AdminChoice{
 }
 
 func (h *Handler) redirect(w http.ResponseWriter, r *http.Request, path string, f *templates.AdminFlash) {
+	if path == "/settings" {
+		switch section := r.PostForm.Get("settings_section"); section {
+		case "provider", "access", "appearance", "callbacks":
+			path += "/" + section
+		}
+	}
 	if f != nil {
 		sessionFrom(r).setFlash(f)
 	}

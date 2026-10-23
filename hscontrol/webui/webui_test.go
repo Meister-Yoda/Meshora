@@ -372,7 +372,7 @@ func TestUsersPage(t *testing.T) {
 
 	resp, body := env.get(env.client, "/admin/users")
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	assert.Contains(t, body, `<a aria-current="page" href="/admin/users">Users</a>`)
+	assert.Regexp(t, `<a aria-current="page" href="/admin/users">.*?Users</a>`, body)
 	assert.Contains(t, body, "&lt;script&gt;alert(1)&lt;/script&gt;")
 	assert.Contains(t, body, ">OIDC<")
 	assert.Contains(t, body, `title="&#34;&gt;&lt;script&gt;`, "display name escaped in attribute")

@@ -59,7 +59,7 @@ func InitialSetup(info SetupInfo) *elem.Element {
 
 	return adminDocument("/admin", "Einrichtung · Meshora", "app",
 		elem.Header(attrs.Props{attrs.Class: "topbar"},
-			elem.Div(attrs.Props{attrs.Class: "topbar-inner"}, brand("Einrichtung"))),
+			elem.Div(attrs.Props{attrs.Class: "topbar-inner"}, brand("Einrichtung"), languageSwitcher())),
 		elem.Main(attrs.Props{attrs.Class: "content"}, children...),
 		elem.Footer(attrs.Props{attrs.Class: "app-footer"}, poweredBy()...))
 }
