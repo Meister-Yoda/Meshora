@@ -112,7 +112,9 @@ jobs:
           done
           docker buildx imagetools create -t "$image:$TAG" "$image:$TAG-amd64" "$image:$TAG-arm64"
           docker buildx imagetools inspect "$image:$TAG"
-          if [[ "$TAG" != *-* ]]; then
+          # Include prereleases; rerunning an older release must not move latest backwards.
+          newest_tag="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1 --json tagName --jq '.[0].tagName')"
+          if [ "$TAG" = "$newest_tag" ]; then
             docker buildx imagetools create -t "$image:latest" "$image:$TAG"
           fi
       - name: Attach GHCR Compose bundle
@@ -124,4 +126,4 @@ jobs:
           tar -czf /tmp/meshora-ghcr/meshora-compose-ghcr.tar.gz -C packaging/docker compose.yaml compose.traefik.yaml config.yaml README.md
           cd /tmp/meshora-ghcr
           sha256sum meshora-compose-ghcr.tar.gz > meshora-compose-ghcr.sha256
-          gh release upload "$TAG" meshora-compose-ghcr.tar.gz meshora-compose-ghcr.sha256 --repo "$GITHUB_REPOSITORY"
+          gh release upload "$TAG" meshora-compose-ghcr.tar.gz meshora-compose-ghcr.sha256 --repo "$GITHUB_REPOSITORY" --clobber
