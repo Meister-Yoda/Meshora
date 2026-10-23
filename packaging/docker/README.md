@@ -1,15 +1,15 @@
 # Meshora starten und im Browser einrichten
 
-## Neu in v0.1.0-rc.5
+## Neu in v0.1.0-rc.6
 
-- Deutsch/English-Umschalter mit gespeicherter Sprachwahl.
-- Automatischer stiller Authentik-Login für Admins mit Rückfall auf das lokale Formular.
-- Admin-Zugriff an signierte Rollen und/oder Gruppen binden.
-- OIDC-Button im Admin-Panel frei beschriften; Änderungen gelten sofort.
-- Neues Meshora-Logo, Dunkelmodus-Variante und Symbol-Favicon.
+- Seitennavigation und getrennte Einstellungen für Identitätsanbieter, Zugriff und Darstellung.
+- Rückleitungs-URLs beim Identitätsanbieter und kompakter Sprachumschalter mit Flaggen.
+- Headscale-Stabilitätskorrekturen für Datenbank, Policy-Updates und Client-Verbindungen.
+- Sauberer Shutdown einschließlich der Authentifizierungs- und Dashboard-Caches.
+- Aktualisierte Abhängigkeiten und Go 1.27.3; weiterhin Images für AMD64 und ARM64.
 
 Die Einrichtung von Claims und Scopes beschreibt die
-[Admin-OIDC-Anleitung](https://github.com/Meister-Yoda/Meshora/blob/v0.1.0-rc.5/README.de.md#admin-anmeldung-mit-authentik).
+[Admin-OIDC-Anleitung](https://github.com/Meister-Yoda/Meshora/blob/v0.1.0-rc.6/README.de.md#admin-anmeldung-mit-authentik).
 Bei OIDC-Problemen kann der lokale Admin-Login immer direkt unter
 `/admin/login?local=1` geöffnet werden.
 
@@ -96,7 +96,7 @@ Archive mit Prüfsummen. Beispiel:
 
 ```bash
 sha256sum --ignore-missing -c SHA256SUMS
-docker load -i meshora_v0.1.0-rc.5_linux_amd64.docker.tar.gz
+docker load -i meshora_v0.1.0-rc.6_linux_amd64.docker.tar.gz
 ```
 
 Für das lokal geladene Image `MESHORA_IMAGE=meshora` setzen.

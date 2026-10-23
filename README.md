@@ -9,15 +9,15 @@ managing users, devices, registrations and pre-auth keys.
 > Meshora is an independent fork, unaffiliated with Tailscale Inc. and the
 > Headscale project. Please report Meshora issues in this repository.
 
-## v0.1.0-rc.5
+## v0.1.0-rc.6
 
-- German and English interface, with a language switcher and saved preference.
-- Local admin accounts and Authentik/OpenID Connect admin sign-in.
-- Automatic silent OIDC sign-in when visiting the admin panel; failed attempts
-  show the normal login form without a redirect loop.
-- Admin access restricted by signed OIDC roles and/or groups.
-- Configurable OIDC button text, applied immediately without a restart.
-- Meshora wordmark and symbol favicon, including a dark-mode wordmark.
+- Sidebar navigation, with a collapsible menu on smaller screens.
+- Separate settings pages for identity provider, admin access and appearance.
+- OIDC callback URLs grouped with the identity provider settings.
+- Compact German/English flag dropdown with a saved language preference.
+- Selected Headscale fixes for database connections, policy updates, map sessions
+  and shutdown; Go builds updated to 1.27.3.
+- Authentik admin sign-in, role/group restrictions and local-login recovery.
 
 ## Start with Docker
 
@@ -33,7 +33,7 @@ least 12 characters. OIDC is optional and can also be configured later under
 **Settings**. The setup assistant saves the configuration and activates the
 server automatically. Existing installations keep their data and skip setup.
 
-The release image is `ghcr.io/meister-yoda/meshora:v0.1.0-rc.5`, for Linux
+The release image is `ghcr.io/meister-yoda/meshora:v0.1.0-rc.6`, for Linux
 AMD64 and ARM64. See the [Docker guide](packaging/docker/README.md) for volumes,
 reverse proxies and updates. Route a reverse proxy to **container port 8080**.
 

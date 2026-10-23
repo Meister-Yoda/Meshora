@@ -1,7 +1,11 @@
 # CHANGELOG
 
-## Meshora unreleased
+## Meshora v0.1.0-rc.6 (2026-10-24)
 
+- Replace the horizontal admin navigation with a responsive sidebar.
+- Split provider, admin access and appearance settings into separate pages.
+- Group OIDC callback URLs with the identity provider configuration.
+- Use a compact flag dropdown for German/English language selection.
 - Sync selected Headscale stability fixes through upstream `30ff8df9`.
 - Handle database-open errors and escape PostgreSQL connection parameters.
 - Fix request-memory ownership, policy refresh ordering and DNS updates after node renames.
