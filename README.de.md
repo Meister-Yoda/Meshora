@@ -12,11 +12,11 @@ für Benutzer, Geräte, Registrierungen, Vorab-Schlüssel und Netzwerkeinstellun
 ## v0.1.1-rc.1
 
 - Logische Netzwerkzonen mit Benutzern, Geräten und gerouteten IPv4-/IPv6-Subnetzen erstellen.
-- Zonen mit gerichteten Dienstfreigaben verbinden und Exits je Zone, Benutzer oder Gerät einschränken.
+- Freigaben in einer klickbaren Quelle-/Zielmatrix filtern und bearbeiten; Exits je Zone, Benutzer oder Gerät einschränken.
 - Neue Registrierungen aus eigenen Mesh-Adresspools versorgen; bestehende Geräte behalten ihre Adressen.
 - Öffentliche IPv6-Präfixe und feste Reservierungen verwalten; die Einrichtung auf Gateway und Client bleibt erforderlich.
 - Geprüfte Entwürfe vor der Aktivierung vergleichen, mit Konfliktschutz und standardmäßig gesperrtem Zugriff.
-- Betroffene Pakettests, Race-Checks, Lint und vollständiger Build sind bestanden. Browserdarstellung und Zonenverkehr mit echten Clients sind noch nicht geprüft.
+- Betroffene Pakettests, Race-Checks, Lint und vollständiger Build sind bestanden. Matrix-Darstellung, Kontrast und Fokus sind mit Chromium-Desktop-/Mobilansichten und Beispieldaten geprüft; Zonenverkehr mit echten Clients ist noch nicht geprüft.
 
 Die [Zonen-Anleitung](docs/network-zones.md) beschreibt Einrichtung, Policy-Übernahme und Grenzen.
 Diese Vorabversion verschiebt das Image-Tag `latest` nicht.

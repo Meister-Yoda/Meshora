@@ -3,6 +3,8 @@
 ## Neu in v0.1.1-rc.1
 
 - Zonen mit Benutzern, Geräten, gerouteten Subnetzen und gerichteten Dienstfreigaben.
+- Klickbare Zonenmatrix mit farbigen Freigaben, Filterung nach Zonenpaar und direkter Regelbearbeitung.
+- Aufklappbare Einstellungen, funktionierende Mehrfachauswahl und eine mobil verschiebbare Matrix mit festen Quellzonen.
 - Exit-Berechtigungen je Zone mit zusätzlichen Benutzer- und Geräteeinschränkungen.
 - Eigene IPv4-/IPv6-Mesh-Pools für neue Registrierungen; bestehende Adressen bleiben erhalten.
 - Öffentliche IPv6-Präfixe und feste Reservierungen als Inventar mit ausdrücklich erforderlicher Gateway-/Client-Einrichtung.
@@ -30,8 +32,10 @@ Die betroffenen Pakettests und vollständigen Race-Checks, Lint sowie der
 vollständige Build sind bestanden. Geprüft sind unter anderem gerichtete
 Freigaben, Exit-Ausblendung, Benutzer-/Geräteschnittmengen, Registrierungen,
 Neustarts, parallele Adressvergabe, IPv6-Reservierungen, CSRF und Versionskonflikte.
-Browserdarstellung und echter Tailscale-Client-Verkehr für die neuen Zonen sind
-noch nicht geprüft. Der Release-Workflow ergänzt einen Container-Starttest.
+Matrix-Darstellung, Kontrast, Fokus und mobiles Scrollen sind mit Chromium und
+Beispieldaten in Hell- und Dunkelansicht geprüft. Echter Tailscale-Client-Verkehr
+für die neuen Zonen ist noch nicht geprüft. Der Release-Workflow ergänzt einen
+Container-Starttest.
 
 Öffentliche IPv6-Reservierungen konfigurieren weder Gateway noch Client.
 Subnetzrouten müssen weiterhin angekündigt und genehmigt werden; erlaubte

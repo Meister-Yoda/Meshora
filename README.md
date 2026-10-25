@@ -12,11 +12,11 @@ managing users, devices, registrations, pre-auth keys and network settings.
 ## v0.1.1-rc.1
 
 - Create logical network zones with users, devices and routed IPv4/IPv6 subnets.
-- Connect zones with directed service permissions and limit exits per zone, user or device.
+- Use a clickable source/destination matrix to filter and edit zone permissions; limit exits per zone, user or device.
 - Assign new registrations from separate mesh address pools; existing devices keep their addresses.
 - Record public IPv6 prefixes and fixed reservations; gateway/client setup is still required.
 - Review validated drafts before activating them, with conflict protection and deny-by-default permissions.
-- Verified with affected package tests, race checks, lint and a full build. Browser rendering and real-client zone traffic are not yet verified.
+- Verified with affected package tests, race checks, lint and a full build. Matrix rendering, contrast and focus are checked with Chromium desktop/mobile fixtures; real-client zone traffic is not yet verified.
 
 See the [network zones guide](docs/network-zones.md) for setup, policy takeover and limits.
 This is a prerelease and does not update the `latest` image tag.

@@ -77,8 +77,15 @@ jobs:
           set -euo pipefail
           prerelease=()
           if [[ "$TAG" == *-* ]]; then prerelease+=(--prerelease --latest=false); fi
-          gh release create "$TAG" dist/* --verify-tag --title "Meshora $TAG" \
-            --notes-file packaging/docker/README.md "${prerelease[@]}"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --title "Meshora $TAG" --notes-file packaging/docker/README.md "${prerelease[@]}"
+          else
+            gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --verify-tag \
+              --target "$GITHUB_SHA" --title "Meshora $TAG" \
+              --notes-file packaging/docker/README.md "${prerelease[@]}"
+          fi
 
   registry:
     needs: release
