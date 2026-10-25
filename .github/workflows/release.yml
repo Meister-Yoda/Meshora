@@ -7,7 +7,7 @@ on:
       release_tag:
         description: Existing release tag to publish to GHCR
         required: true
-        default: v0.1.0-rc.8
+        default: v0.1.1-rc.1
 permissions:
   contents: write
 jobs:
@@ -76,7 +76,7 @@ jobs:
         run: |
           set -euo pipefail
           prerelease=()
-          if [[ "$TAG" == *-* ]]; then prerelease+=(--prerelease); fi
+          if [[ "$TAG" == *-* ]]; then prerelease+=(--prerelease --latest=false); fi
           gh release create "$TAG" dist/* --verify-tag --title "Meshora $TAG" \
             --notes-file packaging/docker/README.md "${prerelease[@]}"
 
@@ -112,9 +112,9 @@ jobs:
           done
           docker buildx imagetools create -t "$image:$TAG" "$image:$TAG-amd64" "$image:$TAG-arm64"
           docker buildx imagetools inspect "$image:$TAG"
-          # Include prereleases; rerunning an older release must not move latest backwards.
+          # Prereleases never move latest; rerunning older stable releases must not move it backwards.
           newest_tag="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1 --json tagName --jq '.[0].tagName')"
-          if [ "$TAG" = "$newest_tag" ]; then
+          if [[ "$TAG" != *-* ]] && [ "$TAG" = "$newest_tag" ]; then
             docker buildx imagetools create -t "$image:latest" "$image:$TAG"
           fi
       - name: Attach GHCR Compose bundle

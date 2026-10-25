@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## Meshora v0.1.1-rc.1 (2026-10-25)
+
+- Add logical network zones with user/device membership, routed subnets and directed service permissions.
+- Restrict exit availability by zone, user and device; hide unauthorized exit default routes from client network maps.
+- Allocate new devices from optional IPv4/IPv6 zone pools, with overlap checks, reserved-range exclusions, atomic dual-stack allocation and restart/backfill protection.
+- Manage routed public IPv6 prefixes and fixed address reservations; gateway/client provisioning remains manual.
+- Validate and save zone drafts separately from activation, preserve unrelated HuJSON and reject stale forms.
+- Keep tagged identity separate from user ownership and recompute membership for new and changed devices.
+- Verify affected package suites with race detection, lint and the complete build; browser rendering and real-client zone traffic remain unverified.
+- Publish this prerelease only under its versioned image tags; do not update Docker or GitHub latest.
+
 ## Meshora v0.1.0-rc.8 (2026-10-25)
 
 - Manage subnet routes and exit nodes centrally and on device details; approve/revoke IPv4 and IPv6 default routes together.

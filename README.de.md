@@ -9,14 +9,17 @@ für Benutzer, Geräte, Registrierungen, Vorab-Schlüssel und Netzwerkeinstellun
 > Meshora ist ein unabhängiger Fork und gehört weder zu Tailscale Inc. noch
 > zum Headscale-Projekt. Bitte melde Meshora-Probleme in diesem Repository.
 
-## v0.1.0-rc.8
+## v0.1.1-rc.1
 
-- Subnetzrouten und gemeinsame IPv4-/IPv6-Freigaben für Exit Nodes im Dashboard verwalten.
-- Gespeicherten und laufenden DNS-Zustand vergleichen; die maßgebliche YAML-Datei sicher bearbeiten.
-- HuJSON-Policies getrennt validieren, speichern und aktivieren, mit geladenen Snapshots und Konflikterkennung.
-- Kommentare erhalten und ungültige oder mehrdeutige Eingaben ohne Austausch der aktiven Policy abweisen.
-- Gerätefilter, Diagnose und geführte Anmeldung für Desktop und Mobilgeräte gemeinsam nutzen.
-- Mit echten isolierten Tailscale-Clients, Datenverbindungen und DNS-Auflösung nach Neustart geprüft.
+- Logische Netzwerkzonen mit Benutzern, Geräten und gerouteten IPv4-/IPv6-Subnetzen erstellen.
+- Zonen mit gerichteten Dienstfreigaben verbinden und Exits je Zone, Benutzer oder Gerät einschränken.
+- Neue Registrierungen aus eigenen Mesh-Adresspools versorgen; bestehende Geräte behalten ihre Adressen.
+- Öffentliche IPv6-Präfixe und feste Reservierungen verwalten; die Einrichtung auf Gateway und Client bleibt erforderlich.
+- Geprüfte Entwürfe vor der Aktivierung vergleichen, mit Konfliktschutz und standardmäßig gesperrtem Zugriff.
+- Betroffene Pakettests, Race-Checks, Lint und vollständiger Build sind bestanden. Browserdarstellung und Zonenverkehr mit echten Clients sind noch nicht geprüft.
+
+Die [Zonen-Anleitung](docs/network-zones.md) beschreibt Einrichtung, Policy-Übernahme und Grenzen.
+Diese Vorabversion verschiebt das Image-Tag `latest` nicht.
 
 ## Mit Docker starten
 
@@ -33,7 +36,7 @@ unter **Einstellungen** eingerichtet werden. Der Assistent speichert die
 Konfiguration und aktiviert den Server automatisch. Bestehende Installationen
 behalten ihre Daten und überspringen die Einrichtung.
 
-Das Release-Image lautet `ghcr.io/meister-yoda/meshora:v0.1.0-rc.8`, für Linux
+Das Release-Image lautet `ghcr.io/meister-yoda/meshora:v0.1.1-rc.1`, für Linux
 AMD64 und ARM64. Volumes, Reverse Proxies und Updates beschreibt die
 [Docker-Anleitung](packaging/docker/README.md). Ein Reverse Proxy muss den
 **Container-Port 8080** ansprechen.

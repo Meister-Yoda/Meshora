@@ -9,14 +9,17 @@ managing users, devices, registrations, pre-auth keys and network settings.
 > Meshora is an independent fork, unaffiliated with Tailscale Inc. and the
 > Headscale project. Please report Meshora issues in this repository.
 
-## v0.1.0-rc.8
+## v0.1.1-rc.1
 
-- Manage subnet routes and paired IPv4/IPv6 exit-node approvals in the dashboard.
-- Compare saved and running DNS settings; safely edit the authoritative YAML source.
-- Validate, save and activate HuJSON policies separately, with loaded snapshots and conflict checks.
-- Preserve policy comments and reject invalid or ambiguous input without replacing the active policy.
-- Use device filters, diagnostics and the guided desktop/mobile sign-in flow together.
-- Verified with real isolated Tailscale clients, actual traffic and DNS resolution after restart.
+- Create logical network zones with users, devices and routed IPv4/IPv6 subnets.
+- Connect zones with directed service permissions and limit exits per zone, user or device.
+- Assign new registrations from separate mesh address pools; existing devices keep their addresses.
+- Record public IPv6 prefixes and fixed reservations; gateway/client setup is still required.
+- Review validated drafts before activating them, with conflict protection and deny-by-default permissions.
+- Verified with affected package tests, race checks, lint and a full build. Browser rendering and real-client zone traffic are not yet verified.
+
+See the [network zones guide](docs/network-zones.md) for setup, policy takeover and limits.
+This is a prerelease and does not update the `latest` image tag.
 
 ## Start with Docker
 
@@ -32,7 +35,7 @@ least 12 characters. OIDC is optional and can also be configured later under
 **Settings**. The setup assistant saves the configuration and activates the
 server automatically. Existing installations keep their data and skip setup.
 
-The release image is `ghcr.io/meister-yoda/meshora:v0.1.0-rc.8`, for Linux
+The release image is `ghcr.io/meister-yoda/meshora:v0.1.1-rc.1`, for Linux
 AMD64 and ARM64. See the [Docker guide](packaging/docker/README.md) for volumes,
 reverse proxies and updates. Route a reverse proxy to **container port 8080**.
 

@@ -1,59 +1,47 @@
 # Meshora starten und im Browser einrichten
 
-## Neu in v0.1.0-rc.8
+## Neu in v0.1.1-rc.1
 
-- Zentrale Routenübersicht und Freigabe/Rücknahme auf den Gerätedetails.
-- Gemeinsame Behandlung der IPv4-/IPv6-Standardrouten eines Exit Nodes.
-- DNS-Verwaltung mit gespeicherten und laufenden Werten, Validierung und Neustarthinweis.
-- Policy-Übersicht und HuJSON-Editor mit getrennten Schritten für Validieren, Speichern und Aktivieren.
-- Geladene Policy-Snapshots, Konflikterkennung und ausdrücklich ausgewiesene Aktivierungs-Folgefehler.
-- Gemeinsame Prüfung mit Gerätefiltern, Diagnose und der geführten Geräteanmeldung.
+- Zonen mit Benutzern, Geräten, gerouteten Subnetzen und gerichteten Dienstfreigaben.
+- Exit-Berechtigungen je Zone mit zusätzlichen Benutzer- und Geräteeinschränkungen.
+- Eigene IPv4-/IPv6-Mesh-Pools für neue Registrierungen; bestehende Adressen bleiben erhalten.
+- Öffentliche IPv6-Präfixe und feste Reservierungen als Inventar mit ausdrücklich erforderlicher Gateway-/Client-Einrichtung.
+- Geprüfte Entwürfe, gesonderte Aktivierung und Schutz vor konkurrierenden Policy-Änderungen.
 
 ### Hinweise vor dem Update
 
 Konfiguration und Datenbank bei gestopptem Dienst sichern; vorhandene Volumes
-beibehalten. Das Image gezielt auf v0.1.0-rc.8 setzen. Der interne
-Proxy-Port bleibt 8080. Eine neue Datenbankmigration wird nicht eingeführt.
-Änderungen an OIDC-Anbieter und Gruppenregeln werden nach Neustart wirksam.
+beibehalten. Das Image gezielt auf `v0.1.1-rc.1` setzen. Der interne Proxy-Port
+bleibt 8080. Es wird keine neue Datenbankmigration eingeführt.
 
-Ein lokales Benutzerkonto mit passender, verifizierter E-Mail wird beim ersten
-OIDC-Login dauerhaft an diese Identität gebunden. Mehrdeutige Treffer oder
-bereits anderweitig gebundene Konten werden abgewiesen. E-Mail-Adressen und
-Gruppen-Claims vor dem Update prüfen und einen lokalen Admin-Zugang behalten.
-Gerätezugriff und Admin-Zugriff sind getrennte Berechtigungen.
+Der erste Wechsel in den Zonenmodus ersetzt vorhandene ACLs und Grants,
+einschließlich App-Freigaben, nach ausdrücklicher Bestätigung. SSH und andere
+Policy-Einstellungen bleiben erhalten. Ohne Freigabe ist auch innerhalb einer
+Zone kein Zugriff erlaubt. Neue Entwürfe werden erst nach Aktivierung wirksam.
+Vor einem Downgrade auf eine Version ohne Zonenunterstützung die vorherige
+Policy wiederherstellen; ältere Versionen verstehen `networkZones` nicht.
+
+Diese Vorabversion wird mit versionierten Image-Tags veröffentlicht und
+aktualisiert weder das Docker-Tag `latest` noch GitHubs Latest-Kennzeichnung.
 
 ### Abnahme und Grenzen
 
-Die vollständige Go-Suite ist bestanden, einschließlich aller 100 lokalen
-HA-Zufallsprüfungen. Lint, CSS-/Dokumentationsformatierung, Race-Tests und
-git diff --check sind sauber. Fünf Docker-Integrationsprüfungen sowie
-Browserabläufe mit neuen isolierten Instanzen und echten Tailscale-Clients
-sind bestanden: Subnetz-/Exit-Verkehr über IPv4 und IPv6, Freigabe und
-Rücknahme, Policy-Zustellung mit erlaubten/verweigerten Verbindungen,
-erneute Auto-Genehmigung nach Rücknahme und DNS-Auflösung nach Neustart.
-Datei- und Datenbankquellen wurden mit getrenntem Speichern/Aktivieren
-geprüft; Kommentare bleiben im übermittelten HuJSON erhalten.
+Die betroffenen Pakettests und vollständigen Race-Checks, Lint sowie der
+vollständige Build sind bestanden. Geprüft sind unter anderem gerichtete
+Freigaben, Exit-Ausblendung, Benutzer-/Geräteschnittmengen, Registrierungen,
+Neustarts, parallele Adressvergabe, IPv6-Reservierungen, CSRF und Versionskonflikte.
+Browserdarstellung und echter Tailscale-Client-Verkehr für die neuen Zonen sind
+noch nicht geprüft. Der Release-Workflow ergänzt einen Container-Starttest.
 
-Deutsch/Englisch, Desktop/Mobil, Tastatur, XSS/CSRF, veraltete Formulare,
-Offline- und Ablaufdiagnose sowie die Anleitung ohne JavaScript sind
-geprüft. Die Diagnose misst selbst keine Erreichbarkeit. DNS-Änderungen
-werden erst beim Neustart geladen; Policy-Reloads aktivieren sie nicht.
-Nach erfolgreicher Policy-Übernahme können Folgearbeiten fehlschlagen:
-Die neue Policy bleibt dann aktiv; es wird kein Rollback behauptet.
+Öffentliche IPv6-Reservierungen konfigurieren weder Gateway noch Client.
+Subnetzrouten müssen weiterhin angekündigt und genehmigt werden; erlaubte
+Exits werden am Client gewählt. Die ausführliche
+[Zonen-Anleitung](https://github.com/Meister-Yoda/Meshora/blob/v0.1.1-rc.1/docs/network-zones.md)
+beschreibt die Voraussetzungen und verbleibenden Grenzen.
 
-Die vollständigen Nachweise, behobenen Prüfvorbereitungsfehler und
-verbleibenden Grenzen stehen im
-[Abnahmebericht](https://github.com/Meister-Yoda/Meshora/blob/v0.1.0-rc.8/docs/ref/debug.md).
-Nicht abgedeckt sind physische Endgeräte, der eigene Authentik-Anbieter,
-Safari/Firefox, PostgreSQL in diesem Gesamtlauf, DoH/NextDNS-Dienste und
-IPv6-NAT. IPv6-Verkehr wurde mit explizitem Rückweg im isolierten Netz
-geprüft. DNS-01 und Zertifikatsverwaltung bleiben außerhalb des Umfangs.
-Ein Produktionsdeployment wird durch diesen Auftrag nicht ausgeführt.
-
-Die Einrichtung von Claims und Scopes beschreibt die
-[Admin-OIDC-Anleitung](https://github.com/Meister-Yoda/Meshora/blob/v0.1.0-rc.8/README.de.md#admin-anmeldung-mit-authentik).
-Bei OIDC-Problemen kann der lokale Admin-Login immer direkt unter
-`/admin/login?local=1` geöffnet werden.
+Für bestehende OIDC-Einstellungen gilt weiterhin die
+[Admin-OIDC-Anleitung](https://github.com/Meister-Yoda/Meshora/blob/v0.1.1-rc.1/README.de.md#admin-anmeldung-mit-authentik).
+Der lokale Admin-Login ist unter `/admin/login?local=1` erreichbar.
 
 Benötigt werden Docker und Docker Compose v2 mit Linux-Containern
 (AMD64 oder ARM64).
@@ -138,7 +126,7 @@ Archive mit Prüfsummen. Beispiel:
 
 ```bash
 sha256sum --ignore-missing -c SHA256SUMS
-docker load -i meshora_v0.1.0-rc.8_linux_amd64.docker.tar.gz
+docker load -i meshora_v0.1.1-rc.1_linux_amd64.docker.tar.gz
 ```
 
 Für das lokal geladene Image `MESHORA_IMAGE=meshora` setzen.
