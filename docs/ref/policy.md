@@ -243,6 +243,101 @@ fine-grained configuration instead.
 }
 ```
 
+## Meshora policy overview and editor
+
+The overview at `/admin/policy` reads the current file/database source.
+`/admin/policy/edit` adds three separate actions:
+
+1. **Validate and preview** uses a private instance of the real policy engine
+   with current users/nodes. Compilation, declared ACL/SSH tests and per-node
+   SSH policy construction must succeed.
+1. **Save validated draft** writes exact submitted HuJSON to the configured
+   source. It does not replace the running policy.
+1. **Activate saved source** revalidates the reviewed saved revision, then
+   switches the engine and performs existing reload work.
+
+All actions require an admin session and CSRF token. Saving also requires
+the same session's unexpired validation token and exactly the validated
+text. Editing after validation requires revalidation. No JSON serialization,
+minimization or formatting is applied to the draft. Unknown fields stay in
+the draft, but the existing engine rejects them; the editor reports this
+without deleting them. Duplicate keys at any nesting level, including
+equivalent escaped names, require explicit resolution. The line-based
+before/after preview never rewrites text. Browsers may normalize textarea
+line endings during submission; the server stores submitted text. A leading
+newline is preserved when the original text is loaded into the textarea.
+
+### Loaded-policy evidence
+
+The policy manager records original accepted input, SHA-256, process-local
+revision, UTC acceptance time and whether startup used an implicit policy.
+It commits this snapshot under the engine lock after successful compilation.
+Startup, ordinary State/API policy writes and reloads share this boundary.
+Rejected writes do not advance the snapshot; legacy empty SetPolicy input
+remains a no-op. Revisions and dashboard sessions reset on process restart.
+
+This proves engine acceptance, not client delivery, effective access or
+reachability. Source revisions and database row IDs are separate evidence.
+
+### Conflicts and failure boundaries
+
+State-level policy writes and reloads in this process are serialized.
+Validation, saving and activation compare the source revision (mode,
+reference/row ID, exact text) and loaded revision. Activation repeats engine
+validation against current users and devices. Stale forms are rejected,
+not silently rebased.
+
+Both configured file and database modes are editable. File saves resolve
+the configured target, write and sync an owner-only temporary file, recheck
+the source revision and atomically replace the target. Database saves
+append source records without changing the engine. Missing/unreadable
+sources disable editor actions. Draft size is limited to 1 MiB; the
+authenticated form limit permits URL-encoding overhead.
+
+Do not write concurrently through an external file editor or another server
+process. Revision rechecks detect preceding changes, but the in-process
+lock cannot guarantee cross-process compare-and-swap or exclude an external
+writer in the final filesystem replacement window. Existing policy APIs
+retain their established apply/persist/reload sequence; this dashboard
+does not turn that sequence into a transaction.
+
+Validation and engine-switch errors leave the previous loaded snapshot
+unchanged. Write failures do not activate the draft. Errors after the engine
+switch are explicitly reported as **new policy active, follow-up work
+failed**. There is no rollback claim: route approvals may already have
+changed in the NodeStore. Returned changes are dispatched even on this
+partial outcome. Inspect the error and route state before retrying.
+
+### Content, identity and DNS
+
+The overview retains all configured fields and original HuJSON. Display
+parsing is not engine validation. Invalid source content can be inspected
+and repaired without replacing the loaded valid policy. Tagged devices
+belong to their tags; a recorded creator does not make them user-owned.
+
+Policy activation does not activate DNS settings saved for the next process
+start. NextDNS capabilities may affect per-device DNS separately from the
+global baseline at `/admin/dns`.
+
+### Joint acceptance checklist
+
+Use disposable file and database sources:
+
+- Compare source and loaded revisions/hashes after validation, saving and
+  activation. Verify comments and submitted text survive.
+- Reject malformed rules, unknown fields, duplicate keys and failing ACL/SSH
+  tests without changing either source or loaded snapshot.
+- Reject edited validated text, missing/expired/foreign validation tokens,
+  external source changes and an intervening policy activation.
+- Inject source-write and pre-switch errors; separately inject route
+  persistence failure after switching and verify the explicit partial
+  result and returned client-change notifications.
+- Verify HTML-looking text stays text in the editor, preview and diagnostics,
+  and forged/missing CSRF tokens cannot mutate state.
+- Exercise German/English, mobile scrolling, keyboard focus and all three
+  actions. Real-client distribution and reachability need separate checks;
+  configuration-workflow tests do not prove either.
+
 [^1]: Headscale also allows to store the policy in the database. This is typically only required in case a [web
     interface](integration/web-ui.md) is used.
 

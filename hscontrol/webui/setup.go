@@ -240,7 +240,7 @@ func (h *setupHandler) save(w http.ResponseWriter, r *http.Request) {
 
 	if info.Issuer != "" {
 		oidc := settingsMappingValue(root, "oidc")
-		if oidc == nil || oidc.Tag == "!!null" {
+		if oidc == nil || oidc.Tag == settingsNullTag {
 			oidc = settingsMapping()
 			setSettingsValue(root, "oidc", oidc)
 		}

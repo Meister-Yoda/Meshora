@@ -658,7 +658,7 @@ func TestOIDCVerifiedEmailLinking(t *testing.T) {
 			provider := &AuthProviderOIDC{h: app, cfg: &types.OIDCConfig{}}
 			claims := &types.OIDCClaims{Iss: "https://issuer.example", Sub: "subject", Username: "remote", Email: tc.email, EmailVerified: types.FlexibleBoolean(tc.verified)}
 
-			user, _, err := provider.createOrUpdateUserFromClaim(claims)
+			user, err := provider.createOrUpdateUserFromClaim(claims)
 			if tc.wantConflict {
 				require.ErrorIs(t, err, errOIDCEmailConflict)
 				return
@@ -670,7 +670,7 @@ func TestOIDCVerifiedEmailLinking(t *testing.T) {
 			// provider stops supplying an email address.
 			claims.Email = ""
 			claims.EmailVerified = false
-			repeated, _, err := provider.createOrUpdateUserFromClaim(claims)
+			repeated, err := provider.createOrUpdateUserFromClaim(claims)
 			require.NoError(t, err)
 			assert.Equal(t, user.ID, repeated.ID)
 

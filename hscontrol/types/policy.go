@@ -2,6 +2,7 @@ package types
 
 import (
 	"errors"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -17,4 +18,14 @@ type Policy struct {
 
 	// Data contains the policy in HuJSON format.
 	Data string
+}
+
+// PolicySnapshot is the original input accepted by the running policy manager.
+// Revision is process-local; source persistence and client delivery are separate.
+type PolicySnapshot struct {
+	Text     string
+	SHA256   string
+	Revision uint64
+	LoadedAt time.Time
+	Implicit bool
 }

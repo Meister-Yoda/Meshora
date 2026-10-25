@@ -224,7 +224,6 @@ pre {
   height: auto;
 }
 
-
 .brand-tag {
   padding: 2px 8px;
   border-radius: 999px;
@@ -250,7 +249,8 @@ pre {
 }
 
 .field input:not([type="checkbox"]),
-.field select {
+.field select,
+.field textarea {
   width: 100%;
   height: 42px;
   padding: 0 12px;
@@ -265,12 +265,14 @@ pre {
 }
 
 .field input:not([type="checkbox"]):hover,
-.field select:hover {
+.field select:hover,
+.field textarea:hover {
   border-color: var(--faint);
 }
 
 .field input:not([type="checkbox"]):focus,
-.field select:focus {
+.field select:focus,
+.field textarea:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 4px var(--ring);
@@ -1387,4 +1389,27 @@ html[lang="en"] .language-options a[lang="en"],
 .enrollment .form-grid h2 {
   grid-column: 1 / -1;
   margin: 0;
+}
+
+/* Keep route actions close to the state columns; mobile tables still scroll. */
+.route-table .table td:nth-child(7),
+.route-table .table td:nth-child(8) {
+  white-space: normal;
+}
+
+.route-table .table td:nth-child(7) {
+  min-width: 10rem;
+  max-width: 14rem;
+}
+
+.route-table .table th,
+.route-table .table td {
+  padding: 12px 10px;
+}
+
+.field textarea {
+  min-height: 7rem;
+  height: auto;
+  padding: 10px 12px;
+  resize: vertical;
 }

@@ -26,6 +26,7 @@ type PolicyManager interface {
 	// client-provided URL params.
 	SSHCheckParams(srcNodeID, dstNodeID types.NodeID, localUser string) (time.Duration, bool)
 	SetPolicy(pol []byte) (bool, error)
+	PolicySnapshot() types.PolicySnapshot
 	// SetUsers replaces the user list. policyChanged reports whether clients
 	// need a policy refresh; peerMapChanged reports whether user-derived peer
 	// adjacency may have changed. Both are false when the list is unchanged.

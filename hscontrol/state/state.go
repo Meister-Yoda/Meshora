@@ -11,12 +11,19 @@
 package state
 
 import (
+	"bytes"
 	"cmp"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -38,6 +45,7 @@ import (
 	"github.com/puzpuzpuz/xsync/v4"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"github.com/tailscale/hujson"
 	"gorm.io/gorm"
 	"tailscale.com/tailcfg"
 	"tailscale.com/types/key"
@@ -190,6 +198,7 @@ type State struct {
 	// always converges on [NodeStore] rather than being clobbered by a stale
 	// caller snapshot or resurrected by an update racing with deletion.
 	persistMu sync.Mutex
+	policyMu  sync.Mutex
 
 	// selfRefresh holds nodes whose own DNS config inputs changed (NextDNS
 	// device metadata, given name), drained by [State.DrainSelfRefreshes].
@@ -355,11 +364,18 @@ func (s *State) DERPMap() tailcfg.DERPMapView {
 // Returns the resulting [change.Change] slice when the policy or routes changed,
 // also alongside an error once the policy is swapped.
 func (s *State) ReloadPolicy() ([]change.Change, error) {
+	s.policyMu.Lock()
+	defer s.policyMu.Unlock()
+
 	pol, err := hsdb.PolicyBytes(s.db.DB, s.cfg)
 	if err != nil {
 		return nil, fmt.Errorf("loading policy: %w", err)
 	}
 
+	return s.reloadPolicyBytes(pol)
+}
+
+func (s *State) reloadPolicyBytes(pol []byte) ([]change.Change, error) {
 	policyChanged, err := s.polMan.SetPolicy(pol)
 	if err != nil {
 		return nil, fmt.Errorf("setting policy: %w", err)
@@ -1336,6 +1352,9 @@ func (s *State) NodeCanHaveTag(node types.NodeView, tag string) bool {
 
 // SetPolicy updates the policy configuration.
 func (s *State) SetPolicy(pol []byte) (bool, error) {
+	s.policyMu.Lock()
+	defer s.policyMu.Unlock()
+
 	changed, err := s.polMan.SetPolicy(pol)
 	if err != nil {
 		return changed, err
@@ -1353,8 +1372,12 @@ func (s *State) SetPolicy(pol []byte) (bool, error) {
 	return changed, nil
 }
 
-// AutoApproveRoutes checks if a node's routes should be auto-approved.
-// AutoApproveRoutes checks if any routes should be auto-approved for a node and updates them.
+// RouteAutoApproval reports current policy eligibility, not historical approval origin.
+func (s *State) RouteAutoApproval(nv types.NodeView, route netip.Prefix) bool {
+	return s.polMan != nil && s.polMan.NodeCanApproveRoute(nv, route)
+}
+
+// AutoApproveRoutes checks policy and persists newly approved routes.
 func (s *State) AutoApproveRoutes(nv types.NodeView) (change.Change, error) {
 	approved, changed := policy.ApproveRoutesWithPolicy(s.polMan, nv, nv.ApprovedRoutes().AsSlice(), nv.AnnouncedRoutes())
 	if changed {
@@ -1393,6 +1416,9 @@ func (s *State) GetPolicy() (*types.Policy, error) {
 
 // SetPolicyInDB stores policy data in the database.
 func (s *State) SetPolicyInDB(data string) (*types.Policy, error) {
+	s.policyMu.Lock()
+	defer s.policyMu.Unlock()
+
 	return s.db.SetPolicy(data)
 }
 
@@ -3861,4 +3887,342 @@ func peerChangePersistWorthy(peerChange tailcfg.PeerChange) bool {
 		peerChange.Endpoints != nil ||
 		peerChange.DERPRegion != 0 ||
 		peerChange.KeyExpiry != nil
+}
+
+var (
+	ErrPolicyEditorWrite     = errors.New("policy source write failed")
+	ErrPolicyEditorConflict  = errors.New("policy source or loaded revision changed")
+	ErrPolicyEditorDuplicate = errors.New("duplicate policy key")
+	ErrPolicyEditorInput     = errors.New("policy editor requires a nonempty HuJSON object within the size limit")
+	ErrPolicyEditorPath      = errors.New("no policy file path configured")
+)
+
+// PolicyEditorSource is source evidence, separate from the running engine snapshot.
+type PolicyEditorSource struct {
+	Mode      types.PolicyMode
+	Reference string
+	Text      string
+	Revision  string
+}
+
+// PolicyActivation distinguishes a failed engine switch from failed follow-up work.
+type PolicyActivation struct {
+	Loaded  types.PolicySnapshot
+	Applied bool
+	Changes []change.Change
+}
+
+const PolicyEditorMaxBytes = 1 << 20
+
+func policyEditorHash(data string) string {
+	sum := sha256.Sum256([]byte(data))
+	return hex.EncodeToString(sum[:])
+}
+
+func (s *State) PolicySnapshot() types.PolicySnapshot {
+	return s.polMan.PolicySnapshot()
+}
+
+func (s *State) PolicyEditorState() (PolicyEditorSource, types.PolicySnapshot, error) {
+	s.policyMu.Lock()
+	defer s.policyMu.Unlock()
+
+	source, err := s.policyEditorSource()
+
+	return source, s.polMan.PolicySnapshot(), err
+}
+
+func (s *State) policyEditorSource() (PolicyEditorSource, error) {
+	source := PolicyEditorSource{Mode: s.cfg.Policy.Mode}
+	switch source.Mode {
+	case types.PolicyModeDB:
+		row, err := s.db.GetPolicy()
+		if err != nil && !errors.Is(err, types.ErrPolicyNotFound) {
+			return source, err
+		}
+
+		source.Reference = "database:0"
+		if row != nil {
+			source.Reference = "database:" + strconv.FormatUint(uint64(row.ID), 10)
+			source.Text = row.Data
+		}
+	case types.PolicyModeFile:
+		if s.cfg.Policy.Path == "" {
+			return source, ErrPolicyEditorPath
+		}
+
+		path := s.cfg.Policy.Path
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(filepath.Dir(s.cfg.ConfigFilePath), path)
+		}
+
+		resolved, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			return source, err
+		}
+
+		source.Reference = resolved
+
+		file, err := os.Open(resolved)
+		if err != nil {
+			return source, err
+		}
+		defer file.Close()
+
+		raw, err := io.ReadAll(io.LimitReader(file, PolicyEditorMaxBytes+1))
+		if err != nil {
+			return source, err
+		}
+
+		source.Text = string(raw)
+	default:
+		return source, ErrUnsupportedPolicyMode
+	}
+
+	if len(source.Text) > PolicyEditorMaxBytes {
+		return source, ErrPolicyEditorInput
+	}
+
+	source.Revision = policyEditorHash(string(source.Mode) + "\x00" + source.Reference + "\x00" + source.Text)
+
+	return source, nil
+}
+
+func policyEditorUnique(decoder *json.Decoder) error {
+	token, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+
+	delimiter, ok := token.(json.Delim)
+	if !ok {
+		return nil
+	}
+
+	switch delimiter {
+	case '{':
+		seen := map[string]bool{}
+
+		for decoder.More() {
+			keyToken, readErr := decoder.Token()
+			if readErr != nil {
+				return readErr
+			}
+
+			key, valid := keyToken.(string)
+			if !valid {
+				return ErrPolicyEditorInput
+			}
+
+			if seen[key] {
+				return fmt.Errorf("%w: %s", ErrPolicyEditorDuplicate, key)
+			}
+
+			seen[key] = true
+
+			err = policyEditorUnique(decoder)
+			if err != nil {
+				return err
+			}
+		}
+	case '[':
+		for decoder.More() {
+			err = policyEditorUnique(decoder)
+			if err != nil {
+				return err
+			}
+		}
+	default:
+		return ErrPolicyEditorInput
+	}
+
+	_, err = decoder.Token()
+
+	return err
+}
+
+// validatePolicyEditor uses a private instance of the real policy engine.
+// Constructors warn about declared tests at boot; SetPolicy makes them mandatory.
+func (s *State) validatePolicyEditor(text string) error {
+	if len(text) == 0 || len(text) > PolicyEditorMaxBytes {
+		return ErrPolicyEditorInput
+	}
+
+	raw, err := hujson.Standardize([]byte(text))
+	if err != nil {
+		return err
+	}
+
+	if !bytes.HasPrefix(bytes.TrimSpace(raw), []byte("{")) {
+		return ErrPolicyEditorInput
+	}
+
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+
+	err = policyEditorUnique(decoder)
+	if err != nil {
+		return err
+	}
+
+	_, err = decoder.Token()
+	if !errors.Is(err, io.EOF) {
+		return ErrPolicyEditorInput
+	}
+
+	users, err := s.ListAllUsers()
+	if err != nil {
+		return err
+	}
+
+	nodes := s.ListNodes()
+
+	sandbox, err := policy.NewPolicyManager(raw, users, nodes)
+	if err != nil {
+		return err
+	}
+
+	_, err = sandbox.SetPolicy(raw)
+	if err != nil {
+		return err
+	}
+
+	for _, node := range nodes.All() {
+		_, err = sandbox.SSHPolicy(s.cfg.ServerURL, node)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (s *State) checkPolicyEditor(sourceRevision string, loadedRevision uint64) (PolicyEditorSource, error) {
+	source, err := s.policyEditorSource()
+	if err != nil {
+		return source, err
+	}
+
+	if source.Revision != sourceRevision || s.polMan.PolicySnapshot().Revision != loadedRevision {
+		return source, ErrPolicyEditorConflict
+	}
+
+	return source, nil
+}
+
+func (s *State) ValidatePolicyDraft(text, sourceRevision string, loadedRevision uint64) error {
+	s.policyMu.Lock()
+	defer s.policyMu.Unlock()
+
+	_, err := s.checkPolicyEditor(sourceRevision, loadedRevision)
+	if err != nil {
+		return err
+	}
+
+	return s.validatePolicyEditor(text)
+}
+
+// SavePolicyDraft persists exact original bytes and never changes the live engine.
+func (s *State) SavePolicyDraft(text, sourceRevision string, loadedRevision uint64) (PolicyEditorSource, error) {
+	s.policyMu.Lock()
+	defer s.policyMu.Unlock()
+
+	source, err := s.checkPolicyEditor(sourceRevision, loadedRevision)
+	if err != nil {
+		return source, err
+	}
+
+	err = s.validatePolicyEditor(text)
+	if err != nil {
+		return source, err
+	}
+	// Recheck after validation, which may take time while an external editor writes.
+	source, err = s.checkPolicyEditor(sourceRevision, loadedRevision)
+	if err != nil {
+		return source, err
+	}
+
+	if source.Mode == types.PolicyModeDB {
+		var row *types.Policy
+
+		row, err = s.db.SetPolicy(text)
+		if err == nil {
+			source.Reference = "database:" + strconv.FormatUint(uint64(row.ID), 10)
+		}
+	} else {
+		err = s.writePolicyEditorFile(source, text)
+	}
+
+	if err != nil {
+		return source, fmt.Errorf("%w: %w", ErrPolicyEditorWrite, err)
+	}
+
+	source.Text = text
+	source.Revision = policyEditorHash(string(source.Mode) + "\x00" + source.Reference + "\x00" + source.Text)
+
+	return source, nil
+}
+
+func (s *State) writePolicyEditorFile(source PolicyEditorSource, text string) error {
+	file, err := os.CreateTemp(filepath.Dir(source.Reference), ".meshora-policy-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(file.Name())
+	defer file.Close()
+
+	_, err = io.WriteString(file, text)
+	if err != nil {
+		return err
+	}
+
+	err = file.Sync()
+	if err != nil {
+		return err
+	}
+
+	err = file.Close()
+	if err != nil {
+		return err
+	}
+
+	current, err := s.policyEditorSource()
+	if err != nil {
+		return err
+	}
+
+	if current.Revision != source.Revision {
+		return ErrPolicyEditorConflict
+	}
+
+	return os.Rename(file.Name(), source.Reference)
+}
+
+// ActivatePolicySource only commits the saved revision the admin reviewed.
+// Applied remains true when post-commit route work fails; Changes must be sent.
+func (s *State) ActivatePolicySource(sourceRevision string, loadedRevision uint64) (PolicyActivation, error) {
+	s.policyMu.Lock()
+	defer s.policyMu.Unlock()
+
+	result := PolicyActivation{Loaded: s.polMan.PolicySnapshot()}
+
+	source, err := s.checkPolicyEditor(sourceRevision, loadedRevision)
+	if err != nil {
+		return result, err
+	}
+
+	err = s.validatePolicyEditor(source.Text)
+	if err != nil {
+		return result, err
+	}
+
+	source, err = s.checkPolicyEditor(sourceRevision, loadedRevision)
+	if err != nil {
+		return result, err
+	}
+
+	result.Changes, err = s.reloadPolicyBytes([]byte(source.Text))
+	result.Loaded = s.polMan.PolicySnapshot()
+	result.Applied = result.Loaded.Revision != loadedRevision
+
+	return result, err
 }

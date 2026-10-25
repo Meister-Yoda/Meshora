@@ -78,8 +78,9 @@ type session struct {
 	// flash is shown once on the page after a POST-redirect-GET. It lives
 	// here rather than in the URL so nothing the admin typed is reflected
 	// from a query string, and a new pre-auth key never lands in a URL.
-	mu    sync.Mutex
-	flash *templates.AdminFlash
+	mu          sync.Mutex
+	flash       *templates.AdminFlash
+	policyDraft *policyEditorDraft
 }
 
 func (s *session) setFlash(f *templates.AdminFlash) {
@@ -102,7 +103,8 @@ func (s *session) takeFlash() *templates.AdminFlash {
 
 // Handler serves the dashboard.
 type Handler struct {
-	state *state.State
+	state         *state.State
+	runtimeConfig *types.Config
 	// change distributes state changes to connected nodes, like
 	// apiv1.Backend.Change.
 	change func(...change.Change)
@@ -121,6 +123,7 @@ type Handler struct {
 	oidcFlows           *expirable.LRU[string, adminOIDCFlow]
 	oidcFlowsMu         sync.Mutex
 	settingsMu          sync.Mutex
+	routesMu            sync.Mutex
 
 	// sessions is keyed by the SHA-256 of the session token, so the tokens
 	// themselves are never held in memory after they are handed out.
@@ -143,6 +146,7 @@ func New(st *state.State, cfg *types.Config, notify func(...change.Change)) *Han
 
 	return &Handler{
 		state:               st,
+		runtimeConfig:       cfg,
 		change:              notify,
 		publicPath:          publicPath,
 		serverURL:           strings.TrimSuffix(cfg.ServerURL, "/"),
@@ -196,6 +200,15 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Post("/users/{id}/delete", h.deleteUser)
 
 			r.Get("/nodes", h.nodes)
+			r.Get("/routes", h.routeOverview)
+			r.Get("/dns", h.dnsSettings)
+			r.Get("/policy", h.policyPage)
+			r.Get("/policy/edit", h.policyEditor)
+			r.Post("/policy/validate", h.validatePolicyDraft)
+			r.Post("/policy/save", h.savePolicyDraft)
+			r.Post("/policy/activate", h.activatePolicySource)
+			r.Post("/dns", h.saveDNSSettings)
+			r.Post("/nodes/{id}/routes", h.setNodeRoute)
 			r.Get("/nodes/{id}", h.nodeDetail)
 			r.Post("/nodes/{id}/rename", h.renameNode)
 			r.Post("/nodes/{id}/tags", h.setNodeTags)
@@ -255,6 +268,7 @@ func (h *Handler) loginPage(w http.ResponseWriter, r *http.Request) {
 		h.startOIDC(w, r, true)
 		return
 	}
+
 	h.renderLogin(w, r, http.StatusOK, "", "")
 }
 
@@ -264,6 +278,7 @@ func (h *Handler) renderLogin(w http.ResponseWriter, r *http.Request, status int
 	h.settingsMu.Lock()
 	buttonText := h.oidcButtonText
 	h.settingsMu.Unlock()
+
 	token := randomToken()
 	h.setCookie(w, r, loginCSRFCookie, token, int(loginFailureWindow.Seconds()))
 
@@ -478,6 +493,7 @@ func nodeRow(n types.NodeView) templates.AdminNodeRow {
 	}
 
 	row.LastSeen, _ = n.LastSeen().GetOk()
+
 	row.Expiry, _ = n.Expiry().GetOk()
 	for _, route := range n.AnnouncedRoutes() {
 		row.AnnouncedRoutes = append(row.AnnouncedRoutes, route.String())
@@ -566,7 +582,12 @@ func (h *Handler) requireSession(next http.Handler) http.Handler {
 		}
 
 		if r.Method == http.MethodPost {
-			r.Body = http.MaxBytesReader(w, r.Body, maxFormBytes)
+			limit := int64(maxFormBytes)
+			if strings.HasPrefix(r.URL.Path, BasePath+"/policy/") {
+				limit = 4 << 20
+			}
+
+			r.Body = http.MaxBytesReader(w, r.Body, limit)
 
 			err := r.ParseForm()
 			if err != nil {

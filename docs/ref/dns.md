@@ -109,3 +109,72 @@ hostname and port combination "http://hostname-in-magic-dns.myvpn.example.com:30
 
     }
     ```
+
+## Meshora dashboard DNS management
+
+The DNS page at `/admin/dns` uses the existing YAML configuration file as
+its authoritative persisted source. There is no DNS database override.
+Non-empty `HEADSCALE_DNS_*` environment variables retain startup precedence
+and make this page read-only. Their names are shown; their values are not
+copied into the file.
+
+The page distinguishes three states:
+
+- **Running**: the DNS inputs loaded at startup.
+- **Saved for next start**: the current file, including defaults for omitted
+  fields. Changed fields are marked as requiring a restart.
+- **Effective client DNS baseline**: the running mapper configuration,
+  including generated MagicDNS reverse zones and current extra records.
+  This baseline is not proof of client adoption or successful DNS resolution.
+
+The editor covers MagicDNS, its base domain, local DNS override, global
+nameservers, search domains and Split DNS. Nameservers accept IP literals
+or HTTPS DoH URLs. Lists keep their order and resolver URLs keep their
+paths and query parameters. Split DNS uses lowercase domains without a
+trailing dot. An explicit empty list (`domain.example: []`) means local
+resolution by the client, not an absent route. Clearing the mapping
+(`{}`) removes configured split rules; generated MagicDNS reverse zones
+remain governed by the running configuration.
+
+Saving does **not** activate these settings. Restart Meshora through your
+normal deployment procedure, then compare the running and saved columns.
+`SIGHUP` reloads the ACL policy only. The existing extra-records file
+watcher can update record contents at runtime; it is not a general DNS
+configuration reloader.
+
+### File safety and validation
+
+The dashboard serializes its own settings writes and checks a revision of
+the entire file. A stale form, including one made stale by an unrelated
+file edit, is rejected. It rereads the file before saving, patches only
+changed DNS nodes and atomically replaces the file with owner-only
+permissions. Additional records, record-file references, unknown settings
+and unchanged YAML nodes are retained. Formatting can change; comments on
+replaced list items may need to be reapplied. Do not edit the file with an
+external editor during a dashboard save: atomic replacement and revision
+checking cannot lock out a non-cooperating external writer.
+
+Files with ambiguous editable YAML (aliases, anchors, merge keys, duplicate
+keys or multiple documents) are read-only rather than flattened. Other
+sections are not migrated by the DNS editor. Review startup errors in the
+full configuration separately; DNS field validation is not a validation of
+every unrelated server setting.
+
+Validation checks DNS domains, resolver syntax, base-domain separation from
+both running and saved server hostnames, and the global-resolver requirement
+when overriding local DNS. HTTPS DoH URL validation does not test bootstrap
+resolution, server reachability or the resolver's responses. The editor
+does not send DNS queries.
+
+### Handoff to the policy view
+
+Keep configuration source, saved state and runtime state explicit. Policy
+supports file/database modes and its own reload behavior; do not apply DNS
+restart semantics to it automatically. `mapper.generateDNSConfig` derives
+a per-device copy from `Config.CloneTailcfgDNSConfig` and applies
+`nextdns:<profile>` / `nextdns:no-device-info` node capabilities. The policy
+view should explain these per-device effects and link back to the global
+DNS baseline. An ACL grant, route approval or syntactically valid DNS setting
+does not prove reachability or resolution.
+
+DNS-01 and certificate management are outside this editor.

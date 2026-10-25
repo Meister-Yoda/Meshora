@@ -18,7 +18,6 @@ import (
 	"github.com/juanfont/headscale/hscontrol/db"
 	"github.com/juanfont/headscale/hscontrol/templates"
 	"github.com/juanfont/headscale/hscontrol/types"
-	"github.com/juanfont/headscale/hscontrol/types/change"
 	"github.com/juanfont/headscale/hscontrol/util"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/oauth2"
@@ -336,7 +335,7 @@ func (a *AuthProviderOIDC) OIDCCallbackHandler(
 		return
 	}
 
-	user, _, err := a.createOrUpdateUserFromClaim(&claims)
+	user, err := a.createOrUpdateUserFromClaim(&claims)
 	if err != nil {
 		httpUserError(writer, NewHTTPError(
 			http.StatusInternalServerError,
@@ -635,17 +634,16 @@ func (a *AuthProviderOIDC) getAuthInfoFromState(state string) *AuthInfo {
 
 func (a *AuthProviderOIDC) createOrUpdateUserFromClaim(
 	claims *types.OIDCClaims,
-) (*types.User, change.Change, error) {
+) (*types.User, error) {
 	var (
 		user    *types.User
 		err     error
 		newUser bool
-		c       change.Change
 	)
 
 	user, err = a.h.state.GetUserByOIDCIdentifier(claims.Identifier())
 	if err != nil && !errors.Is(err, db.ErrUserNotFound) {
-		return nil, change.Change{}, fmt.Errorf("creating or updating user: %w", err)
+		return nil, fmt.Errorf("creating or updating user: %w", err)
 	}
 
 	// Only a verified mailbox can link a previously local identity. Never
@@ -655,7 +653,7 @@ func (a *AuthProviderOIDC) createOrUpdateUserFromClaim(
 		if parseErr == nil && address.Address == claims.Email {
 			users, listErr := a.h.state.ListAllUsers()
 			if listErr != nil {
-				return nil, change.Change{}, fmt.Errorf("finding user by email: %w", listErr)
+				return nil, fmt.Errorf("finding user by email: %w", listErr)
 			}
 
 			for i := range users {
@@ -666,7 +664,7 @@ func (a *AuthProviderOIDC) createOrUpdateUserFromClaim(
 
 				if user != nil || candidate.ProviderIdentifier.Valid ||
 					(candidate.Provider != "" && candidate.Provider != util.RegisterMethodCLI) {
-					return nil, change.Change{}, errOIDCEmailConflict
+					return nil, errOIDCEmailConflict
 				}
 
 				user = candidate
@@ -685,25 +683,27 @@ func (a *AuthProviderOIDC) createOrUpdateUserFromClaim(
 	user.FromClaim(claims, a.cfg.EmailVerifiedRequired)
 
 	if newUser {
-		user, c, err = a.h.state.CreateUser(*user)
+		user, _, err = a.h.state.CreateUser(*user)
 		if err != nil {
-			return nil, change.Change{}, fmt.Errorf("creating user: %w", err)
+			return nil, fmt.Errorf("creating user: %w", err)
 		}
 	} else {
-		_, c, err = a.h.state.UpdateUser(types.UserID(user.ID), func(u *types.User) error {
+		_, _, err = a.h.state.UpdateUser(types.UserID(user.ID), func(u *types.User) error {
 			// The account may have been linked by another login since lookup.
 			if u.ProviderIdentifier.Valid && u.ProviderIdentifier != user.ProviderIdentifier {
 				return errOIDCEmailConflict
 			}
+
 			*u = *user
+
 			return nil
 		})
 		if err != nil {
-			return nil, change.Change{}, fmt.Errorf("updating user: %w", err)
+			return nil, fmt.Errorf("updating user: %w", err)
 		}
 	}
 
-	return user, c, nil
+	return user, nil
 }
 
 // registerConfirmCSRFCookie is the cookie name used to bind the

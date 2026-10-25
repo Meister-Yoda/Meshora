@@ -1,10 +1,13 @@
 package v2
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"maps"
 	"net/netip"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -4201,4 +4204,65 @@ func BenchmarkNodeCapMapsConstruction(b *testing.B) {
 			}
 		}
 	}
+}
+
+func TestPolicySnapshotCommitBoundary(t *testing.T) {
+	original := []byte("{\n// original comment\n\"acls\": []\n}")
+	pm, err := NewPolicyManager(original, nil, views.SliceOf([]types.NodeView{}))
+	require.NoError(t, err)
+
+	initial := pm.PolicySnapshot()
+	require.Equal(t, string(original), initial.Text)
+	require.Equal(t, uint64(1), initial.Revision)
+	require.False(t, initial.LoadedAt.IsZero())
+
+	original[0] = 'x'
+
+	require.Equal(t, "{", pm.PolicySnapshot().Text[:1], "snapshot must own the accepted input")
+	_, err = pm.SetPolicy([]byte(`{"acls":[{"action":"drop","src":["*"],"dst":["*:*"]}]}`))
+	require.Error(t, err)
+	require.Equal(t, initial, pm.PolicySnapshot())
+	_, err = pm.SetPolicy([]byte("{\n// retained new comment\n\"acls\":[]\n}"))
+	require.NoError(t, err)
+
+	current := pm.PolicySnapshot()
+	require.Equal(t, initial.Revision+1, current.Revision)
+	require.NotEqual(t, initial.SHA256, current.SHA256)
+
+	_, err = pm.SetPolicy(nil)
+	require.NoError(t, err)
+	require.Equal(t, current, pm.PolicySnapshot(), "legacy empty input is a no-op, not a false loaded snapshot")
+}
+
+func TestPolicySnapshotConcurrentReaders(t *testing.T) {
+	pm, err := NewPolicyManager(nil, nil, views.SliceOf([]types.NodeView{}))
+	require.NoError(t, err)
+
+	var workers sync.WaitGroup
+
+	workers.Add(2)
+	go func() {
+		defer workers.Done()
+
+		for i := range 50 {
+			_, writeErr := pm.SetPolicy([]byte(fmt.Sprintf("{/* accepted revision %d */}", i)))
+			if writeErr != nil {
+				t.Errorf("policy write: %v", writeErr)
+			}
+		}
+	}()
+	go func() {
+		defer workers.Done()
+
+		for range 100 {
+			snapshot := pm.PolicySnapshot()
+
+			digest := sha256.Sum256([]byte(snapshot.Text))
+			if snapshot.SHA256 != hex.EncodeToString(digest[:]) {
+				t.Error("snapshot metadata and accepted input are inconsistent")
+			}
+		}
+	}()
+
+	workers.Wait()
 }

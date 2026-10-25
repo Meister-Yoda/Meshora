@@ -9,6 +9,7 @@ import (
 
 	"github.com/chasefleming/elem-go"
 	"github.com/chasefleming/elem-go/attrs"
+	"github.com/juanfont/headscale/hscontrol/types"
 )
 
 const inputTypeHidden = "hidden"
@@ -26,7 +27,7 @@ func flashBanner(f *AdminFlash) elem.Node {
 
 	class, role := "flash flash-success", "status"
 	if f.Error {
-		class, role = "flash flash-error", "alert"
+		class, role = adminFlashErrorClass, "alert"
 	}
 
 	children := []elem.Node{elem.P(nil, i18nText(f.Message))}
@@ -61,6 +62,7 @@ func textField(label, name, value string, required bool) *elem.Element {
 
 func selectField(label, name string, choices []AdminChoice, placeholder string) *elem.Element {
 	options := make([]elem.Node, 0, len(choices)+1)
+
 	if placeholder != "" {
 		option := elem.Option(attrs.Props{attrs.Value: ""}, elem.Text(placeholder))
 		option.Children = []elem.Node{i18nText(placeholder)}
@@ -74,7 +76,7 @@ func selectField(label, name string, choices []AdminChoice, placeholder string) 
 		}
 
 		var label elem.Node = elem.Text(c.Label)
-		if name == "expiry" {
+		if name == "expiry" || name == "magic_dns" || name == "override_local_dns" {
 			label = i18nText(c.Label)
 		}
 
@@ -178,6 +180,7 @@ func (u AdminUserRow) displayName() string {
 
 // AdminNodeExtra holds node details only shown on [AdminNodeDetail].
 type AdminNodeExtra struct {
+	Routes         []AdminRouteRow
 	MachineKey     string
 	RegisterMethod string
 	CreatedAt      time.Time
@@ -198,6 +201,7 @@ func AdminNodeDetail(info AdminPageInfo, node AdminNodeRow, extra AdminNodeExtra
 		backLink(info.Base+"/nodes", "Nodes"),
 		pageHeadNodes(elem.Text(node.GivenName), elem.Text(node.Hostname)),
 		nodeDiagnostics(node),
+		adminRouteSection(info, extra.Routes, false),
 		elem.Section(attrs.Props{attrs.Class: "card"}, detailList(
 			detail("Owner", ownerCell(node.Tags, node.Owner)),
 			detail("Status", statusCell(node.Online)),
@@ -226,7 +230,7 @@ func AdminNodeDetail(info AdminPageInfo, node AdminNodeRow, extra AdminNodeExtra
 			),
 		),
 		cardSection("Expire or delete", "",
-			elem.Div(attrs.Props{attrs.Class: "actions"},
+			elem.Div(attrs.Props{attrs.Class: adminActionsClass},
 				linkButton(info.Base+path+"/expire", "Expire node…", "btn-ghost"),
 				linkButton(info.Base+path+"/delete", "Delete node…", "btn-danger"),
 			),
@@ -264,7 +268,7 @@ func nodeDiagnostics(node AdminNodeRow) elem.Node {
 		items = append(items,
 			elem.H3(nil, i18nText("Routes awaiting approval")),
 			routeList(unapproved),
-			elem.P(nil, i18nText("These advertised routes are not approved for this device. The reason is unknown. An administrator should verify the intended networks and approve them through route management (CLI or API), or check the policy's autoApprovers. This page does not change route approvals.")),
+			elem.P(nil, i18nText("Verify the intended networks before approving them in route management below. Automatic approval is controlled by the policy's autoApprovers.")),
 		)
 	}
 
@@ -302,7 +306,7 @@ func AdminPendingReview(info AdminPageInfo, req AdminPendingRow, users []AdminCh
 	if req.SSHCheck {
 		sections = append(sections, cardSection("Decide",
 			"Approving lets this SSH connection through once. The client is waiting for the answer.",
-			elem.Div(attrs.Props{attrs.Class: "actions"},
+			elem.Div(attrs.Props{attrs.Class: adminActionsClass},
 				postForm(info, path+"/approve", "form-plain", submitButton("Approve", "btn-primary")),
 				reject,
 			),
@@ -443,7 +447,7 @@ func AdminConfirm(info AdminPageInfo, c AdminConfirmInfo) *elem.Element {
 			elem.H1(nil, i18nText(c.Title)),
 			elem.P(attrs.Props{attrs.Class: "confirm-subject"}, elem.Text(c.Subject)),
 			elem.P(attrs.Props{attrs.Class: "muted"}, i18nText(c.Message)),
-			elem.Div(attrs.Props{attrs.Class: "actions"},
+			elem.Div(attrs.Props{attrs.Class: adminActionsClass},
 				postForm(info, c.Action, "form-plain", submitButton(c.Button, "btn-danger")),
 				linkButton(info.Base+c.Cancel, "Cancel", "btn-ghost"),
 			),
@@ -574,9 +578,10 @@ func AdminSettings(info AdminPageInfo, settings AdminOIDCSettings) *elem.Element
 	if section == "provider" {
 		content = elem.Div(attrs.Props{attrs.Class: "settings-primary"}, content,
 			cardSection("Redirect URLs", "Add these exact URLs to Authentik using strict matching.",
-				elem.Div(attrs.Props{attrs.Class: "callback-item"}, elem.H3(nil, i18nText("Administrators")), elem.Pre(attrs.Props{attrs.Class: "codeblock"}, elem.Code(nil, elem.Text(settings.AdminCallbackURL)))),
-				elem.Div(attrs.Props{attrs.Class: "callback-item"}, elem.H3(nil, i18nText("Device registration")), elem.Pre(attrs.Props{attrs.Class: "codeblock"}, elem.Code(nil, elem.Text(settings.CallbackURL))))))
+				elem.Div(attrs.Props{attrs.Class: "callback-item"}, elem.H3(nil, i18nText("Administrators")), elem.Pre(attrs.Props{attrs.Class: adminCodeblockClass}, elem.Code(nil, elem.Text(settings.AdminCallbackURL)))),
+				elem.Div(attrs.Props{attrs.Class: "callback-item"}, elem.H3(nil, i18nText("Device registration")), elem.Pre(attrs.Props{attrs.Class: adminCodeblockClass}, elem.Code(nil, elem.Text(settings.CallbackURL))))))
 	}
+
 	return info.shell("Settings",
 		pageHead(title, "Manage sign-in, permissions and appearance."),
 		elem.Div(attrs.Props{attrs.Class: "settings-status", attrs.Role: "status"},
@@ -603,4 +608,477 @@ func routeList(routes []string) elem.Node {
 	}
 
 	return elem.Ul(attrs.Props{attrs.Class: "mono"}, items...)
+}
+
+// AdminRouteRow describes recorded route state and current policy eligibility.
+type AdminRouteRow struct {
+	NodeID                                uint64
+	Device, Prefix                        string
+	Advertised, Approved, Automatic, Exit bool
+}
+
+func AdminRoutes(info AdminPageInfo, rows []AdminRouteRow) *elem.Element {
+	return info.shell("Routes", pageHead("Routes", "Subnet routes and exit nodes"), adminRouteSection(info, rows, true))
+}
+
+func routeFlag(value bool) elem.Node {
+	if value {
+		return i18nText("Yes")
+	}
+
+	return i18nText("No")
+}
+
+func adminRouteSection(info AdminPageInfo, routes []AdminRouteRow, overview bool) elem.Node {
+	rows := make([]elem.Node, 0, len(routes))
+	for _, route := range routes {
+		kind := "Subnet route"
+		if route.Exit {
+			kind = "Exit node"
+		}
+
+		mode := "Manual approval required"
+		if route.Automatic {
+			mode = "Automatic approval allowed by current policy"
+		}
+
+		action := i18nText("Not advertised")
+
+		if route.Approved || route.Advertised {
+			verb, label := "approve", "Approve route"
+			if route.Approved {
+				verb, label = "revoke", "Revoke approval"
+			}
+
+			destination := "node"
+			if overview {
+				destination = "routes"
+			}
+
+			action = postForm(info, "/nodes/"+strconv.FormatUint(route.NodeID, 10)+"/routes", "form-inline",
+				elem.Input(attrs.Props{attrs.Type: inputTypeHidden, attrs.Name: "route", attrs.Value: html.EscapeString(route.Prefix)}),
+				elem.Input(attrs.Props{attrs.Type: inputTypeHidden, attrs.Name: "action", attrs.Value: verb}),
+				elem.Input(attrs.Props{attrs.Type: inputTypeHidden, attrs.Name: "return", attrs.Value: destination}),
+				submitButton(label, "btn-ghost"))
+		}
+
+		rows = append(rows, elem.Tr(nil,
+			elem.Td(nil, twoLine(nodeHref(info.Base, route.NodeID), route.Device, "")),
+			elem.Td(nil, elem.Code(nil, elem.Text(route.Prefix))),
+			elem.Td(nil, i18nText(kind)),
+			elem.Td(nil, routeFlag(route.Advertised)),
+			elem.Td(nil, routeFlag(route.Approved)),
+			elem.Td(nil, routeFlag(route.Advertised && route.Approved)),
+			elem.Td(nil, i18nText(mode)),
+			elem.Td(nil, action)))
+	}
+
+	var table elem.Node = emptyState("No routes", "Devices have not advertised any routes and have no saved approvals.")
+	if len(rows) > 0 {
+		table = elem.Div(attrs.Props{attrs.Class: "route-table"}, dataTable("Routes", []string{"Device", "Route", "Type", "Advertised", "Approved", "Available", "Approval policy", "Action"}, rows))
+	}
+
+	return cardSection("Subnet routes and exit nodes",
+		"Available means advertised and approved. Approval does not prove reachability; connection state, IP forwarding, access policy and client route settings must also be checked.",
+		elem.P(attrs.Props{attrs.Class: "muted"}, i18nText("The original approval source is not recorded. The policy column shows current autoApprovers eligibility, not who granted approval. Revoked routes may be automatically approved again after an advertisement change or policy reload. Exit-node actions apply to both IPv4 and IPv6 default routes.")),
+		table)
+}
+
+// AdminDNSValues contains editable settings, not a claim about DNS reachability.
+type AdminDNSValues struct {
+	MagicDNS, OverrideLocalDNS        bool
+	BaseDomain, Global, Search, Split string
+}
+
+type AdminDNSSplit struct{ Domain, Resolvers string }
+
+type AdminDNSSettings struct {
+	Active, Saved, Form                                    AdminDNSValues
+	Revision, Error, ReadOnlyReason                        string
+	Overrides                                              []string
+	HasSaved, Writable, PendingRestart                     bool
+	EffectiveAvailable, EffectiveMagic                     bool
+	EffectiveResolvers, EffectiveFallback, EffectiveSearch []string
+	EffectiveRoutes                                        []AdminDNSSplit
+	ExtraRecordCount                                       int
+}
+
+func dnsMultiline(value string) elem.Node {
+	if value == "" {
+		return i18nText("None")
+	}
+
+	return elem.Pre(attrs.Props{attrs.Class: adminCodeblockClass}, elem.Text(value))
+}
+
+func dnsTextArea(label, name, value string) elem.Node {
+	return elem.Div(attrs.Props{attrs.Class: "field"},
+		elem.Label(attrs.Props{attrs.For: "dns-" + name}, i18nText(label)),
+		elem.Textarea(attrs.Props{attrs.ID: "dns-" + name, attrs.Name: name, "rows": "4", "spellcheck": "false"}, elem.Text(value)))
+}
+
+func AdminDNS(info AdminPageInfo, dns AdminDNSSettings) *elem.Element {
+	content := []elem.Node{
+		pageHead("DNS", "MagicDNS, nameservers, search domains and Split DNS"),
+		cardSection("Configuration source",
+			"The YAML file is authoritative. The dashboard edits that file; environment overrides take precedence and disable editing. DNS changes require a Meshora restart. SIGHUP reloads policy only.",
+			elem.P(nil, i18nText("Configuration checks do not test DNS resolution. Client DNS preferences, network access and policy can affect the result."))),
+	}
+	if dns.Error != "" {
+		content = append(content, elem.Div(attrs.Props{attrs.Class: adminFlashErrorClass, attrs.Role: "alert"}, i18nText(dns.Error)))
+	}
+
+	if dns.PendingRestart {
+		content = append(content, elem.Div(attrs.Props{attrs.Class: adminFlashErrorClass, attrs.Role: "status"}, i18nText("Saved DNS settings differ from the running configuration. Restart required; saved values are not active yet.")))
+	}
+
+	if dns.ReadOnlyReason != "" {
+		content = append(content, cardSection("Read-only DNS settings", dns.ReadOnlyReason, routeList(dns.Overrides)))
+	}
+
+	active, saved := dns.Active, dns.Saved
+
+	type comparison struct {
+		label         string
+		active, saved elem.Node
+		changed       bool
+	}
+
+	pairs := []comparison{
+		{"MagicDNS", routeFlag(active.MagicDNS), routeFlag(saved.MagicDNS), active.MagicDNS != saved.MagicDNS},
+		{"MagicDNS base domain", textOrDash(active.BaseDomain), textOrDash(saved.BaseDomain), active.BaseDomain != saved.BaseDomain},
+		{"Override local DNS", routeFlag(active.OverrideLocalDNS), routeFlag(saved.OverrideLocalDNS), active.OverrideLocalDNS != saved.OverrideLocalDNS},
+		{"Global nameservers", dnsMultiline(active.Global), dnsMultiline(saved.Global), active.Global != saved.Global},
+		{"Search domains", dnsMultiline(active.Search), dnsMultiline(saved.Search), active.Search != saved.Search},
+		{"Split DNS", dnsMultiline(active.Split), dnsMultiline(saved.Split), active.Split != saved.Split},
+	}
+
+	rows := make([]elem.Node, 0, len(pairs))
+	for _, p := range pairs {
+		var (
+			next  = p.saved
+			state = i18nText("Matches running configuration")
+		)
+		if !dns.HasSaved {
+			next = i18nText("Unavailable")
+			state = i18nText("Unknown")
+		} else if p.changed {
+			state = i18nText("Restart required")
+		}
+
+		rows = append(rows, elem.Tr(nil, elem.Td(nil, i18nText(p.label)), elem.Td(nil, p.active), elem.Td(nil, next), elem.Td(nil, state)))
+	}
+
+	content = append(content, cardSection("Running and saved DNS settings", "Running values were loaded at startup. Saved values are read from the current YAML file.",
+		dataTable("DNS settings", []string{"Setting", "Running", "Saved for next start", "Activation"}, rows)))
+
+	if dns.EffectiveAvailable {
+		routeRows := make([]elem.Node, 0, len(dns.EffectiveRoutes))
+		for _, entry := range dns.EffectiveRoutes {
+			resolvers := dnsMultiline(entry.Resolvers)
+			if entry.Resolvers == "" {
+				resolvers = i18nText("Resolved locally by the client")
+			}
+
+			routeRows = append(routeRows, elem.Tr(nil, elem.Td(nil, elem.Text(entry.Domain)), elem.Td(nil, resolvers)))
+		}
+
+		content = append(content, cardSection("Effective client DNS baseline",
+			"This is the current server-side DNS baseline, including generated MagicDNS reverse zones. Policy may customize NextDNS per device. This does not confirm that a client applied it or resolved a name.",
+			detailList(detail("MagicDNS", routeFlag(dns.EffectiveMagic)),
+				detail("Override nameservers", routeList(dns.EffectiveResolvers)),
+				detail("Fallback nameservers", routeList(dns.EffectiveFallback)),
+				detail("Effective search domains", routeList(dns.EffectiveSearch)),
+				detail("Active extra records", elem.Text(strconv.Itoa(dns.ExtraRecordCount)))),
+			elem.Details(nil, elem.Summary(nil, i18nText("Show effective DNS routes")), dataTable("Effective DNS routes", []string{"Domain", "Nameservers or local resolution"}, routeRows))))
+	} else {
+		content = append(content, cardSection("Effective client DNS baseline", "No client DNS configuration is available from the running server."))
+	}
+
+	if dns.Writable {
+		edit := dns.Form
+		choices := func(value bool) []AdminChoice {
+			return []AdminChoice{{Value: "true", Label: "Yes", Selected: value}, {Value: "false", Label: "No", Selected: !value}}
+		}
+		form := postForm(info, "/dns", "stack",
+			elem.Input(attrs.Props{attrs.Type: inputTypeHidden, attrs.Name: "revision", attrs.Value: html.EscapeString(dns.Revision)}),
+			selectField("MagicDNS", "magic_dns", choices(edit.MagicDNS), ""),
+			textField("MagicDNS base domain", "base_domain", edit.BaseDomain, false),
+			selectField("Override local DNS", "override_local_dns", choices(edit.OverrideLocalDNS), ""),
+			dnsTextArea("Global nameservers (one per line)", "global", edit.Global),
+			dnsTextArea("Search domains (one per line)", "search", edit.Search),
+			dnsTextArea("Split DNS (YAML domain to resolver lists)", "split", edit.Split),
+			elem.P(attrs.Props{attrs.Class: "muted"}, i18nText("Use IPv4, IPv6 or HTTPS DNS-over-HTTPS URLs for nameservers. Override local DNS requires at least one global nameserver. Split DNS uses lowercase domains without trailing dots; [] means local resolution. Use {} to remove all Split DNS rules.")),
+			elem.Pre(attrs.Props{attrs.Class: adminCodeblockClass}, elem.Text("corp.example.net:\n  - 192.0.2.53\nlocal.example.net: []")),
+			elem.P(attrs.Props{attrs.Class: "muted"}, i18nText("Only changed DNS fields are replaced. Extra records, file references, comments and other configuration values are retained. Do not edit the file externally while saving from the dashboard.")),
+			submitButton("Save DNS for next start", "btn-primary"))
+		content = append(content, cardSection("Edit saved DNS settings", "Saving validates configuration and writes the YAML file. It does not activate DNS or test resolution.", form))
+	}
+
+	return info.shell("DNS", content...)
+}
+
+type (
+	AdminPolicyField struct{ Key, Value string }
+	AdminPolicyEntry struct {
+		Fields []AdminPolicyField
+		Value  string
+	}
+	AdminPolicySection struct {
+		Key, Value string
+		Fields     []AdminPolicyField
+		Entries    []AdminPolicyEntry
+	}
+	AdminPolicyTagged struct {
+		ID   uint64
+		Name string
+		Tags []string
+	}
+	AdminPolicyInfo struct {
+		Loaded                                     types.PolicySnapshot
+		Source, Reference, Fingerprint, Raw, Error string
+		Empty                                      bool
+		Sections                                   []AdminPolicySection
+		Tagged                                     []AdminPolicyTagged
+	}
+)
+
+func policySectionDescription(key string) (string, string, bool) {
+	switch key {
+	case "acls":
+		return "Network rules (ACLs)", "Configured source and destination selectors, protocol and action. These rules have not been evaluated by this page.", true
+	case "grants":
+		return "Network and capability grants", "Configured selectors, IP rules, application capabilities and via targets are shown completely.", true
+	case "groups":
+		return "Groups", "Declared membership only. Group and user selectors are not expanded into effective device permissions.", true
+	case "tagOwners":
+		return "Tags and tag owners", "Declared identities allowed to assign tags. Tagged devices belong to their tags; a recorded creator is not their user owner.", true
+	case "autoApprovers":
+		return "Automatic route approvals", "Declared subnet and exit-node auto-approvers. These entries do not prove an approval, access or route reachability.", true
+	case "hosts":
+		return "Host aliases", "Configured address aliases. This is not a DNS resolution result.", true
+	case "ssh":
+		return "SSH rules", "Configured SSH selectors, local users, actions and check periods. No SSH authorization check was run.", true
+	case "nodeAttrs":
+		return "Device attributes", "Configured targets, capabilities and address pools. NextDNS profile and metadata settings may affect individual devices.", true
+	case "tests":
+		return "Declared policy tests", "Test declarations from the source. This page does not execute them or report a pass result.", true
+	case "sshTests":
+		return "Declared SSH tests", "SSH test declarations from the source. This page does not execute them or report a pass result.", true
+	case "randomizeClientPort":
+		return "Client port randomization", "Configured value from the source, not confirmation of client adoption.", true
+	default:
+		return "Additional policy section", "This source field is not interpreted by this view. Its complete value is retained below; engine support is not asserted.", false
+	}
+}
+
+func policyFieldLabel(key string) string {
+	switch key {
+	case "action":
+		return "Configured action"
+	case "src":
+		return "Sources"
+	case "dst":
+		return "Destinations"
+	case "proto":
+		return "Protocol"
+	case "ip":
+		return "IP rules"
+	case "app":
+		return "Application capabilities"
+	case "via":
+		return "Via targets"
+	case "target":
+		return "Targets"
+	case "attr":
+		return "Attributes"
+	case "ipPool":
+		return "Address pools"
+	case "users":
+		return "Local SSH users"
+	case "checkPeriod":
+		return "SSH check period"
+	case "acceptEnv":
+		return "Accepted environment variables"
+	case "accept":
+		return "Expected accepts"
+	case "deny":
+		return "Expected denies"
+	default:
+		return "Other source field"
+	}
+}
+
+func policyFields(fields []AdminPolicyField, rule bool) elem.Node {
+	rows := make([]elem.Node, 0, len(fields))
+	for _, field := range fields {
+		var label elem.Node = elem.Code(nil, elem.Text(field.Key))
+		if rule {
+			label = elem.Div(attrs.Props{attrs.Class: "cell-stack"}, i18nText(policyFieldLabel(field.Key)), elem.Code(nil, elem.Text(field.Key)))
+		}
+
+		rows = append(rows, elem.Tr(nil, elem.Td(nil, label), elem.Td(nil, dnsMultiline(field.Value))))
+	}
+
+	return dataTable("Configured source fields", []string{"Source field", "Configured value"}, rows)
+}
+
+func AdminPolicy(info AdminPageInfo, policy AdminPolicyInfo) *elem.Element {
+	content := []elem.Node{
+		pageHead("Policy", "Read-only policy source overview"),
+		cardSection("Evidence and limits",
+			"This page reads the current configured source. It does not compile policy, evaluate permissions, run policy tests, reload policy or change configuration.",
+			detailList(detail("Source mode", i18nText(policy.Source)),
+				detail("Source reference", textOrDash(policy.Reference)),
+				detail("Current source SHA-256", textOrDash(policy.Fingerprint))),
+			detailList(detail("Loaded revision", elem.Text(strconv.FormatUint(policy.Loaded.Revision, 10))),
+				detail("Loaded SHA-256", elem.Text(policy.Loaded.SHA256)),
+				detail("Engine acceptance time (UTC)", elem.Text(policy.Loaded.LoadedAt.UTC().Format(time.RFC3339Nano)))),
+			elem.P(nil, i18nText("The source and loaded snapshot are separate evidence. The loaded snapshot records engine acceptance, not client delivery or effective access.")),
+			linkButton(info.Base+"/policy/edit", "Edit policy", "btn-primary"),
+			elem.P(nil, i18nText("Configured rules do not prove allowed access or reachability. Actual evaluation depends on device identity, tags, policy context and current state."))),
+	}
+	if policy.Error != "" {
+		content = append(content, elem.Div(attrs.Props{attrs.Class: adminFlashErrorClass, attrs.Role: "alert"}, i18nText(policy.Error)))
+	}
+
+	if policy.Empty && policy.Error == "" {
+		content = append(content, cardSection("No explicit policy in the source", "An empty or absent source is not proof of the currently loaded policy or of any device permission."))
+	}
+
+	if len(policy.Sections) > 0 {
+		content = append(content, cardSection("Configured source sections", "Parsed for display only. Recognized field names do not mean that the source passed policy-engine validation. All source fields remain visible."))
+	}
+
+	for _, section := range policy.Sections {
+		title, hint, known := policySectionDescription(section.Key)
+
+		children := []elem.Node{elem.P(nil, elem.Code(nil, elem.Text(section.Key)))}
+		if !known {
+			children = append(children, elem.P(nil, i18nText("Not interpreted by this view")))
+		}
+
+		switch {
+		case len(section.Fields) > 0:
+			children = append(children, policyFields(section.Fields, false))
+		case len(section.Entries) > 0:
+			for index, entry := range section.Entries {
+				body := dnsMultiline(entry.Value)
+				if len(entry.Fields) > 0 {
+					body = policyFields(entry.Fields, true)
+				}
+
+				children = append(children, elem.Details(nil,
+					elem.Summary(nil, i18nText("Source entry"), elem.Text(" "+strconv.Itoa(index+1))), body))
+			}
+		default:
+			children = append(children, dnsMultiline(section.Value))
+		}
+
+		content = append(content, cardSection(title, hint, children...))
+	}
+
+	if len(policy.Tagged) > 0 {
+		rows := make([]elem.Node, 0, len(policy.Tagged))
+		for _, node := range policy.Tagged {
+			rows = append(rows, elem.Tr(nil,
+				elem.Td(nil, twoLine(nodeHref(info.Base, node.ID), node.Name, "")),
+				elem.Td(nil, routeList(node.Tags))))
+		}
+
+		content = append(content, cardSection("Recorded tagged devices",
+			"These tags come from the current device store. They are not proof of authorization under the source shown above. Tagged devices belong to their tags, even when a creator user is recorded.",
+			dataTable("Recorded tagged devices", []string{"Device", "Owning tags"}, rows)))
+	}
+
+	content = append(content, cardSection("Policy and DNS",
+		"Policy reloads do not activate DNS settings saved for the next Meshora start. NextDNS capabilities can customize DNS per device and must be considered separately from the global DNS baseline.",
+		linkButton(info.Base+"/dns", "View DNS baseline", "btn-ghost"),
+		linkButton(info.Base+"/routes", "View route approvals", "btn-ghost")))
+	if policy.Raw != "" {
+		content = append(content, cardSection("Complete policy source",
+			"Original source, including comments, unknown fields and unsupported content. This is source evidence, not a permission evaluation.",
+			elem.Details(nil, elem.Summary(nil, i18nText("Show complete policy source")), dnsMultiline(policy.Raw))))
+	}
+
+	return info.shell("Policy", content...)
+}
+
+type AdminPolicyEditorInfo struct {
+	Source, SourceRevision, SourceText, Text, LoadedText, LoadedHash, Token, Preview, Error, Diagnostics string
+	LoadedRevision                                                                                       uint64
+	LoadedAt                                                                                             time.Time
+	Implicit, Writable, Pending, Validated                                                               bool
+}
+
+func AdminPolicyEditor(info AdminPageInfo, editor AdminPolicyEditorInfo) *elem.Element {
+	content := []elem.Node{
+		backLink(info.Base+"/policy", "Policy"),
+		pageHead("Edit policy", "Validate, save and activate are separate actions"),
+		cardSection("Loaded policy evidence",
+			"This snapshot records the exact input accepted by the running engine. It does not confirm client delivery, allowed access or reachability.",
+			detailList(detail("Loaded revision", elem.Text(strconv.FormatUint(editor.LoadedRevision, 10))),
+				detail("Loaded SHA-256", elem.Text(editor.LoadedHash)),
+				detail("Engine acceptance time (UTC)", elem.Text(editor.LoadedAt.UTC().Format(time.RFC3339Nano))),
+				detail("Implicit boot policy", routeFlag(editor.Implicit)),
+				detail("Saved source", textOrDash(editor.Source))),
+			elem.Details(nil, elem.Summary(nil, i18nText("Show loaded policy text")), dnsMultiline(editor.LoadedText))),
+	}
+	if editor.Error != "" {
+		content = append(content, elem.Div(attrs.Props{attrs.Class: adminFlashErrorClass, attrs.Role: "alert"}, i18nText(editor.Error)))
+	}
+
+	if editor.Diagnostics != "" {
+		content = append(content, cardSection("Engine diagnostics", "Diagnostic text is shown as text, never executed.", dnsMultiline(editor.Diagnostics)))
+	}
+
+	pending := "The saved source matches the loaded text."
+	if editor.Pending {
+		pending = "The saved source differs from the loaded policy. Saving alone does not activate it."
+	}
+
+	content = append(content, cardSection("Saved and loaded state", pending,
+		elem.Details(nil, elem.Summary(nil, i18nText("Show current saved source")), dnsMultiline(editor.SourceText))))
+	if editor.Writable {
+		buttons := []elem.Node{submitButton("1. Validate and preview", "btn-primary")}
+		if editor.Validated {
+			buttons = append(buttons, elem.Button(attrs.Props{attrs.Type: submitType, attrs.Class: "btn btn-ghost", "formaction": info.Base + "/policy/save"}, i18nText("2. Save validated draft")))
+		}
+
+		form := postForm(info, "/policy/validate", "stack",
+			elem.Input(attrs.Props{attrs.Type: inputTypeHidden, attrs.Name: "source_revision", attrs.Value: html.EscapeString(editor.SourceRevision)}),
+			elem.Input(attrs.Props{attrs.Type: inputTypeHidden, attrs.Name: "loaded_revision", attrs.Value: strconv.FormatUint(editor.LoadedRevision, 10)}),
+			elem.Input(attrs.Props{attrs.Type: inputTypeHidden, attrs.Name: "validation_token", attrs.Value: html.EscapeString(editor.Token)}),
+			elem.Div(attrs.Props{attrs.Class: "field"},
+				elem.Label(attrs.Props{attrs.For: "policy-text"}, i18nText("HuJSON policy draft")),
+				elem.Textarea(attrs.Props{attrs.ID: "policy-text", attrs.Name: "policy_text", "rows": "18", "spellcheck": "false"}, elem.Text("\n"+editor.Text))),
+			elem.P(attrs.Props{attrs.Class: "muted"}, i18nText("Comments and unknown fields are preserved without JSON reformatting. Duplicate keys must be resolved explicitly. An edited draft must be validated again before saving.")),
+			elem.Div(attrs.Props{attrs.Class: adminActionsClass}, buttons...))
+		content = append(content, cardSection("Policy draft",
+			"Validation uses an isolated instance of the policy engine and its declared tests. It does not replace the active policy. Saving writes the reviewed draft only.", form))
+
+		if editor.Validated {
+			preview := dnsMultiline(editor.Preview)
+			if editor.Preview == "" {
+				preview = i18nText("No source changes.")
+			}
+
+			content = append(content, cardSection("Change preview",
+				"Minus lines belong to the current source; plus lines belong to the draft. The preview does not rewrite the draft. Validation must be repeated if text or runtime context changes.",
+				preview))
+		}
+
+		content = append(content, cardSection("Activate saved policy",
+			"Activation revalidates the saved source against current users and devices. Invalid input or an engine-switch failure keeps the previous loaded policy. A later route-processing failure is reported as new policy active, follow-up work failed; it is not rolled back.",
+			postForm(info, "/policy/activate", "stack",
+				elem.Input(attrs.Props{attrs.Type: inputTypeHidden, attrs.Name: "source_revision", attrs.Value: html.EscapeString(editor.SourceRevision)}),
+				elem.Input(attrs.Props{attrs.Type: inputTypeHidden, attrs.Name: "loaded_revision", attrs.Value: strconv.FormatUint(editor.LoadedRevision, 10)}),
+				submitButton("3. Activate saved source", "btn-primary"))))
+	}
+
+	content = append(content, cardSection("Source and concurrency",
+		"File and database sources are editable. Writes in this process are serialized and stale source or loaded revisions are rejected. Do not write the source simultaneously through an external editor or another server process. Policy activation does not activate saved DNS settings.",
+		linkButton(info.Base+"/dns", "View DNS baseline", "btn-ghost")))
+
+	return info.shell("Policy", content...)
 }

@@ -3,6 +3,8 @@ package state
 import (
 	"errors"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -1259,4 +1261,190 @@ func TestBackfillNodeIPsSurvivesConcurrentPersist(t *testing.T) {
 	dbNode, err := s.db.GetNodeByID(nodeID)
 	require.NoError(t, err)
 	assert.Nil(t, dbNode.IPv6, "database kept the removed IPv6 address")
+}
+
+var errPolicyEditorInjected = errors.New("injected policy editor write failure")
+
+func TestPolicyEditorStagesAndConflicts(t *testing.T) {
+	_, s, _ := persistTestSetup(t)
+	t.Cleanup(func() { _ = s.Close() })
+
+	source, loaded, err := s.PolicyEditorState()
+	require.NoError(t, err)
+
+	candidate := "{\n// preserved comment\n\"acls\": [], \"hosts\": {\"future-host\":\"192.0.2.44\"}\n}"
+	require.NoError(t, s.ValidatePolicyDraft(candidate, source.Revision, loaded.Revision))
+	require.Equal(t, loaded, s.PolicySnapshot())
+	saved, err := s.SavePolicyDraft(candidate, source.Revision, loaded.Revision)
+	require.NoError(t, err)
+	require.Equal(t, candidate, saved.Text)
+	require.Equal(t, loaded, s.PolicySnapshot())
+	_, err = s.SavePolicyDraft("{}", source.Revision, loaded.Revision)
+	require.ErrorIs(t, err, ErrPolicyEditorConflict)
+	result, err := s.ActivatePolicySource(saved.Revision, loaded.Revision)
+	require.NoError(t, err)
+	require.True(t, result.Applied)
+	require.Equal(t, candidate, result.Loaded.Text)
+	require.NotEmpty(t, result.Changes)
+
+	_, err = s.ActivatePolicySource(saved.Revision, loaded.Revision)
+	require.ErrorIs(t, err, ErrPolicyEditorConflict)
+	require.Equal(t, result.Loaded, s.PolicySnapshot())
+}
+
+func TestPolicyEditorInvalidLeavesRuntimeUnchanged(t *testing.T) {
+	_, s, _ := persistTestSetup(t)
+	t.Cleanup(func() { _ = s.Close() })
+
+	source, loaded, err := s.PolicyEditorState()
+	require.NoError(t, err)
+
+	for _, candidate := range []string{
+		"", "{", `{"future":{"retained":true}}`, `{"acls":[{"action":"drop","src":["*"],"dst":["*:*"]}]}`,
+		`{"acls":[],"acls":[]}`, `{"groups":{"group:ops":["persist-user@"],"group:ops":[]}}`,
+		`{"acls":[{"action":"accept","src":["*"],"dst":["*:*"]}],"tests":[{"src":"persist-user@","deny":["203.0.113.10:80"]}]}`,
+		`{"ssh":[{"action":"accept","src":["persist-user@"],"dst":["autogroup:self"],"users":["root"]}],"sshTests":[{"src":"persist-user@","dst":["autogroup:self"],"deny":["root"]}]}`,
+	} {
+		err = s.ValidatePolicyDraft(candidate, source.Revision, loaded.Revision)
+		require.Error(t, err, candidate)
+		_, err = s.SavePolicyDraft(candidate, source.Revision, loaded.Revision)
+		require.Error(t, err, candidate)
+
+		current, snapshot, readErr := s.PolicyEditorState()
+		require.NoError(t, readErr)
+		require.Equal(t, source, current)
+		require.Equal(t, loaded, snapshot)
+	}
+	// Externally stored invalid content must not replace the active engine.
+	_, err = s.SetPolicyInDB(`{"acls":[{"action":"drop"}]}`)
+	require.NoError(t, err)
+	stored, _, err := s.PolicyEditorState()
+	require.NoError(t, err)
+	result, err := s.ActivatePolicySource(stored.Revision, loaded.Revision)
+	require.Error(t, err)
+	require.False(t, result.Applied)
+	require.Equal(t, loaded, s.PolicySnapshot())
+}
+
+func TestPolicyEditorWriteFailure(t *testing.T) {
+	_, s, _ := persistTestSetup(t)
+	t.Cleanup(func() { _ = s.Close() })
+
+	source, loaded, err := s.PolicyEditorState()
+	require.NoError(t, err)
+	require.NoError(t, s.db.DB.Callback().Create().Before("gorm:create").Register("policy_editor_fail_write", func(tx *gorm.DB) {
+		if tx.Statement.Table == "policies" {
+			_ = tx.AddError(errPolicyEditorInjected)
+		}
+	}))
+	t.Cleanup(func() { _ = s.db.DB.Callback().Create().Remove("policy_editor_fail_write") })
+
+	_, err = s.SavePolicyDraft("{}", source.Revision, loaded.Revision)
+	require.ErrorIs(t, err, errPolicyEditorInjected)
+	current, snapshot, err := s.PolicyEditorState()
+	require.NoError(t, err)
+	require.Equal(t, source, current)
+	require.Equal(t, loaded, snapshot)
+}
+
+func TestPolicyEditorActivationFollowupFailure(t *testing.T) {
+	_, s, nodeID := persistTestSetup(t)
+	t.Cleanup(func() { _ = s.Close() })
+
+	route := netip.MustParsePrefix("10.9.0.0/24")
+	_, ok := s.nodeStore.UpdateNode(nodeID, func(n *types.Node) { n.Hostinfo = &tailcfg.Hostinfo{RoutableIPs: []netip.Prefix{route}} })
+	require.True(t, ok)
+
+	source, loaded, err := s.PolicyEditorState()
+	require.NoError(t, err)
+	saved, err := s.SavePolicyDraft(`{"autoApprovers":{"routes":{"10.9.0.0/24":["persist-user@"]}}}`, source.Revision, loaded.Revision)
+	require.NoError(t, err)
+	require.NoError(t, s.db.DB.Callback().Update().Before("gorm:update").Register("policy_editor_fail_routes", func(tx *gorm.DB) {
+		if tx.Statement.Table == "nodes" {
+			_ = tx.AddError(errPolicyEditorInjected)
+		}
+	}))
+	t.Cleanup(func() { _ = s.db.DB.Callback().Update().Remove("policy_editor_fail_routes") })
+
+	result, err := s.ActivatePolicySource(saved.Revision, loaded.Revision)
+	require.ErrorIs(t, err, errPolicyEditorInjected)
+	require.True(t, result.Applied, "follow-up failure must never be reported as an unchanged engine")
+	require.Equal(t, saved.Text, result.Loaded.Text)
+	require.Equal(t, result.Loaded, s.PolicySnapshot())
+	require.True(t, slices.ContainsFunc(result.Changes, func(c change.Change) bool { return c.IncludePolicy }))
+}
+
+func TestPolicyEditorFileExactAndFailedRename(t *testing.T) {
+	_, s, _ := persistTestSetup(t)
+	t.Cleanup(func() { _ = s.Close() })
+	path := filepath.Join(t.TempDir(), "policy.hujson")
+	original := "{\r\n// original comment\r\n\"acls\":[]\r\n}"
+	require.NoError(t, os.WriteFile(path, []byte(original), 0o600))
+
+	s.cfg.Policy.Mode = types.PolicyModeFile
+	s.cfg.Policy.Path = path
+	source, loaded, err := s.PolicyEditorState()
+	require.NoError(t, err)
+
+	candidate := "{\n// preserved as entered\n\"acls\":[],\"hosts\": {\"application\":\"192.0.2.80\"}\n}"
+	saved, err := s.SavePolicyDraft(candidate, source.Revision, loaded.Revision)
+	require.NoError(t, err)
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, candidate, string(data))
+	require.Equal(t, loaded, s.PolicySnapshot())
+	require.NoError(t, os.WriteFile(path, []byte(original), 0o600))
+
+	_, err = s.SavePolicyDraft(candidate, saved.Revision, loaded.Revision)
+	require.ErrorIs(t, err, ErrPolicyEditorConflict)
+	current, _, err := s.PolicyEditorState()
+	require.NoError(t, err)
+	// Force an atomic-rename error using a directory inside this test's temp tree.
+	bad := current
+	bad.Reference = t.TempDir()
+	err = s.writePolicyEditorFile(bad, candidate)
+	require.Error(t, err)
+	data, err = os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, original, string(data))
+	require.Equal(t, loaded, s.PolicySnapshot())
+}
+
+func TestPolicyEditorConcurrentSavesCAS(t *testing.T) {
+	_, s, _ := persistTestSetup(t)
+	t.Cleanup(func() { _ = s.Close() })
+
+	source, loaded, err := s.PolicyEditorState()
+	require.NoError(t, err)
+
+	start := make(chan struct{})
+	results := make(chan error, 2)
+
+	for _, candidate := range []string{"{/* draft one */}", "{/* draft two */}"} {
+		go func() {
+			<-start
+
+			_, saveErr := s.SavePolicyDraft(candidate, source.Revision, loaded.Revision)
+			results <- saveErr
+		}()
+	}
+
+	close(start)
+
+	successes, conflicts := 0, 0
+
+	for range 2 {
+		err = <-results
+		if err == nil {
+			successes++
+		} else if errors.Is(err, ErrPolicyEditorConflict) {
+			conflicts++
+		} else {
+			t.Errorf("unexpected save error: %v", err)
+		}
+	}
+
+	require.Equal(t, 1, successes)
+	require.Equal(t, 1, conflicts)
+	require.Equal(t, loaded, s.PolicySnapshot())
 }

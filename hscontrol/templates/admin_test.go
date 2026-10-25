@@ -165,7 +165,7 @@ func TestRouteDiagnosticsOnlyListUnapprovedAdvertisements(t *testing.T) {
 	assert.NotContains(t, body, "192.168.0.0/24")
 	assert.Contains(t, body, "&lt;script&gt;")
 	assert.NotContains(t, body, "<script>")
-	assert.Contains(t, body, "The reason is unknown.")
+	assert.Contains(t, body, "Verify the intended networks")
 }
 
 func TestPendingRegistrationGuidance(t *testing.T) {

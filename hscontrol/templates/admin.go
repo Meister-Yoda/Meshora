@@ -24,6 +24,12 @@ import (
 // dashboard form.
 const AdminCSRFField = "csrf_token"
 
+const (
+	adminCodeblockClass  = "codeblock"
+	adminActionsClass    = "actions"
+	adminFlashErrorClass = "flash flash-error"
+)
+
 // submitType is the type of every submit button.
 const submitType = "submit"
 
@@ -109,6 +115,7 @@ func AdminLogin(info AdminLoginInfo) *elem.Element {
 		card = append(card, elem.P(attrs.Props{attrs.Class: "muted"},
 			elem.A(attrs.Props{attrs.Href: info.Base + "/login?local=1"}, i18nText("Use local admin login"))))
 	}
+
 	return adminDocument(info.Base, "Sign in · Meshora", "auth",
 		elem.Main(attrs.Props{attrs.Class: "auth-card"}, card...),
 		elem.P(attrs.Props{attrs.Class: "auth-footer"}, poweredBy()...),
@@ -162,7 +169,7 @@ func AdminOverview(info AdminOverviewInfo) *elem.Element {
 		elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text(
 			"Run this on the device. The user then signs in with their identity provider.",
 		)),
-		elem.Pre(attrs.Props{attrs.Class: "codeblock"}, elem.Code(nil,
+		elem.Pre(attrs.Props{attrs.Class: adminCodeblockClass}, elem.Code(nil,
 			elem.Text("tailscale up --login-server "+info.ServerURL),
 		)),
 	)
@@ -304,7 +311,6 @@ type AdminNodeRow struct {
 
 const statusClass = "status"
 
-// AdminNodes renders the node list.
 // AdminNodeFilters describes shareable, intersecting device filters.
 type AdminNodeFilters struct {
 	Query, Status, User, Tag, Expiry string
@@ -349,6 +355,7 @@ func AdminFilteredNodes(info AdminPageInfo, nodes, all []AdminNodeRow, filters A
 
 		return result
 	}
+
 	return info.shell("Nodes",
 		pageHead("Nodes", "Search devices and combine filters."),
 		linkButton(strings.TrimSuffix(info.Base, "/admin")+"/connect", "Add device", "btn-primary"),
@@ -702,6 +709,9 @@ func mainNavigation(base, current string) elem.Node {
 		navLink(base+"/", "Overview", current == "Overview"),
 		navLink(base+"/users", "Users", current == "Users"),
 		navLink(base+"/nodes", "Nodes", current == "Nodes"),
+		navLink(base+"/routes", "Routes", current == "Routes"),
+		navLink(base+"/dns", "DNS", current == "DNS"),
+		navLink(base+"/policy", "Policy", current == "Policy"),
 		navLink(base+"/pending", "Pending", current == "Pending"),
 		navLink(base+"/keys", "Keys", current == "Keys"),
 		elem.P(attrs.Props{attrs.Class: "sidebar-label"}, i18nText("Administration")),
@@ -721,6 +731,7 @@ func adminDocument(base, title, bodyClass string, body ...elem.Node) *elem.Eleme
 	if bodyClass == "auth" && len(body) > 0 {
 		body = append([]elem.Node{body[0], languageSwitcher()}, body[1:]...)
 	}
+
 	return elem.Html(
 		attrs.Props{attrs.Lang: "en"},
 		elem.Head(
@@ -894,7 +905,7 @@ func AdminEnrollment(info AdminPageInfo, serverURL, platform string, oidc bool) 
 		cardSection("3. Finish registration", registration),
 		elem.Section(attrs.Props{attrs.Class: "card"}, elem.H2(nil, i18nText("4. Check your device")),
 			elem.P(nil, i18nText("After registration, return to the Tailscale app and check its connection state. An administrator can open your device in the device list to check the recorded state and next steps. Registration alone does not prove an active connection or reachability. If the request expired, start sign-in again on the device.")),
-			elem.Div(attrs.Props{attrs.Class: "actions"}, linkButton(info.Base+"/pending", "Review requests (admin)", "btn-secondary"), linkButton(info.Base+"/nodes", "Find device (admin)", "btn-primary"))),
+			elem.Div(attrs.Props{attrs.Class: adminActionsClass}, linkButton(info.Base+"/pending", "Review requests (admin)", "btn-secondary"), linkButton(info.Base+"/nodes", "Find device (admin)", "btn-primary"))),
 		elem.Script(attrs.Props{attrs.Src: html.EscapeString(info.Base + "/assets/enrollment.js"), "defer": "true"}),
 	)
 

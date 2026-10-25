@@ -2,6 +2,8 @@ package v2
 
 import (
 	"cmp"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,10 +35,11 @@ type PolicyManager struct {
 	// RWMutex, not Mutex, so concurrent map generation does not serialise on
 	// reads. The per-node caches are xsync.Maps so a read can fill them without
 	// taking the write lock.
-	mu    sync.RWMutex
-	pol   *Policy
-	users []types.User
-	nodes views.Slice[types.NodeView]
+	mu             sync.RWMutex
+	pol            *Policy
+	policySnapshot types.PolicySnapshot
+	users          []types.User
+	nodes          views.Slice[types.NodeView]
 	// nodesByID indexes nodes; see [PolicyManager.cacheableLocked].
 	nodesByID map[types.NodeID]types.NodeView
 
@@ -237,6 +240,8 @@ func NewPolicyManager(b []byte, users []types.User, nodes views.Slice[types.Node
 	if testErr := pm.RunSSHTests(); testErr != nil { //nolint:noinlineerr // boot path: warn-and-continue, not return
 		log.Warn().Err(testErr).Msg("policy sshTests failed at boot; server starting anyway, fix the policy and reload")
 	}
+
+	pm.recordPolicySnapshot(b)
 
 	return &pm, nil
 }
@@ -671,6 +676,8 @@ func (pm *PolicyManager) SetPolicy(polB []byte) (bool, error) {
 
 		return false, err
 	}
+
+	pm.recordPolicySnapshot(polB)
 
 	return changed, nil
 }
@@ -2164,4 +2171,21 @@ func (pm *PolicyManager) NodesWithChangedCapMap() []types.NodeID {
 	pm.nodeAttrsPending.Store(false)
 
 	return out
+}
+
+// recordPolicySnapshot is called under pm.mu, or during private construction.
+func (pm *PolicyManager) recordPolicySnapshot(raw []byte) {
+	sum := sha256.Sum256(raw)
+	pm.policySnapshot = types.PolicySnapshot{
+		Text: string(raw), SHA256: hex.EncodeToString(sum[:]),
+		Revision: pm.policySnapshot.Revision + 1, LoadedAt: time.Now().UTC(), Implicit: len(raw) == 0,
+	}
+}
+
+// PolicySnapshot returns an immutable copy of the last accepted original input.
+func (pm *PolicyManager) PolicySnapshot() types.PolicySnapshot {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+
+	return pm.policySnapshot
 }

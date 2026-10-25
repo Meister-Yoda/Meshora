@@ -3,6 +3,7 @@ package webui
 import (
 	"fmt"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -95,6 +96,7 @@ func TestActionsRequireCSRF(t *testing.T) {
 		fmt.Sprintf("/admin/users/%d/delete", user.ID),
 		nodePath + "/rename",
 		nodePath + "/tags",
+		nodePath + "/routes",
 		nodePath + "/expire",
 		nodePath + "/delete",
 		"/admin/pending/" + id.String() + "/assign",
@@ -139,6 +141,7 @@ func TestAssignPendingRegistration(t *testing.T) {
 	require.Equal(t, http.StatusOK, response.StatusCode)
 	assert.Contains(t, guide, "An administrator must review the request")
 	assert.NotContains(t, guide, "csrf_token")
+
 	user := env.state.CreateUserForTest("sebastian")
 
 	id, req := newRegistration("winpc")
@@ -465,4 +468,138 @@ func TestActionPagesEscapeUserData(t *testing.T) {
 		require.Equal(t, http.StatusOK, resp.StatusCode, path)
 		assertEscaped(t, body)
 	}
+}
+
+func TestRouteManagement(t *testing.T) {
+	env := newTestEnv(t)
+	user := env.state.CreateUserForTest("routerowner")
+	node := env.state.CreateRegisteredNodeForTest(user, "router")
+	// DB test helpers do not preload the User association. Username-based
+	// policy resolution requires it, just like a production NodeStore entry.
+	node.User = user
+	require.False(t, node.IsTagged())
+	require.Equal(t, user.ID, node.User.ID)
+
+	subnet := netip.MustParsePrefix("10.20.0.0/24")
+	stale := netip.MustParsePrefix("192.168.8.0/24")
+	v4, v6 := netip.MustParsePrefix("0.0.0.0/0"), netip.MustParsePrefix("::/0")
+	node.Hostinfo = &tailcfg.Hostinfo{RoutableIPs: []netip.Prefix{subnet, v4, v6}}
+	node.ApprovedRoutes = []netip.Prefix{stale}
+	env.state.PutNodeInStoreForTest(*node)
+	csrf := env.signedIn()
+	path := fmt.Sprintf("/admin/nodes/%d", node.ID)
+	response, body := env.get(env.client, "/admin/routes?lang=en")
+	require.Equal(t, http.StatusOK, response.StatusCode)
+	assert.Contains(t, body, stale.String())
+	assert.Contains(t, body, "Approval does not prove reachability")
+	assert.Contains(t, body, "Manual approval required")
+	_, body = env.action(csrf, path+"/routes", url.Values{"route": {subnet.String()}, "action": {"approve"}})
+	assert.Contains(t, body, "Route approval saved")
+
+	stored, ok := env.state.GetNodeByID(node.ID)
+	require.True(t, ok)
+	assert.ElementsMatch(t, []netip.Prefix{subnet, stale}, stored.ApprovedRoutes().AsSlice())
+	assert.ElementsMatch(t, []netip.Prefix{subnet}, stored.AllApprovedRoutes())
+	env.action(csrf, path+"/routes", url.Values{"route": {v4.String()}, "action": {"approve"}, "return": {"routes"}})
+	stored, _ = env.state.GetNodeByID(node.ID)
+	assert.ElementsMatch(t, []netip.Prefix{v4, v6}, stored.ExitRoutes())
+	env.action(csrf, path+"/routes", url.Values{"route": {v6.String()}, "action": {"revoke"}})
+	stored, _ = env.state.GetNodeByID(node.ID)
+	assert.Empty(t, stored.ExitRoutes())
+	assert.Contains(t, stored.ApprovedRoutes().AsSlice(), subnet)
+	env.action(csrf, path+"/routes", url.Values{"route": {stale.String()}, "action": {"approve"}})
+	stored, _ = env.state.GetNodeByID(node.ID)
+	assert.Len(t, stored.ApprovedRoutes().AsSlice(), 2)
+	env.action(csrf, path+"/routes", url.Values{"route": {stale.String()}, "action": {"revoke"}})
+	stored, _ = env.state.GetNodeByID(node.ID)
+	assert.Equal(t, []netip.Prefix{subnet}, stored.ApprovedRoutes().AsSlice())
+	env.action(csrf, path+"/routes", url.Values{"route": {subnet.String()}, "action": {"revoke"}})
+	stored, _ = env.state.GetNodeByID(node.ID)
+	assert.Empty(t, stored.ApprovedRoutes().AsSlice())
+	assert.Empty(t, stored.AllApprovedRoutes())
+
+	for _, form := range []url.Values{
+		{"route": {"invalid"}, "action": {"approve"}},
+		{"route": {subnet.String()}, "action": {"delete"}},
+		{"route": {"10.20.0.1/24"}, "action": {"approve"}},
+	} {
+		form.Set("csrf_token", csrf)
+		resp, _ := env.post(env.client, path+"/routes", form)
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	}
+
+	resp, _ := env.post(env.client, path+"/routes", url.Values{"route": {subnet.String()}, "action": {"approve"}})
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	require.Positive(t, env.changeCount())
+	require.NoError(t, env.state.UpdatePolicyManagerUsersForTest())
+	require.NoError(t, env.state.UpdatePolicyManagerNodesForTest())
+	changed, err := env.state.SetPolicy([]byte(`{"autoApprovers":{"routes":{"10.20.0.0/24":["routerowner@"]}}}`))
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.True(t, stored.User().Valid())
+	require.False(t, stored.IsTagged())
+	require.Contains(t, stored.AnnouncedRoutes(), subnet)
+	assert.True(t, env.state.RouteAutoApproval(stored, subnet))
+	assert.False(t, env.state.RouteAutoApproval(stored, stale))
+	assert.False(t, env.state.RouteAutoApproval(stored, v4), "subnet approval does not approve exit routes")
+	c, err := env.state.AutoApproveRoutes(stored)
+	require.NoError(t, err)
+	env.handler.change(c)
+	stored, _ = env.state.GetNodeByID(node.ID)
+	assert.Equal(t, []netip.Prefix{subnet}, stored.ApprovedRoutes().AsSlice())
+	// Revocation is immediate, but the unchanged policy can approve it again.
+	_, body = env.action(csrf, path+"/routes", url.Values{"route": {subnet.String()}, "action": {"revoke"}})
+	assert.Contains(t, body, "Matching autoApprovers may approve it again")
+
+	stored, _ = env.state.GetNodeByID(node.ID)
+	require.Empty(t, stored.ApprovedRoutes().AsSlice())
+	_, err = env.state.AutoApproveRoutes(stored)
+	require.NoError(t, err)
+
+	stored, _ = env.state.GetNodeByID(node.ID)
+	assert.Equal(t, []netip.Prefix{subnet}, stored.ApprovedRoutes().AsSlice())
+
+	_, body = env.get(env.client, "/admin/routes?lang=en")
+	assert.Contains(t, body, "Automatic approval allowed by current policy")
+	resp, _ = env.get(newClient(t), "/admin/routes")
+	assert.Equal(t, http.StatusSeeOther, resp.StatusCode)
+	resp, _ = env.post(env.client, "/admin/nodes/999999/routes", url.Values{"csrf_token": {csrf}, "route": {subnet.String()}, "action": {"approve"}})
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
+func TestRouteAutoApprovalOwnership(t *testing.T) {
+	env := newTestEnv(t)
+	user := env.state.CreateUserForTest("routeowner")
+	node := env.state.CreateRegisteredNodeForTest(user, "tagged-router")
+	node.User = user
+	node.Tags = []string{"tag:router"}
+	route := netip.MustParsePrefix("10.30.0.0/24")
+	v4, v6 := netip.MustParsePrefix("0.0.0.0/0"), netip.MustParsePrefix("::/0")
+	node.Hostinfo = &tailcfg.Hostinfo{RoutableIPs: []netip.Prefix{route, v4, v6}}
+	view := env.state.PutNodeInStoreForTest(*node)
+	require.True(t, view.IsTagged())
+	require.True(t, view.UserID().Valid(), "creator tracking is retained")
+	require.True(t, view.User().Valid())
+	require.NoError(t, env.state.UpdatePolicyManagerUsersForTest())
+	require.NoError(t, env.state.UpdatePolicyManagerNodesForTest())
+	_, err := env.state.SetPolicy([]byte(`{"tagOwners":{"tag:router":["routeowner@"]},"autoApprovers":{"routes":{"10.30.0.0/24":["routeowner@"]},"exitNode":["routeowner@"]}}`))
+	require.NoError(t, err)
+	assert.False(t, env.state.RouteAutoApproval(view, route), "creator is not the owner of a tagged node")
+	assert.False(t, env.state.RouteAutoApproval(view, v4))
+	_, err = env.state.AutoApproveRoutes(view)
+	require.NoError(t, err)
+
+	view, _ = env.state.GetNodeByID(node.ID)
+	require.Empty(t, view.ApprovedRoutes().AsSlice())
+
+	_, err = env.state.SetPolicy([]byte(`{"tagOwners":{"tag:router":["routeowner@"]},"autoApprovers":{"routes":{"10.30.0.0/24":["tag:router"]},"exitNode":["tag:router"]}}`))
+	require.NoError(t, err)
+	assert.True(t, env.state.RouteAutoApproval(view, route))
+	assert.True(t, env.state.RouteAutoApproval(view, v4))
+	assert.True(t, env.state.RouteAutoApproval(view, v6))
+	_, err = env.state.AutoApproveRoutes(view)
+	require.NoError(t, err)
+
+	view, _ = env.state.GetNodeByID(node.ID)
+	assert.ElementsMatch(t, []netip.Prefix{route, v4, v6}, view.ApprovedRoutes().AsSlice())
 }

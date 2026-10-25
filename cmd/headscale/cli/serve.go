@@ -49,6 +49,7 @@ var serveCmd = &cobra.Command{
 				return fmt.Errorf("reloading setup configuration: %w", err)
 			}
 		}
+
 		app, err := newHeadscaleServerWithConfig()
 		if err != nil {
 			if squibbleErr, ok := errors.AsType[squibble.ValidationError](err); ok {
@@ -65,6 +66,7 @@ var serveCmd = &cobra.Command{
 				return fmt.Errorf("finishing initial setup: %w", err)
 			}
 		}
+
 		err = app.Serve()
 		if err == nil || errors.Is(err, http.ErrServerClosed) {
 			return nil

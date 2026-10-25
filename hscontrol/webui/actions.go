@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/netip"
 	"slices"
 	"strconv"
 	"strings"
@@ -50,6 +51,7 @@ func (h *Handler) redirect(w http.ResponseWriter, r *http.Request, path string, 
 			path += "/" + section
 		}
 	}
+
 	if f != nil {
 		sessionFrom(r).setFlash(f)
 	}
@@ -317,6 +319,7 @@ func (h *Handler) nodeDetail(w http.ResponseWriter, r *http.Request) {
 		MachineKey:     shortMachineKey(node.MachineKey().String()),
 		RegisterMethod: node.RegisterMethod(),
 		CreatedAt:      node.CreatedAt(),
+		Routes:         h.routeRows(node),
 	}).Render())
 }
 
@@ -785,4 +788,103 @@ func (h *Handler) expireKey(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.redirect(w, r, "/keys", success("Expired key %s.", key.Prefix))
+}
+
+func (h *Handler) routeRows(node types.NodeView) []templates.AdminRouteRow {
+	prefixes := append(node.AnnouncedRoutes(), node.ApprovedRoutes().AsSlice()...)
+	slices.SortFunc(prefixes, netip.Prefix.Compare)
+	prefixes = slices.Compact(prefixes)
+
+	rows := make([]templates.AdminRouteRow, 0, len(prefixes))
+	for _, prefix := range prefixes {
+		rows = append(rows, templates.AdminRouteRow{
+			NodeID: node.ID().Uint64(), Device: node.GivenName(), Prefix: prefix.String(),
+			Advertised: slices.Contains(node.AnnouncedRoutes(), prefix),
+			Approved:   slices.Contains(node.ApprovedRoutes().AsSlice(), prefix),
+			Automatic:  h.state.RouteAutoApproval(node, prefix),
+			Exit:       prefix.Bits() == 0,
+		})
+	}
+
+	return rows
+}
+
+func (h *Handler) routeOverview(w http.ResponseWriter, r *http.Request) {
+	var rows []templates.AdminRouteRow
+	for _, node := range h.state.ListNodes().All() {
+		rows = append(rows, h.routeRows(node)...)
+	}
+
+	slices.SortFunc(rows, func(a, b templates.AdminRouteRow) int {
+		if c := cmp.Compare(a.Device, b.Device); c != 0 {
+			return c
+		}
+
+		if c := cmp.Compare(a.NodeID, b.NodeID); c != 0 {
+			return c
+		}
+
+		return cmp.Compare(a.Prefix, b.Prefix)
+	})
+	writeHTML(w, http.StatusOK, templates.AdminRoutes(h.pageInfo(r), rows).Render())
+}
+
+func (h *Handler) setNodeRoute(w http.ResponseWriter, r *http.Request) {
+	h.routesMu.Lock()
+	defer h.routesMu.Unlock()
+
+	node, ok := h.nodeFromURL(w, r)
+	if !ok {
+		return
+	}
+
+	back := nodePath(node)
+	if formValue(r, "return") == "routes" {
+		back = "/routes"
+	}
+
+	prefix, err := netip.ParsePrefix(formValue(r, "route"))
+
+	action := formValue(r, "action")
+	if err != nil || prefix != prefix.Masked() || (action != "approve" && action != "revoke") {
+		http.Error(w, "invalid route action", http.StatusBadRequest)
+		return
+	}
+
+	targets := []netip.Prefix{prefix}
+	if prefix.Bits() == 0 {
+		targets = []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0"), netip.MustParsePrefix("::/0")}
+	}
+
+	approved := node.ApprovedRoutes().AsSlice()
+	if action == "approve" {
+		// Never grant a route supplied only by a forged or outdated form.
+		if !slices.Contains(node.AnnouncedRoutes(), prefix) {
+			h.redirect(w, r, back, failure("The device no longer advertises this route. Refresh and review its routes."))
+			return
+		}
+
+		approved = append(approved, targets...)
+	} else {
+		approved = slices.DeleteFunc(approved, func(p netip.Prefix) bool { return slices.Contains(targets, p) })
+	}
+
+	slices.SortFunc(approved, netip.Prefix.Compare)
+	approved = slices.Compact(approved)
+	_, c, err := h.state.SetApprovedRoutes(node.ID(), approved)
+	h.change(c)
+
+	if err != nil {
+		h.redirect(w, r, back, failure("Could not save route approval: %v", err))
+		return
+	}
+
+	log.Info().Str("admin", sessionFrom(r).username).Uint64("node.id", node.ID().Uint64()).Str("route", prefix.String()).Str("action", action).Msg("web admin route approval")
+
+	message := "Route approval saved. Approval does not prove reachability."
+	if action == "revoke" {
+		message = "Route approval revoked. Matching autoApprovers may approve it again on a later advertisement or policy reload."
+	}
+
+	h.redirect(w, r, back, success("%s", message))
 }

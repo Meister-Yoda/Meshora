@@ -116,3 +116,168 @@ additional protection despite listening on all interfaces.
     ```
 
     Access the debug interface on your device by opening `http://<IP_OF_HEADSCALE>:9090/debug/` in your web browser.
+
+## Meshora joint network acceptance — 2026-10-25
+
+This report closes the previously missing device-diagnostics acceptance
+handover. The accumulated routes, DNS and policy changes were exercised
+together with device filtering and onboarding. Tests used the complete
+working tree based on `3fa01802`, a newly built
+`Dockerfile.meshora` image, a disposable SQLite database and three real
+Tailscale 1.104.1 clients. No production policy, DNS source or deployment
+was changed.
+
+### Isolation and evidence
+
+All server configuration, credentials, resolver fixtures and client state
+belonged to the acceptance run. Only its controller wrote configuration:
+initial setup, subsequent dashboard submissions and controlled restarts
+were sequential. No external configuration editor or second Meshora
+process wrote the source. File-source compare-and-swap remains subject to
+the cross-process limitation documented in [Policy](policy.md).
+
+The disposable artifacts are under
+`control_logs/network-acceptance/` (gitignored): build/lint/test logs,
+`traffic-results.json`, `exit-client-routes.txt`, `dns-results.json`,
+`ui-results.json`, screenshots and recorded offline diagnostics.
+They are local evidence, not release assets; fixture secrets and private
+test certificates must never be published.
+
+The initial fixture had an empty DERP map and was corrected before client
+acceptance. Docker-only control-name resolution and Tailscale's HTTPS
+reconnect fallback required a fixed control-host mapping and a local TLS
+proxy trusted only by the test clients. The successful DNS restart run
+then reconnected clients automatically, without restarting them.
+
+### Verified behavior
+
+- Browser onboarding assigned an actual pending client to the intended
+  user. It registered and opened its control stream.
+
+- An unapproved advertised subnet failed actual HTTP requests. Approval
+  enabled IPv4 and IPv6 requests; withdrawal blocked requests again.
+  Responses identified the isolated target and observed source address.
+
+- A single exit-node action approved both `0.0.0.0/0` and `::/0`.
+  HTTP over each family succeeded through the selected exit node, and
+  revoking either displayed default route revoked both and blocked both
+  requests.
+
+- For the synthetic exit target, its directly attached LAN was also
+  advertised to satisfy Tailscale's local-forwarding safeguard, but its
+  subnet routes were **not approved**. Recorded client IPv4 routes show the
+  default route, with no specific route to that target subnet. Thus the
+  successful request used exit routing, not an approved target subnet.
+
+- This WSL kernel lacks Tailscale IPv6 NAT support. Isolated targets had
+  an explicit return route for the tailnet IPv6 prefix. IPv6 forwarding
+  and withdrawal were tested; IPv6 NAT was not.
+
+- Invalid policy validation preserved working peer access. Saving a valid
+  restrictive draft left access unchanged. Activating it denied the
+  formerly allowed peer while still permitting the tagged router.
+  Restoring the policy restored peer access, with clients continuously
+  connected during those policy changes.
+
+- The router belonged to `tag:router`; its recorded creator was not used
+  as user ownership. A manual subnet withdrawal under matching
+  `autoApprovers` blocked traffic. Activating the saved policy again
+  restored approval and actual traffic, as the dashboard warning states.
+
+- DNS validation rejected an invalid resolver. Saving valid resolver,
+  MagicDNS domain, search-domain and Split-DNS changes kept the old
+  resolution active. Policy activation also kept it active. After server
+  restart, real queries through the client's `100.100.100.100` resolver
+  used the new global resolver, the separate split resolver and the new
+  MagicDNS suffix. A short-name lookup through the system resolver
+  verified the search domain. Old-only names stopped resolving.
+
+- Chromium checked 40 page/language/viewport combinations: overview,
+  devices, device details, routes, DNS, policy overview/editor, pending
+  registrations, settings and onboarding, in English/German at 1440/390
+  pixels. No document overflow or uncaught page errors occurred.
+  Screenshots were inspected. Keyboard checks covered device filtering,
+  opening mobile navigation, following a route link and focus traversal.
+
+- HTML-looking policy comments remained text in the editor and preview.
+  A forged native form submission returned HTTP 403 and left the saved
+  policy unchanged. An intervening activation invalidated another open
+  form. Stopping a real peer produced the explicit offline diagnostic;
+  the peer was restarted after that check. A later browser action expired
+  its authorization and verified the separate sign-in guidance. Mobile
+  table scrolling was exercised with the keyboard; the Linux connection
+  guide remained usable with JavaScript disabled.
+
+- A second fresh instance used a file-backed policy. Browser validation
+  rejected duplicate keys, unknown sections and invalid rules without
+  writing the file. Saving retained the exact submitted HuJSON, including
+  comments and a leading newline; activation remained a separate action.
+  Native form submission normalized LF to CRLF as documented.
+
+### Diagnostic interpretation
+
+Online means a recorded control connection, not successful service or
+route access. Offline does not identify the cause. Expired authorization
+is a separate state; template tests cover its sign-in guidance and UTC
+timestamps. The live offline check and independent HTTP probes above
+must not be conflated with a dashboard reachability measurement. The UI
+does not perform one.
+
+`TestDeviceDiagnostics`, `TestRouteDiagnosticsOnlyListUnapprovedAdvertisements`,
+`TestDiagnosticTranslations`, device-filter tests and public-enrollment
+tests ran with the accumulated changes. File/database policy validation,
+source conflicts, exact HuJSON preservation, write failures and
+post-switch follow-up failures are also covered by state/HTTP tests,
+including race checks. Injected failure tests are not claims that such
+failures were induced in the real-client browser run.
+
+### Suite status and remaining limits
+
+The first full `go test ./... -count=1 -timeout=20m` run timed out in
+the server suite. Missing `tofu`/`tscli` was resolved by isolated,
+checksum-verified binaries (OpenTofu 1.13.1, tscli 0.3.0). The JSON
+diagnostic run identified the locally enabled `TestHAProberProperty`:
+its documented default is 100 real-Noise checks, about 15–25 seconds
+each. The next full run retains that budget, records per-test JSON and
+uses `GOMAXPROCS=4`, `-parallel=4`, `-timeout=45m`.
+An intermediate diagnostic run was stopped after temporary Go helper
+programs in the log directory were inadvertently included as a duplicate-
+main package. Their source files now have non-Go extensions;
+`go list ./...` confirms they are outside package discovery. The final
+complete run is recorded in `unit-complete.jsonl`.
+
+Full-suite final result: **passed**, exit code 0, 30 test-bearing packages.
+The server package completed in 1831.845 seconds, including all 100 HA
+property checks (1238.74 seconds). No assertion was relaxed and no
+server-suite case was skipped. The corrected full command was:
+
+```sh
+PATH="/path/to/acceptance/tools:$PATH" GOMAXPROCS=4 \
+  go test ./... -count=1 -json -parallel=4 -timeout=45m
+```
+
+The complete lint run reported zero issues and `git diff --check`
+passed. Race tests passed for webui, templates, state, policy/v2, types,
+db and the CLI. Docker integration tests passed for enabling subnet and
+exit routes, MagicDNS, live database policy updates and multiple-network
+exit routing.
+
+CSS formatting was checked with Prettier after the browser run. Its
+non-whitespace content was unchanged; a newly built formatted image
+passed setup/health smoke checks. No behavior or presentation change
+required another browser run.
+
+HTTP probes opened fresh connections; revocation of already established,
+long-lived flows was not tested.
+
+Not tested here: DoH/NextDNS resolver services, an existing production database/configuration, physical
+Windows/macOS/mobile clients, the user's Authentik provider, Safari or
+Firefox, Internet-wide IPv6/NAT, PostgreSQL in this combined run, DNS-01
+or certificates. TLS certificates above were test infrastructure only.
+
+For later policy editing, retain the separate validate/save/activate
+steps, raw HuJSON and loaded-snapshot evidence. Do not claim client
+delivery or reachability from an accepted snapshot. Follow-up failures
+after a successful engine switch mean new policy active with incomplete
+follow-up work, not rollback. Policy reload never activates saved global
+DNS settings; device-specific NextDNS capabilities remain separate.
