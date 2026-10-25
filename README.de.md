@@ -9,15 +9,13 @@ für Benutzer, Geräte, Registrierungen und Vorab-Authentifizierungsschlüssel.
 > Meshora ist ein unabhängiger Fork und gehört weder zu Tailscale Inc. noch
 > zum Headscale-Projekt. Bitte melde Meshora-Probleme in diesem Repository.
 
-## v0.1.0-rc.6
+## v0.1.0-rc.7
 
-- Seitennavigation mit einklappbarem Menü auf kleinen Bildschirmen.
-- Getrennte Einstellungsseiten für Identitätsanbieter, Admin-Zugriff und Darstellung.
-- OIDC-Rückleitungs-URLs direkt bei den Einstellungen des Identitätsanbieters.
-- Kompakter Deutsch/English-Umschalter mit Flaggen-Dropdown und gespeicherter Wahl.
-- Ausgewählte Headscale-Korrekturen für Datenbankverbindungen, Policy-Updates,
-  Client-Verbindungen und Shutdown; Go-Builds mit Version 1.27.3.
-- Authentik-Admin-Anmeldung, Rollen-/Gruppenbindung und lokaler Wiederherstellungszugang.
+- Geführte Geräteanmeldung unter /connect, mit manueller Kopiermöglichkeit.
+- Kombinierte Gerätesuche und Filter für Status, Eigentümer, Tags und Ablauf.
+- Gerätediagnose, UTC-Zeitpunkte, Routenfreigaben und nächste Schritte.
+- Getrennte OIDC-Gruppenregeln für Gerätezugriff und Administration.
+- Verknüpfung eindeutiger lokaler Benutzer per verifizierter E-Mail mit Konfliktschutz.
 
 ## Mit Docker starten
 
@@ -34,7 +32,7 @@ unter **Einstellungen** eingerichtet werden. Der Assistent speichert die
 Konfiguration und aktiviert den Server automatisch. Bestehende Installationen
 behalten ihre Daten und überspringen die Einrichtung.
 
-Das Release-Image lautet `ghcr.io/meister-yoda/meshora:v0.1.0-rc.6`, für Linux
+Das Release-Image lautet `ghcr.io/meister-yoda/meshora:v0.1.0-rc.7`, für Linux
 AMD64 und ARM64. Volumes, Reverse Proxies und Updates beschreibt die
 [Docker-Anleitung](packaging/docker/README.md). Ein Reverse Proxy muss den
 **Container-Port 8080** ansprechen.
