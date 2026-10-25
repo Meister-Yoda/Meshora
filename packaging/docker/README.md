@@ -31,6 +31,11 @@ Die öffentliche Anleitung zeigt keine Gerätedaten oder Anmeldeschlüssel.
 Die Diagnose beschreibt gespeicherte Zustände; sie misst keine Erreichbarkeit.
 Routenfreigaben erfolgen weiterhin per CLI/API oder autoApprovers.
 
+Der breite Lauf mit go test ./... ist im Servertest-Paket nicht grün:
+tofu und tscli fehlen in der lokalen Umgebung; zusätzlich wurde das
+Standardlimit von zehn Minuten erreicht. Die gezielten Release- und
+Anmeldeprüfungen werden separat bewertet.
+
 Der begleitete Durchlauf mit echten Geräten und dem eigenen Authentik-Anbieter
 steht noch aus. Safari, Firefox und native Mobilclients sind nicht durch den
 Chromium-Test abgedeckt. Ein Abschlussbericht aus dem Koordinationschat war
