@@ -303,7 +303,7 @@ func isTailscaleReservedIP(ip netip.Addr) bool {
 // it will be added.
 // If a prefix type has been removed (IPv4 or IPv6), it
 // will remove the IPs in that family from the node.
-func (db *HSDatabase) BackfillNodeIPs(i *IPAllocator) ([]string, error) {
+func (db *HSDatabase) BackfillNodeIPs(i *IPAllocator, zoneModels ...*types.NetworkZones) ([]string, error) {
 	var (
 		err error
 		ret []string
@@ -321,13 +321,31 @@ func (db *HSDatabase) BackfillNodeIPs(i *IPAllocator) ([]string, error) {
 			return fmt.Errorf("listing nodes to backfill IPs: %w", err)
 		}
 
+		var zones *types.NetworkZones
+		if len(zoneModels) > 0 {
+			zones = zoneModels[0]
+		}
+
 		for _, node := range nodes {
 			log.Trace().Caller().EmbedObject(node).Msg("ip backfill check started because node found in database")
+
+			var zone4, zone6 *netip.Addr
+			if zones != nil && ((i.prefix4 != nil && node.IPv4 == nil) || (i.prefix6 != nil && node.IPv6 == nil)) {
+				zone4, zone6, err = i.nextForZone(zones.ZoneForNode(node.View()), zones, node.IPv4 == nil, node.IPv6 == nil)
+				if err != nil {
+					return fmt.Errorf("allocating zone addresses for node(%d): %w", node.ID, err)
+				}
+			}
 
 			changed := false
 			// IPv4 prefix is set, but node ip is missing, alloc
 			if i.prefix4 != nil && node.IPv4 == nil {
-				ret4, err := i.allocateNext(&i.prev4, i.prefix4)
+				ret4 := zone4
+
+				var err error
+				if zones == nil {
+					ret4, err = i.allocateNext(&i.prev4, i.prefix4)
+				}
 				if err != nil {
 					return fmt.Errorf("allocating IPv4 for node(%d): %w", node.ID, err)
 				}
@@ -340,7 +358,12 @@ func (db *HSDatabase) BackfillNodeIPs(i *IPAllocator) ([]string, error) {
 
 			// IPv6 prefix is set, but node ip is missing, alloc
 			if i.prefix6 != nil && node.IPv6 == nil {
-				ret6, err := i.allocateNext(&i.prev6, i.prefix6)
+				ret6 := zone6
+
+				var err error
+				if zones == nil {
+					ret6, err = i.allocateNext(&i.prev6, i.prefix6)
+				}
 				if err != nil {
 					return fmt.Errorf("allocating IPv6 for node(%d): %w", node.ID, err)
 				}
@@ -389,4 +412,121 @@ func (i *IPAllocator) FreeIPs(ips []netip.Addr) {
 	for _, ip := range ips {
 		i.usedIPs.Remove(ip)
 	}
+}
+
+// NextForZone allocates both address families atomically from optional zone
+// subpools. Other zone pools are excluded from the default allocation space.
+// IPSet range subtraction avoids scanning enormous reserved IPv6 subprefixes.
+func (i *IPAllocator) NextForZone(zone *types.NetworkZone, zones *types.NetworkZones) (*netip.Addr, *netip.Addr, error) {
+	if zones == nil {
+		return i.Next()
+	}
+
+	return i.nextForZone(zone, zones, true, true)
+}
+
+func (i *IPAllocator) nextForZone(zone *types.NetworkZone, zones *types.NetworkZones, need4, need6 bool) (*netip.Addr, *netip.Addr, error) {
+	err := zones.ValidateMeshPrefixes(i.prefix4, i.prefix6)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
+	used, err := i.usedIPs.IPSet()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var result [2]*netip.Addr
+
+	for family, parent := range []*netip.Prefix{i.prefix4, i.prefix6} {
+		if parent == nil || (family == 0 && !need4) || (family == 1 && !need6) {
+			continue
+		}
+
+		chosen := *parent
+
+		selected := ""
+		if zone != nil {
+			selected = zone.Pool4
+			if family == 1 {
+				selected = zone.Pool6
+			}
+		}
+
+		if selected != "" {
+			chosen = netip.MustParsePrefix(selected)
+		}
+
+		var available netipx.IPSetBuilder
+		available.AddPrefix(chosen)
+		available.RemoveSet(used)
+
+		start, end := util.GetIPPrefixEndpoints(chosen)
+		available.Remove(start)
+		available.Remove(end)
+
+		for _, other := range zones.Zones {
+			raw := other.Pool4
+			if family == 1 {
+				raw = other.Pool6
+			}
+
+			if raw != "" && raw != selected {
+				available.RemovePrefix(netip.MustParsePrefix(raw))
+			}
+		}
+		// Reserved Tailscale service addresses must never be allocated.
+		available.RemovePrefix(tsaddr.ChromeOSVMRange())
+		available.Remove(tsaddr.TailscaleServiceIP())
+		available.Remove(tsaddr.TailscaleServiceIPv6())
+
+		set, err := available.IPSet()
+		if err != nil {
+			return nil, nil, err
+		}
+
+		candidate := start.Next()
+		if i.strategy == types.IPAllocationStrategyRandom {
+			candidate, err = randomNext(chosen)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+		// Sequential mode starts at the beginning of the available set. Exhausted
+		// space is represented by an empty range list, not an unbounded scan.
+		ranges := set.Ranges()
+		if len(ranges) == 0 {
+			return nil, nil, ErrCouldNotAllocateIP
+		}
+
+		ip := ranges[0].From()
+		for _, r := range ranges {
+			if r.To().Compare(candidate) >= 0 {
+				ip = r.From()
+				if candidate.Compare(ip) > 0 {
+					ip = candidate
+				}
+
+				break
+			}
+		}
+
+		result[family] = new(ip)
+	}
+
+	var next netipx.IPSetBuilder
+	next.AddSet(used)
+
+	for _, ip := range result {
+		if ip != nil {
+			next.Add(*ip)
+		}
+	}
+
+	i.usedIPs = next
+
+	return result[0], result[1], nil
 }

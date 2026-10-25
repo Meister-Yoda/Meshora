@@ -710,6 +710,7 @@ func mainNavigation(base, current string) elem.Node {
 		navLink(base+"/users", "Users", current == "Users"),
 		navLink(base+"/nodes", "Nodes", current == "Nodes"),
 		navLink(base+"/routes", "Routes", current == "Routes"),
+		navLink(base+"/zones", "Zonen", current == "Zonen"),
 		navLink(base+"/dns", "DNS", current == "DNS"),
 		navLink(base+"/policy", "Policy", current == "Policy"),
 		navLink(base+"/pending", "Pending", current == "Pending"),

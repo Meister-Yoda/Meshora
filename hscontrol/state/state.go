@@ -1182,13 +1182,18 @@ func (s *State) RenameNode(nodeID types.NodeID, newName string) (types.NodeView,
 // Like the other writes, it returns the changes alongside an error once the
 // NodeStore holds new addresses; callers publish them before handling it.
 func (s *State) BackfillNodeIPs() ([]string, []change.Change, error) {
+	zones, err := types.NetworkZonesFromPolicy(s.polMan.PolicySnapshot().Text)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	genBefore := s.polMan.NodesGeneration()
 
 	// Hold persistMu until NodeStore has the new addresses, or a concurrent
 	// persist writes the old ones back from NodeStore in between.
 	s.persistMu.Lock()
 
-	changes, err := s.db.BackfillNodeIPs(s.ipAlloc)
+	changes, err := s.db.BackfillNodeIPs(s.ipAlloc, zones)
 	if err != nil {
 		s.persistMu.Unlock()
 
@@ -2291,7 +2296,7 @@ func (s *State) createAndSaveNewNode(params newNodeParams) (types.NodeView, erro
 	}
 
 	// Allocate new IPs
-	ipv4, ipv6, err := s.ipAlloc.Next()
+	ipv4, ipv6, err := s.allocateZoneIPs(nodeToRegister.View())
 	if err != nil {
 		return types.NodeView{}, fmt.Errorf("allocating IPs: %w", err)
 	}
@@ -4067,6 +4072,16 @@ func (s *State) validatePolicyEditor(text string) error {
 	_, err = decoder.Token()
 	if !errors.Is(err, io.EOF) {
 		return ErrPolicyEditorInput
+	}
+
+	zones, zoneErr := types.NetworkZonesFromPolicy(text)
+	if zoneErr != nil {
+		return zoneErr
+	}
+
+	err = zones.ValidateMeshPrefixes(s.cfg.PrefixV4, s.cfg.PrefixV6)
+	if err != nil {
+		return err
 	}
 
 	users, err := s.ListAllUsers()

@@ -201,6 +201,9 @@ func (h *Handler) Routes(r chi.Router) {
 
 			r.Get("/nodes", h.nodes)
 			r.Get("/routes", h.routeOverview)
+			r.Get("/zones", h.zonesPage)
+			r.Post("/zones", h.updateZones)
+			r.Post("/zones/activate", h.activateZones)
 			r.Get("/dns", h.dnsSettings)
 			r.Get("/policy", h.policyPage)
 			r.Get("/policy/edit", h.policyEditor)

@@ -238,6 +238,14 @@ func (pol *Policy) compileGrants(
 		return nil
 	}
 
+	if pol.NetworkZones != nil {
+		expanded, err := pol.materializeNetworkZones(nodes)
+		if err != nil {
+			return nil
+		} // fail closed; updateLocked reports the error
+
+		pol = expanded
+	}
 	grants := pol.Grants
 	for _, acl := range pol.ACLs {
 		grants = append(grants, aclToGrants(acl)...)

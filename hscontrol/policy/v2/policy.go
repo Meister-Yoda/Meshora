@@ -252,7 +252,12 @@ func NewPolicyManager(b []byte, users []types.User, nodes views.Slice[types.Node
 // as it was, and a retry with the same input recompiles.
 func (pm *PolicyManager) updateLocked() (bool, error) {
 	// One tag index serves every resolution in this compile.
-	pol := pm.pol.withNodesByTag(pm.nodes)
+	zonePolicy, err := pm.pol.materializeNetworkZones(pm.nodes)
+	if err != nil {
+		return false, err
+	}
+
+	pol := zonePolicy.withNodesByTag(pm.nodes)
 
 	// Compile all grants once. Both global and per-node filter
 	// rules are derived from these compiled grants.
@@ -293,6 +298,7 @@ func (pm *PolicyManager) updateLocked() (bool, error) {
 		}
 	}
 
+	pm.pol = zonePolicy
 	pm.compiledGrants = grants
 	pm.userNodeIdx = buildUserNodeIndex(pm.nodes)
 	pm.needsPerNodeFilter = hasPerNodeGrants(pm.compiledGrants)
@@ -1425,6 +1431,19 @@ func (pm *PolicyManager) ViaRoutesForPeer(viewer, peer types.NodeView) types.Via
 
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
+
+	// A source with no permitted zone exit must not receive default routes,
+	// including when it has no via grant at all. Packet filtering alone would
+	// leave unusable exits visible in the client's picker.
+	if pm.pol != nil && pm.pol.NetworkZones != nil && peer.IsExitNode() {
+		allowed := pm.pol.NetworkZones.ExitsForNode(viewer)
+		permitted := slices.ContainsFunc(allowed, peer.HasTag)
+
+		if !permitted {
+			result.Exclude = append(result.Exclude, peer.ExitRoutes()...)
+			return result
+		}
+	}
 
 	// pm.pol is written by SetPolicy under pm.mu; reading it before the
 	// lock races with concurrent policy reloads.

@@ -1958,17 +1958,18 @@ type Policy struct {
 	// callers using it should panic if not
 	validated bool `json:"-"`
 
-	Groups              Groups             `json:"groups,omitempty"`
-	Hosts               Hosts              `json:"hosts,omitempty"`
-	TagOwners           TagOwners          `json:"tagOwners,omitempty"`
-	ACLs                []ACL              `json:"acls,omitempty"`
-	Grants              []Grant            `json:"grants,omitempty"`
-	NodeAttrs           []NodeAttrGrant    `json:"nodeAttrs,omitempty"`
-	AutoApprovers       AutoApproverPolicy `json:"autoApprovers"`
-	SSHs                []SSH              `json:"ssh,omitempty"`
-	Tests               []PolicyTest       `json:"tests,omitempty"`
-	SSHTests            []SSHPolicyTest    `json:"sshTests,omitempty"`
-	RandomizeClientPort bool               `json:"randomizeClientPort,omitempty"`
+	NetworkZones        *types.NetworkZones `json:"networkZones,omitempty"`
+	Groups              Groups              `json:"groups,omitempty"`
+	Hosts               Hosts               `json:"hosts,omitempty"`
+	TagOwners           TagOwners           `json:"tagOwners,omitempty"`
+	ACLs                []ACL               `json:"acls,omitempty"`
+	Grants              []Grant             `json:"grants,omitempty"`
+	NodeAttrs           []NodeAttrGrant     `json:"nodeAttrs,omitempty"`
+	AutoApprovers       AutoApproverPolicy  `json:"autoApprovers"`
+	SSHs                []SSH               `json:"ssh,omitempty"`
+	Tests               []PolicyTest        `json:"tests,omitempty"`
+	SSHTests            []SSHPolicyTest     `json:"sshTests,omitempty"`
+	RandomizeClientPort bool                `json:"randomizeClientPort,omitempty"`
 
 	// nodesByTag is set only on the copy [Policy.withNodesByTag] makes for
 	// one compile, and indexes the nodes that compile resolves against.
@@ -3201,6 +3202,40 @@ func unmarshalPolicy(b []byte) (*Policy, error) {
 		}
 
 		return nil, fmt.Errorf("parsing policy from bytes: %w", err)
+	}
+
+	if policy.NetworkZones != nil {
+		if len(policy.ACLs) != 0 || len(policy.Grants) != 0 {
+			return nil, fmt.Errorf("%w: networkZones cannot be combined with ACLs or grants", types.ErrNetworkZones)
+		}
+
+		err = policy.NetworkZones.Validate()
+		if err != nil {
+			return nil, err
+		}
+
+		for _, zone := range policy.NetworkZones.Zones {
+			tags := slices.Clone(zone.Exits)
+			for _, pool := range zone.IPv6Pools {
+				tags = append(tags, pool.Gateway)
+			}
+
+			for _, tag := range tags {
+				if _, ok := policy.TagOwners[Tag(tag)]; !ok {
+					return nil, fmt.Errorf("%w: zone references undefined gateway tag %q", ErrUndefinedTagReference, tag)
+				}
+			}
+		}
+
+		for _, limit := range policy.NetworkZones.ExitLimits {
+			for _, tag := range limit.Exits {
+				if _, ok := policy.TagOwners[Tag(tag)]; !ok {
+					return nil, fmt.Errorf("%w: exit limit references undefined gateway tag %q", ErrUndefinedTagReference, tag)
+				}
+			}
+		}
+		// An empty zone model must never fall through to implicit allow-all.
+		policy.ACLs = []ACL{}
 	}
 
 	if err := policy.validate(); err != nil { //nolint:noinlineerr

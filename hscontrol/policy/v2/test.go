@@ -231,6 +231,12 @@ func evaluateTests(pol *Policy, users []types.User, nodes views.Slice[types.Node
 		return nil
 	}
 
+	var err error
+
+	pol, err = pol.materializeNetworkZones(nodes)
+	if err != nil {
+		return err
+	}
 	grants := pol.compileGrants(users, nodes)
 
 	var filter []tailcfg.FilterRule
