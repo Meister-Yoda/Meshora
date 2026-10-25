@@ -4,18 +4,19 @@
 
 Meshora is a self-hosted Tailscale control server built on
 [Headscale](https://github.com/juanfont/headscale), with a web dashboard for
-managing users, devices, registrations and pre-auth keys.
+managing users, devices, registrations, pre-auth keys and network settings.
 
 > Meshora is an independent fork, unaffiliated with Tailscale Inc. and the
 > Headscale project. Please report Meshora issues in this repository.
 
-## v0.1.0-rc.7
+## v0.1.0-rc.8
 
-- Guided desktop/mobile device sign-in under /connect, with manual copy fallback.
-- Combined device search and filters for status, owner, tags and expiry.
-- Device diagnostics, UTC timestamps, route approvals and next steps.
-- Separate OIDC device-access groups and administrator permissions.
-- Verified-email linking for unique local users, with conflict protection.
+- Manage subnet routes and paired IPv4/IPv6 exit-node approvals in the dashboard.
+- Compare saved and running DNS settings; safely edit the authoritative YAML source.
+- Validate, save and activate HuJSON policies separately, with loaded snapshots and conflict checks.
+- Preserve policy comments and reject invalid or ambiguous input without replacing the active policy.
+- Use device filters, diagnostics and the guided desktop/mobile sign-in flow together.
+- Verified with real isolated Tailscale clients, actual traffic and DNS resolution after restart.
 
 ## Start with Docker
 
@@ -31,7 +32,7 @@ least 12 characters. OIDC is optional and can also be configured later under
 **Settings**. The setup assistant saves the configuration and activates the
 server automatically. Existing installations keep their data and skip setup.
 
-The release image is `ghcr.io/meister-yoda/meshora:v0.1.0-rc.7`, for Linux
+The release image is `ghcr.io/meister-yoda/meshora:v0.1.0-rc.8`, for Linux
 AMD64 and ARM64. See the [Docker guide](packaging/docker/README.md) for volumes,
 reverse proxies and updates. Route a reverse proxy to **container port 8080**.
 
@@ -41,6 +42,8 @@ Visit `/admin/` to view users, registered and online devices, and pending
 requests. Admins can create, rename and delete users; rename, tag, expire and
 delete devices; assign/reject registrations; approve/reject SSH checks; and
 create/expire pre-auth keys. New keys are displayed in full only once.
+
+Manage subnet routes and exit nodes under **Routes**; approval alone does not prove reachability. **DNS** distinguishes running settings from saved changes that need a restart. **Policy** separates validation, saving and activation for file and database sources. Matching auto-approvers may restore manually revoked routes after a later advertisement or policy reload. See the [joint acceptance report](docs/ref/debug.md) for verified behavior and remaining limits.
 
 Choose **Deutsch** or **English** at the top of the page. The selected language
 is saved in a cookie across login, setup, dashboard and public pages. Before a
@@ -66,7 +69,7 @@ web_admin:
     allowed_groups: []
     allowed_roles: [meshora-admin]
     roles_claim: roles
-    button_text: ""  # translated default
+    button_text: "" # translated default
 
 oidc:
   issuer: https://auth.example.com/application/o/meshora/

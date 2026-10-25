@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## Meshora v0.1.0-rc.8 (2026-10-25)
+
+- Manage subnet routes and exit nodes centrally and on device details; approve/revoke IPv4 and IPv6 default routes together.
+- Distinguish advertised, approved and available routes and current auto-approval eligibility without claiming reachability or historical approval origin.
+- Add validated DNS editing of the authoritative YAML file, conflict and environment-override protection, and separate saved/running state with restart requirements.
+- Add policy source overview and HuJSON editing for file/database sources with separate validation, saving and activation, exact submitted text and stale-form protection.
+- Record accepted policy snapshots and explicitly report failures after engine activation without claiming rollback.
+- Complete combined device, diagnostics and onboarding acceptance with real isolated clients, IPv4/IPv6 traffic, DNS restart and live policy delivery checks.
+- Pass the complete Go suite, full lint, targeted race tests and Docker/browser acceptance; document the remaining platform/provider limits.
+
 ## Meshora v0.1.0-rc.7 (2026-10-25)
 
 - Add a public, bilingual /connect guide for desktop and mobile device sign-in.
@@ -11,7 +21,6 @@
 - Link a unique local user to an OIDC identity only through a verified email; reject ambiguous or already linked identities.
 - Fix development CLI parsing of string-encoded user IDs.
 - Keep real-device/Authentik acceptance as a follow-up; isolated HTTP, browser and container tests cover the local release.
-
 
 ## Meshora v0.1.0-rc.6 (2026-10-24)
 
@@ -35,7 +44,6 @@
 - Allow immediate customization of the OIDC button label.
 - Apply the Meshora wordmark, dark-mode variant and symbol favicon across setup and dashboard pages.
 - Update Docker Compose defaults and document provider setup and recovery.
-
 
 ## 0.30.0 (202x-xx-xx)
 

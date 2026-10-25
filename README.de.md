@@ -4,18 +4,19 @@
 
 Meshora ist ein selbst gehosteter Tailscale-Control-Server auf Basis von
 [Headscale](https://github.com/juanfont/headscale), mit einem Web-Dashboard
-für Benutzer, Geräte, Registrierungen und Vorab-Authentifizierungsschlüssel.
+für Benutzer, Geräte, Registrierungen, Vorab-Schlüssel und Netzwerkeinstellungen.
 
 > Meshora ist ein unabhängiger Fork und gehört weder zu Tailscale Inc. noch
 > zum Headscale-Projekt. Bitte melde Meshora-Probleme in diesem Repository.
 
-## v0.1.0-rc.7
+## v0.1.0-rc.8
 
-- Geführte Geräteanmeldung unter /connect, mit manueller Kopiermöglichkeit.
-- Kombinierte Gerätesuche und Filter für Status, Eigentümer, Tags und Ablauf.
-- Gerätediagnose, UTC-Zeitpunkte, Routenfreigaben und nächste Schritte.
-- Getrennte OIDC-Gruppenregeln für Gerätezugriff und Administration.
-- Verknüpfung eindeutiger lokaler Benutzer per verifizierter E-Mail mit Konfliktschutz.
+- Subnetzrouten und gemeinsame IPv4-/IPv6-Freigaben für Exit Nodes im Dashboard verwalten.
+- Gespeicherten und laufenden DNS-Zustand vergleichen; die maßgebliche YAML-Datei sicher bearbeiten.
+- HuJSON-Policies getrennt validieren, speichern und aktivieren, mit geladenen Snapshots und Konflikterkennung.
+- Kommentare erhalten und ungültige oder mehrdeutige Eingaben ohne Austausch der aktiven Policy abweisen.
+- Gerätefilter, Diagnose und geführte Anmeldung für Desktop und Mobilgeräte gemeinsam nutzen.
+- Mit echten isolierten Tailscale-Clients, Datenverbindungen und DNS-Auflösung nach Neustart geprüft.
 
 ## Mit Docker starten
 
@@ -32,7 +33,7 @@ unter **Einstellungen** eingerichtet werden. Der Assistent speichert die
 Konfiguration und aktiviert den Server automatisch. Bestehende Installationen
 behalten ihre Daten und überspringen die Einrichtung.
 
-Das Release-Image lautet `ghcr.io/meister-yoda/meshora:v0.1.0-rc.7`, für Linux
+Das Release-Image lautet `ghcr.io/meister-yoda/meshora:v0.1.0-rc.8`, für Linux
 AMD64 und ARM64. Volumes, Reverse Proxies und Updates beschreibt die
 [Docker-Anleitung](packaging/docker/README.md). Ein Reverse Proxy muss den
 **Container-Port 8080** ansprechen.
@@ -44,6 +45,8 @@ wartende Anfragen. Du kannst Benutzer anlegen, umbenennen und löschen;
 Geräte umbenennen, taggen, abmelden und löschen; Registrierungen zuweisen oder
 ablehnen; SSH-Prüfungen freigeben oder ablehnen sowie Vorab-Schlüssel anlegen
 und deaktivieren. Neue Schlüssel werden nur einmal vollständig angezeigt.
+
+Unter **Routen** verwaltest du Subnetzrouten und Exit Nodes; eine Freigabe belegt keine Erreichbarkeit. **DNS** trennt laufende Einstellungen von gespeicherten Änderungen, die einen Neustart benötigen. **Policy** trennt Validierung, Speicherung und Aktivierung für Datei- und Datenbankquellen. Passende Auto-Genehmigungen können manuell zurückgenommene Routen nach späteren Ankündigungen oder Policy-Reloads erneut freigeben. Der [gemeinsame Abnahmebericht](docs/ref/debug.md) nennt Prüfergebnisse und Grenzen.
 
 Wähle oben **Deutsch** oder **English**. Die Wahl wird in einem Cookie für
 Login, Einrichtung, Dashboard und öffentliche Seiten gespeichert. Ohne eigene
@@ -69,7 +72,7 @@ web_admin:
     allowed_groups: []
     allowed_roles: [meshora-admin]
     roles_claim: roles
-    button_text: ""  # übersetzter Standard
+    button_text: "" # übersetzter Standard
 
 oidc:
   issuer: https://auth.example.com/application/o/meshora/

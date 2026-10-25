@@ -1,18 +1,18 @@
 # Meshora starten und im Browser einrichten
 
-## Neu in v0.1.0-rc.7
+## Neu in v0.1.0-rc.8
 
-- Geführte Geräteanmeldung unter /connect, für Desktop und Mobilgeräte.
-- Kopierhilfe mit JavaScript und manuell auswählbarer Text ohne JavaScript.
-- Kombinierbare Gerätesuche und Filter für Status, Benutzer, Tags und Ablauf.
-- Diagnose mit UTC-Zeitpunkten, Routenfreigaben und konkreten Handlungshilfen.
-- Separate OIDC-Gruppenregeln für Gerätezugriff und Administration.
-- Verknüpfung eines eindeutigen lokalen Benutzers bei verifizierter OIDC-E-Mail.
+- Zentrale Routenübersicht und Freigabe/Rücknahme auf den Gerätedetails.
+- Gemeinsame Behandlung der IPv4-/IPv6-Standardrouten eines Exit Nodes.
+- DNS-Verwaltung mit gespeicherten und laufenden Werten, Validierung und Neustarthinweis.
+- Policy-Übersicht und HuJSON-Editor mit getrennten Schritten für Validieren, Speichern und Aktivieren.
+- Geladene Policy-Snapshots, Konflikterkennung und ausdrücklich ausgewiesene Aktivierungs-Folgefehler.
+- Gemeinsame Prüfung mit Gerätefiltern, Diagnose und der geführten Geräteanmeldung.
 
 ### Hinweise vor dem Update
 
 Konfiguration und Datenbank bei gestopptem Dienst sichern; vorhandene Volumes
-beibehalten. Das Image gezielt auf v0.1.0-rc.7 setzen. Der interne
+beibehalten. Das Image gezielt auf v0.1.0-rc.8 setzen. Der interne
 Proxy-Port bleibt 8080. Eine neue Datenbankmigration wird nicht eingeführt.
 Änderungen an OIDC-Anbieter und Gruppenregeln werden nach Neustart wirksam.
 
@@ -24,26 +24,34 @@ Gerätezugriff und Admin-Zugriff sind getrennte Berechtigungen.
 
 ### Abnahme und Grenzen
 
-Die lokale Abnahme umfasst Go-/HTTP-Tests, gezielte Race-Prüfungen,
-einen OIDC-Durchlauf mit isolierten Tailscale-Containern und Chromium-Prüfungen
-für Deutsch/Englisch, Mobil/Desktop, Tastatur und Kopieren mit/ohne JavaScript.
-Die öffentliche Anleitung zeigt keine Gerätedaten oder Anmeldeschlüssel.
-Die Diagnose beschreibt gespeicherte Zustände; sie misst keine Erreichbarkeit.
-Routenfreigaben erfolgen weiterhin per CLI/API oder autoApprovers.
+Die vollständige Go-Suite ist bestanden, einschließlich aller 100 lokalen
+HA-Zufallsprüfungen. Lint, CSS-/Dokumentationsformatierung, Race-Tests und
+git diff --check sind sauber. Fünf Docker-Integrationsprüfungen sowie
+Browserabläufe mit neuen isolierten Instanzen und echten Tailscale-Clients
+sind bestanden: Subnetz-/Exit-Verkehr über IPv4 und IPv6, Freigabe und
+Rücknahme, Policy-Zustellung mit erlaubten/verweigerten Verbindungen,
+erneute Auto-Genehmigung nach Rücknahme und DNS-Auflösung nach Neustart.
+Datei- und Datenbankquellen wurden mit getrenntem Speichern/Aktivieren
+geprüft; Kommentare bleiben im übermittelten HuJSON erhalten.
 
-Der breite Lauf mit go test ./... ist im Servertest-Paket nicht grün:
-tofu und tscli fehlen in der lokalen Umgebung; zusätzlich wurde das
-Standardlimit von zehn Minuten erreicht. Die gezielten Release- und
-Anmeldeprüfungen werden separat bewertet.
+Deutsch/Englisch, Desktop/Mobil, Tastatur, XSS/CSRF, veraltete Formulare,
+Offline- und Ablaufdiagnose sowie die Anleitung ohne JavaScript sind
+geprüft. Die Diagnose misst selbst keine Erreichbarkeit. DNS-Änderungen
+werden erst beim Neustart geladen; Policy-Reloads aktivieren sie nicht.
+Nach erfolgreicher Policy-Übernahme können Folgearbeiten fehlschlagen:
+Die neue Policy bleibt dann aktiv; es wird kein Rollback behauptet.
 
-Der begleitete Durchlauf mit echten Geräten und dem eigenen Authentik-Anbieter
-steht noch aus. Safari, Firefox und native Mobilclients sind nicht durch den
-Chromium-Test abgedeckt. Ein Abschlussbericht aus dem Koordinationschat war
-nicht verfügbar; geprüft wurde der im Changelog beschriebene Funktionsumfang.
-Dieses Release führt kein Deployment auf einer bestehenden Installation aus.
+Die vollständigen Nachweise, behobenen Prüfvorbereitungsfehler und
+verbleibenden Grenzen stehen im
+[Abnahmebericht](https://github.com/Meister-Yoda/Meshora/blob/v0.1.0-rc.8/docs/ref/debug.md).
+Nicht abgedeckt sind physische Endgeräte, der eigene Authentik-Anbieter,
+Safari/Firefox, PostgreSQL in diesem Gesamtlauf, DoH/NextDNS-Dienste und
+IPv6-NAT. IPv6-Verkehr wurde mit explizitem Rückweg im isolierten Netz
+geprüft. DNS-01 und Zertifikatsverwaltung bleiben außerhalb des Umfangs.
+Ein Produktionsdeployment wird durch diesen Auftrag nicht ausgeführt.
 
 Die Einrichtung von Claims und Scopes beschreibt die
-[Admin-OIDC-Anleitung](https://github.com/Meister-Yoda/Meshora/blob/v0.1.0-rc.7/README.de.md#admin-anmeldung-mit-authentik).
+[Admin-OIDC-Anleitung](https://github.com/Meister-Yoda/Meshora/blob/v0.1.0-rc.8/README.de.md#admin-anmeldung-mit-authentik).
 Bei OIDC-Problemen kann der lokale Admin-Login immer direkt unter
 `/admin/login?local=1` geöffnet werden.
 
@@ -130,7 +138,7 @@ Archive mit Prüfsummen. Beispiel:
 
 ```bash
 sha256sum --ignore-missing -c SHA256SUMS
-docker load -i meshora_v0.1.0-rc.7_linux_amd64.docker.tar.gz
+docker load -i meshora_v0.1.0-rc.8_linux_amd64.docker.tar.gz
 ```
 
 Für das lokal geladene Image `MESHORA_IMAGE=meshora` setzen.
