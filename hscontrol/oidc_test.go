@@ -2,6 +2,7 @@ package hscontrol
 
 import (
 	"context"
+	"database/sql"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -616,4 +617,71 @@ func TestRouterMethodNotAllowedIncludesAllow(t *testing.T) {
 
 	assert.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
 	assert.Equal(t, []string{http.MethodGet}, resp.Header.Values("Allow"))
+}
+
+func TestOIDCVerifiedEmailLinking(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		email        string
+		verified     bool
+		duplicate    bool
+		linked       bool
+		wantLink     bool
+		wantConflict bool
+	}{
+		{name: "verified local account", email: "Admin@example.com", verified: true, wantLink: true},
+		{name: "unverified email", email: "admin@example.com"},
+		{name: "missing email", verified: true},
+		{name: "invalid email", email: "Admin <admin@example.com>", verified: true},
+		{name: "different email", email: "other@example.com", verified: true},
+		{name: "ambiguous email", email: "admin@example.com", verified: true, duplicate: true, wantConflict: true},
+		{name: "another OIDC identity", email: "admin@example.com", verified: true, linked: true, wantConflict: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			app := createTestApp(t)
+			t.Cleanup(func() { require.NoError(t, app.state.Close()) })
+
+			local := types.User{Name: "local", Email: "admin@example.com"}
+			if tc.linked {
+				local.Provider = "oidc"
+				local.ProviderIdentifier = sql.NullString{String: "https://issuer.example/other", Valid: true}
+			}
+
+			original, _, err := app.state.CreateUser(local)
+			require.NoError(t, err)
+
+			if tc.duplicate {
+				_, _, err = app.state.CreateUser(types.User{Name: "duplicate", Email: local.Email})
+				require.NoError(t, err)
+			}
+
+			provider := &AuthProviderOIDC{h: app, cfg: &types.OIDCConfig{}}
+			claims := &types.OIDCClaims{Iss: "https://issuer.example", Sub: "subject", Username: "remote", Email: tc.email, EmailVerified: types.FlexibleBoolean(tc.verified)}
+
+			user, _, err := provider.createOrUpdateUserFromClaim(claims)
+			if tc.wantConflict {
+				require.ErrorIs(t, err, errOIDCEmailConflict)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantLink, user.ID == original.ID)
+			// A repeat login uses the stable OIDC identifier, even after the
+			// provider stops supplying an email address.
+			claims.Email = ""
+			claims.EmailVerified = false
+			repeated, _, err := provider.createOrUpdateUserFromClaim(claims)
+			require.NoError(t, err)
+			assert.Equal(t, user.ID, repeated.ID)
+
+			users, err := app.state.ListAllUsers()
+			require.NoError(t, err)
+
+			if tc.wantLink {
+				assert.Len(t, users, 1)
+			} else {
+				assert.Len(t, users, 2)
+			}
+		})
+	}
 }

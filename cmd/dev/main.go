@@ -281,7 +281,7 @@ func runHS(ctx context.Context, bin, config string, args ...string) ([]byte, err
 // user ID.
 func extractUserID(data []byte) (uint64, error) {
 	var user struct {
-		ID uint64 `json:"id"`
+		ID json.Number `json:"id"`
 	}
 
 	err := json.Unmarshal(data, &user)
@@ -289,7 +289,12 @@ func extractUserID(data []byte) (uint64, error) {
 		return 0, fmt.Errorf("unmarshalling user JSON: %w (raw: %s)", err, data)
 	}
 
-	return user.ID, nil
+	id, err := strconv.ParseUint(user.ID.String(), 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("parsing user ID: %w", err)
+	}
+
+	return id, nil
 }
 
 // extractAuthKey parses the JSON output of "preauthkeys create" and

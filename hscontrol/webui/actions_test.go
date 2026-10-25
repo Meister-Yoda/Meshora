@@ -134,6 +134,11 @@ func TestActionsRequireCSRF(t *testing.T) {
 
 func TestAssignPendingRegistration(t *testing.T) {
 	env := newTestEnv(t)
+
+	response, guide := env.get(env.client, "/connect?platform=windows&lang=en")
+	require.Equal(t, http.StatusOK, response.StatusCode)
+	assert.Contains(t, guide, "An administrator must review the request")
+	assert.NotContains(t, guide, "csrf_token")
 	user := env.state.CreateUserForTest("sebastian")
 
 	id, req := newRegistration("winpc")
@@ -160,9 +165,19 @@ func TestAssignPendingRegistration(t *testing.T) {
 
 	assert.Equal(t, fmt.Sprintf("/admin/nodes/%d", verdict.Node.ID()), location)
 	assert.Contains(t, body, "Registered winpc for sebastian.")
+	assert.Contains(t, body, "Status and next steps")
+	assert.Contains(t, body, "Offline: no active connection")
+	assert.Contains(t, body, "Last activity (UTC)")
+
+	_, devices := env.get(env.client, "/admin/nodes?q=winpc&lang=en")
+	assert.Contains(t, devices, "1 / 1 devices shown")
+	assert.Contains(t, devices, location)
+
+	_, translated := env.get(env.client, location+"?lang=de")
+	assert.Contains(t, translated, "Zustand und n\u00e4chste Schritte")
 	assert.Positive(t, env.changeCount(), "connected nodes must be told about the new node")
 
-	_, list = env.get(env.client, "/admin/pending")
+	_, list = env.get(env.client, "/admin/pending?lang=en")
 	assert.Contains(t, list, "Nothing pending")
 
 	// The flash is shown once.

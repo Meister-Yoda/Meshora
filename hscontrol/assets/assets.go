@@ -38,3 +38,8 @@ var Logo []byte
 //
 //go:embed meshora-logo-dark.png
 var LogoDark []byte
+
+// EnrollmentJS progressively enhances the public connection guide with clipboard support.
+//
+//go:embed enrollment.js
+var EnrollmentJS []byte

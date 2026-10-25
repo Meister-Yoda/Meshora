@@ -23,10 +23,11 @@ var (
 )
 
 type savedOIDCSettings struct {
-	Issuer     string `yaml:"issuer"`
-	ClientID   string `yaml:"client_id"`
-	Secret     string `json:"-"         yaml:"client_secret"`
-	SecretPath string `json:"-"         yaml:"client_secret_path"`
+	AllowedGroups []string `yaml:"allowed_groups"`
+	Issuer        string   `yaml:"issuer"`
+	ClientID      string   `yaml:"client_id"`
+	Secret        string   `json:"-"              yaml:"client_secret"`
+	SecretPath    string   `json:"-"              yaml:"client_secret_path"`
 }
 
 func (h *Handler) settingsPage(w http.ResponseWriter, r *http.Request) {
@@ -55,6 +56,7 @@ func (h *Handler) settingsPage(w http.ResponseWriter, r *http.Request) {
 		HasSecret:        h.activeOIDC.ClientSecret != "",
 		CallbackURL:      h.serverURL + "/oidc/callback",
 		AdminCallbackURL: h.serverURL + "/admin/oidc/callback",
+		UserGroups:       strings.Join(h.activeOIDC.AllowedGroups, ", "),
 		AdminGroups:      strings.Join(h.adminOIDCGroups, ", "),
 		AdminRoles:       strings.Join(h.adminOIDCRoles, ", "),
 		RolesClaim:       h.adminOIDCRolesClaim,
@@ -63,6 +65,7 @@ func (h *Handler) settingsPage(w http.ResponseWriter, r *http.Request) {
 
 	_, document, saved, err := readOIDCSettings(h.configPath)
 	if err == nil {
+		settings.UserGroups = strings.Join(saved.AllowedGroups, ", ")
 		settings.Issuer = saved.Issuer
 		settings.ClientID = saved.ClientID
 		settings.HasSecret = saved.Secret != ""
@@ -92,7 +95,9 @@ func (h *Handler) settingsPage(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-		settings.PendingRestart = saved.Issuer != h.activeOIDC.Issuer ||
+
+		settings.PendingRestart = settings.UserGroups != strings.Join(h.activeOIDC.AllowedGroups, ", ") ||
+			saved.Issuer != h.activeOIDC.Issuer ||
 			saved.ClientID != h.activeOIDC.ClientID || saved.Secret != h.activeOIDC.ClientSecret ||
 			settings.AdminGroups != strings.Join(h.adminOIDCGroups, ", ") ||
 			settings.AdminRoles != strings.Join(h.adminOIDCRoles, ", ") || settings.RolesClaim != cmp.Or(h.adminOIDCRolesClaim, "roles")
@@ -160,6 +165,19 @@ func (h *Handler) saveOIDCSettings(w http.ResponseWriter, r *http.Request) {
 		}
 
 		setSettingsValue(oidc, "scope", scope)
+	}
+
+	// Provider-only forms omit user_groups and must retain access restrictions.
+	if r.PostForm.Has("user_groups") {
+		groups := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+
+		for group := range strings.SplitSeq(formValue(r, "user_groups"), ",") {
+			if group = strings.TrimSpace(group); group != "" {
+				groups.Content = append(groups.Content, settingsString(group))
+			}
+		}
+
+		setSettingsValue(oidc, "allowed_groups", groups)
 	}
 
 	// Omitted fields preserve authorization settings from older clients.

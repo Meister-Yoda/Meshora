@@ -168,6 +168,11 @@ func (h *Handler) Close() {
 
 // Routes mounts the dashboard on r under [BasePath].
 func (h *Handler) Routes(r chi.Router) {
+	r.With(adminHeaders).Get("/connect", h.enrollment)
+	r.With(adminHeaders).Get(BasePath+"/assets/enrollment.js", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		_, _ = w.Write(assets.EnrollmentJS)
+	})
 	r.Get("/setup", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, h.serverURL+"/admin/login", http.StatusSeeOther)
 	})
@@ -433,7 +438,17 @@ func (h *Handler) nodes(w http.ResponseWriter, r *http.Request) {
 		return cmp.Compare(a.GivenName, b.GivenName)
 	})
 
-	writeHTML(w, http.StatusOK, templates.AdminNodes(h.pageInfo(r), rows).Render())
+	query := r.URL.Query()
+	filters := templates.AdminNodeFilters{Query: strings.TrimSpace(query.Get("q")), Status: query.Get("status"), User: query.Get("user"), Tag: query.Get("tag"), Expiry: query.Get("expiry")}
+
+	filtered := make([]templates.AdminNodeRow, 0, len(rows))
+	for _, row := range rows {
+		if matchesNodeFilters(row, filters) {
+			filtered = append(filtered, row)
+		}
+	}
+
+	writeHTML(w, http.StatusOK, templates.AdminFilteredNodes(h.pageInfo(r), filtered, rows, filters).Render())
 }
 
 func nodeRow(n types.NodeView) templates.AdminNodeRow {
@@ -464,6 +479,13 @@ func nodeRow(n types.NodeView) templates.AdminNodeRow {
 
 	row.LastSeen, _ = n.LastSeen().GetOk()
 	row.Expiry, _ = n.Expiry().GetOk()
+	for _, route := range n.AnnouncedRoutes() {
+		row.AnnouncedRoutes = append(row.AnnouncedRoutes, route.String())
+	}
+
+	for _, route := range n.ApprovedRoutes().All() {
+		row.ApprovedRoutes = append(row.ApprovedRoutes, route.String())
+	}
 
 	if hi := n.Hostinfo(); hi.Valid() {
 		row.OS = hi.OS()
@@ -692,4 +714,64 @@ func sessionFrom(r *http.Request) *session {
 	s, _ := r.Context().Value(sessionKey{}).(*session)
 
 	return s
+}
+
+func matchesNodeFilters(node templates.AdminNodeRow, filters templates.AdminNodeFilters) bool {
+	status := "unknown"
+
+	if node.Online != nil {
+		if *node.Online {
+			status = "online"
+		} else {
+			status = "offline"
+		}
+	}
+
+	if filters.Status != "" && filters.Status != status {
+		return false
+	}
+
+	if filters.User != "" && (len(node.Tags) > 0 || node.Owner != filters.User) {
+		return false
+	}
+
+	if filters.Tag != "" && !slices.Contains(node.Tags, filters.Tag) {
+		return false
+	}
+
+	switch filters.Expiry {
+	case "expired":
+		if !node.Expired {
+			return false
+		}
+	case "valid":
+		if node.Expired {
+			return false
+		}
+	case "never":
+		if !node.Expiry.IsZero() {
+			return false
+		}
+	case "":
+	default:
+		return false
+	}
+
+	search := strings.Join([]string{node.GivenName, node.Hostname, node.IPv4, node.IPv6, node.Owner, strings.Join(node.Tags, " ")}, " ")
+
+	return strings.Contains(strings.ToLower(search), strings.ToLower(filters.Query))
+}
+
+// enrollment is public and exposes only the configured server address and sign-in instructions.
+func (h *Handler) enrollment(w http.ResponseWriter, r *http.Request) {
+	platform := r.URL.Query().Get("platform")
+	switch platform {
+	case "", "windows", "macos", "linux", "android", "ios":
+	default:
+		http.Error(w, "Unknown platform", http.StatusBadRequest)
+		return
+	}
+	// Other dashboard pages retain the script-free policy.
+	w.Header().Set("Content-Security-Policy", adminCSP+"; script-src 'self'")
+	writeHTML(w, http.StatusOK, templates.AdminEnrollment(templates.AdminPageInfo{Base: h.publicPath}, h.serverURL, platform, h.activeOIDC.Issuer != "").Render())
 }

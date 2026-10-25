@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"html"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -294,24 +295,95 @@ type AdminNodeRow struct {
 	Online   *bool
 	LastSeen time.Time
 	// Expiry is zero when the node never expires.
-	Expiry  time.Time
-	Expired bool
-	OS      string
+	Expiry          time.Time
+	Expired         bool
+	OS              string
+	AnnouncedRoutes []string
+	ApprovedRoutes  []string
 }
 
-// AdminNodes renders the node list.
-func AdminNodes(info AdminPageInfo, nodes []AdminNodeRow) *elem.Element {
-	var body elem.Node = emptyState("No nodes yet",
-		"Nodes appear here once a device has been registered.")
+const statusClass = "status"
 
+// AdminNodes renders the node list.
+// AdminNodeFilters describes shareable, intersecting device filters.
+type AdminNodeFilters struct {
+	Query, Status, User, Tag, Expiry string
+}
+
+func AdminNodes(info AdminPageInfo, nodes []AdminNodeRow) *elem.Element {
+	return AdminFilteredNodes(info, nodes, nodes, AdminNodeFilters{})
+}
+
+func AdminFilteredNodes(info AdminPageInfo, nodes, all []AdminNodeRow, filters AdminNodeFilters) *elem.Element {
+	var body elem.Node = emptyState("No nodes yet", "Nodes appear here once a device has been registered.")
 	if len(nodes) > 0 {
 		body = nodeTable(info, nodes)
+	} else if len(all) > 0 {
+		body = emptyState("No matching devices", "Change or reset the filters to see more devices.")
 	}
 
+	users, tags := map[string]bool{}, map[string]bool{}
+
+	for _, node := range all {
+		if len(node.Tags) == 0 && node.Owner != "" {
+			users[node.Owner] = true
+		}
+
+		for _, tag := range node.Tags {
+			tags[tag] = true
+		}
+	}
+
+	choices := func(values map[string]bool, selected string) []AdminChoice {
+		keys := make([]string, 0, len(values))
+		for value := range values {
+			keys = append(keys, value)
+		}
+
+		slices.Sort(keys)
+
+		result := make([]AdminChoice, 0, len(keys))
+		for _, value := range keys {
+			result = append(result, AdminChoice{Value: value, Label: value, Selected: value == selected})
+		}
+
+		return result
+	}
 	return info.shell("Nodes",
-		pageHead("Nodes", countLabel(len(nodes), "node", "nodes")+" registered."),
+		pageHead("Nodes", "Search devices and combine filters."),
+		linkButton(strings.TrimSuffix(info.Base, "/admin")+"/connect", "Add device", "btn-primary"),
+		elem.Form(attrs.Props{attrs.Class: "card form-grid", attrs.Method: "GET", attrs.Action: info.Base + "/nodes"},
+			textField("Search devices", "q", filters.Query, false),
+			nodeFilterSelect("Status", statusClass, filters.Status, []string{"online", "offline", "unknown"}, []string{"Online", "Offline", "Unknown"}),
+			selectField("User", "user", choices(users, filters.User), "All"),
+			selectField("Tags", "tag", choices(tags, filters.Tag), "All"),
+			nodeFilterSelect("Expiry", "expiry", filters.Expiry, []string{"expired", "valid", "never"}, []string{"Expired", "Not expired", "Never"}),
+			elem.Div(attrs.Props{attrs.Class: "form-actions actions"}, submitButton("Apply filters", "btn-primary"), linkButton(info.Base+"/nodes", "Reset filters", "btn-ghost")),
+		),
+		elem.P(attrs.Props{"role": statusClass}, elem.Text(strconv.Itoa(len(nodes))+" / "+strconv.Itoa(len(all))+" "), i18nText("devices shown")),
 		body,
+		cardSection("Understanding device states", "Offline and expired describe different states. Offline does not reveal a cause; check the device, network and Tailscale client. Expired authorization requires signing in again on the device. Open a device for recorded times, route approvals and next steps."),
 	)
+}
+
+func nodeFilterSelect(label, name, selected string, values, labels []string) elem.Node {
+	all := elem.Option(attrs.Props{attrs.Value: ""}, elem.Text("All"))
+	all.Children = []elem.Node{i18nText("All")}
+	options := make([]elem.Node, 0, 1+len(values))
+	options = append(options, all)
+
+	for i, value := range values {
+		props := attrs.Props{attrs.Value: value}
+		if value == selected {
+			props[attrs.Selected] = "true"
+		}
+
+		option := elem.Option(props, elem.Text(labels[i]))
+		option.Children = []elem.Node{i18nText(labels[i])}
+		options = append(options, option)
+	}
+
+	return elem.Div(attrs.Props{attrs.Class: "field"}, elem.Label(attrs.Props{attrs.For: "f-" + name}, i18nText(label)), elem.Select(attrs.Props{attrs.ID: "f-" + name, attrs.Name: name}, options...))
 }
 
 func nodeTable(info AdminPageInfo, nodes []AdminNodeRow) *elem.Element {
@@ -381,6 +453,7 @@ func AdminPending(info AdminPageInfo, pending []AdminPendingRow) *elem.Element {
 	return info.shell("Pending",
 		pageHead("Pending", "Logins that have started but not finished yet. They expire on their own."),
 		body,
+		cardSection("Review pending requests", "An open request is not proof of an error. Review its type, device and intended user. Device registration assigns an owner; an SSH check approves one connection. The reason for waiting is unknown. If a request expires, start sign-in or the SSH connection again on the device."),
 	)
 }
 
@@ -413,7 +486,7 @@ func dataTable(caption string, headers []string, rows []elem.Node) *elem.Element
 	}
 
 	return elem.Div(
-		attrs.Props{attrs.Class: "table-wrap"},
+		attrs.Props{attrs.Class: "table-wrap", "tabindex": "0", "role": "region", "aria-label": "Scrollable table / Scrollbare Tabelle"},
 		elem.Table(
 			attrs.Props{attrs.Class: "table"},
 			elem.Caption(attrs.Props{attrs.Class: "sr-only"}, i18nText(caption)),
@@ -509,7 +582,7 @@ func statusCell(online *bool) elem.Node {
 		}
 	}
 
-	return elem.Span(attrs.Props{attrs.Class: "status"},
+	return elem.Span(attrs.Props{attrs.Class: statusClass},
 		elem.Span(attrs.Props{attrs.Class: dot, "aria-hidden": "true"}),
 		i18nText(label),
 	)
@@ -748,4 +821,82 @@ func adminField(label, name, inputType, value, autocomplete string) *elem.Elemen
 			attrs.Autocomplete: autocomplete,
 		}),
 	)
+}
+
+// AdminEnrollment guides an interactive device sign-in without issuing secrets.
+func AdminEnrollment(info AdminPageInfo, serverURL, platform string, oidc bool) *elem.Element {
+	shell := func(content ...elem.Node) *elem.Element {
+		return adminDocument(info.Base, "Add device · Meshora", "app",
+			elem.Header(attrs.Props{attrs.Class: "topbar"}, elem.Div(attrs.Props{attrs.Class: "topbar-inner"}, brand(""), languageSwitcher())),
+			elem.Main(attrs.Props{attrs.Class: "content enrollment", attrs.ID: "main-content"}, content...),
+			elem.Footer(attrs.Props{attrs.Class: "app-footer"}, poweredBy()...))
+	}
+
+	choices := make([]AdminChoice, 0, 5)
+	for _, pair := range [][2]string{{"windows", "Windows"}, {"macos", "macOS"}, {"linux", "Linux"}, {"android", "Android"}, {"ios", "iOS"}} {
+		choices = append(choices, AdminChoice{Value: pair[0], Label: pair[1], Selected: platform == pair[0]})
+	}
+
+	body := make([]elem.Node, 0, 6)
+
+	body = append(body,
+		pageHead("Add device", "Install the client, connect to this server, then finish registration."),
+		elem.Form(attrs.Props{attrs.Class: "card form-grid", attrs.Method: "GET", attrs.Action: strings.TrimSuffix(info.Base, "/admin") + "/connect"},
+			elem.H2(nil, i18nText("1. Choose your platform")),
+			selectField("Platform", "platform", choices, "Choose a platform"),
+			submitButton("Show instructions", "btn-primary")),
+	)
+	if platform == "" {
+		return shell(body...)
+	}
+
+	mobile := platform == "android" || platform == "ios"
+
+	command := "tailscale login --login-server='" + strings.ReplaceAll(serverURL, "'", "'\"'\"'") + "'"
+	if platform == "windows" {
+		command = "tailscale login --login-server='" + strings.ReplaceAll(serverURL, "'", "''") + "'"
+	}
+
+	if platform == "linux" {
+		command = "sudo " + command
+	}
+
+	heading, instruction, label := "2. Connect this device", "Install Tailscale on the device you want to add. Run this command in its terminal; on Windows use PowerShell.", "Connection command"
+
+	if mobile {
+		command = serverURL
+		label = "Server address"
+		instruction = "Install the Tailscale app on the device you want to add. Choose a custom coordination server when signing in and enter this server address."
+	}
+
+	download := externalLink("https://tailscale.com/download", "Download Tailscale")
+	download.Children = []elem.Node{i18nText("Download Tailscale")}
+	instructions := externalLink("https://tailscale.com/docs/how-to/set-up-custom-control-server", "Platform instructions")
+	instructions.Children = []elem.Node{i18nText("Platform instructions")}
+	copyField := elem.Input(attrs.Props{attrs.ID: "enrollment-value", attrs.Type: "text", attrs.Readonly: "true", attrs.Value: html.EscapeString(command), attrs.Class: "mono", "spellcheck": "false"})
+	body = append(body, elem.Section(attrs.Props{attrs.Class: "card"},
+		elem.H2(nil, i18nText(heading)), elem.P(nil, i18nText(instruction)),
+		download,
+		elem.Div(attrs.Props{attrs.Class: "field"}, elem.Label(attrs.Props{attrs.For: "enrollment-value"}, i18nText(label)), copyField),
+		elem.Button(attrs.Props{attrs.Type: "button", attrs.Class: "btn btn-ghost", attrs.ID: "enrollment-copy", attrs.Disabled: "true"}, i18nText("Copy")),
+		elem.P(attrs.Props{attrs.ID: "enrollment-copy-status", "role": statusClass, "aria-live": "polite"}, i18nText("You can also select the text and copy it manually.")),
+		elem.Span(attrs.Props{attrs.ID: "enrollment-copied", "hidden": "true"}, i18nText("Copied.")),
+		elem.Span(attrs.Props{attrs.ID: "enrollment-copy-failed", "hidden": "true"}, i18nText("Copy failed. Select the text and copy it manually.")),
+		instructions,
+	))
+
+	registration := "Open the registration link shown by the client. An administrator must review the request, choose its user and approve it under Pending registrations. Keep the client running while you wait."
+	if oidc {
+		registration = "Open the registration link shown by the client. Sign in with the configured identity provider, review the device and confirm registration. The provider's access rules apply; an admin dashboard login does not register the device."
+	}
+
+	body = append(body,
+		cardSection("3. Finish registration", registration),
+		elem.Section(attrs.Props{attrs.Class: "card"}, elem.H2(nil, i18nText("4. Check your device")),
+			elem.P(nil, i18nText("After registration, return to the Tailscale app and check its connection state. An administrator can open your device in the device list to check the recorded state and next steps. Registration alone does not prove an active connection or reachability. If the request expired, start sign-in again on the device.")),
+			elem.Div(attrs.Props{attrs.Class: "actions"}, linkButton(info.Base+"/pending", "Review requests (admin)", "btn-secondary"), linkButton(info.Base+"/nodes", "Find device (admin)", "btn-primary"))),
+		elem.Script(attrs.Props{attrs.Src: html.EscapeString(info.Base + "/assets/enrollment.js"), "defer": "true"}),
+	)
+
+	return shell(body...)
 }

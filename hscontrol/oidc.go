@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/mail"
 	"net/url"
 	"slices"
 	"strings"
@@ -41,6 +42,8 @@ const (
 	// out-of-range.
 	cookieNamePrefixLen = 6
 )
+
+var errOIDCEmailConflict = errors.New("email matches multiple users or an already linked identity")
 
 var errOIDCStateTooShort = errors.New("oidc state parameter is too short")
 
@@ -645,6 +648,32 @@ func (a *AuthProviderOIDC) createOrUpdateUserFromClaim(
 		return nil, change.Change{}, fmt.Errorf("creating or updating user: %w", err)
 	}
 
+	// Only a verified mailbox can link a previously local identity. Never
+	// rebind an existing OIDC identity based on a mutable email claim.
+	if user == nil && claims.EmailVerified && claims.Email != "" {
+		address, parseErr := mail.ParseAddress(claims.Email)
+		if parseErr == nil && address.Address == claims.Email {
+			users, listErr := a.h.state.ListAllUsers()
+			if listErr != nil {
+				return nil, change.Change{}, fmt.Errorf("finding user by email: %w", listErr)
+			}
+
+			for i := range users {
+				candidate := &users[i]
+				if !strings.EqualFold(strings.TrimSpace(candidate.Email), claims.Email) {
+					continue
+				}
+
+				if user != nil || candidate.ProviderIdentifier.Valid ||
+					(candidate.Provider != "" && candidate.Provider != util.RegisterMethodCLI) {
+					return nil, change.Change{}, errOIDCEmailConflict
+				}
+
+				user = candidate
+			}
+		}
+	}
+
 	// if the user is still not found, create a new empty user.
 	// TODO(kradalby): This context is not inherited from the request, which is probably not ideal.
 	// However, we need a context to use the OIDC provider.
@@ -662,6 +691,10 @@ func (a *AuthProviderOIDC) createOrUpdateUserFromClaim(
 		}
 	} else {
 		_, c, err = a.h.state.UpdateUser(types.UserID(user.ID), func(u *types.User) error {
+			// The account may have been linked by another login since lookup.
+			if u.ProviderIdentifier.Valid && u.ProviderIdentifier != user.ProviderIdentifier {
+				return errOIDCEmailConflict
+			}
 			*u = *user
 			return nil
 		})

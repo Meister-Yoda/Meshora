@@ -396,3 +396,60 @@ func TestSettingsSubpages(t *testing.T) {
 	resp, _ = env.get(env.client, "/admin/settings/unknown")
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
+
+func TestOIDCSettingsUserGroups(t *testing.T) {
+	env, path := settingsTestEnv(t, `server_url: http://localhost:8080
+web_admin:
+  enabled: true
+  oidc:
+    allowed_groups: [meshora-admins]
+oidc:
+  issuer: https://auth.example.com/application/o/meshora/
+  client_id: meshora
+  client_secret: test-secret
+  allowed_groups: [existing-users]
+  scope: [openid, profile, email, groups]
+`)
+	csrf := env.signedIn()
+	_, page := env.get(env.client, "/admin/settings/access")
+	assert.Contains(t, page, `name="user_groups"`)
+	assert.Contains(t, page, `value="existing-users"`)
+
+	form := url.Values{
+		"issuer": {settingsIssuer}, "client_id": {"meshora"},
+		"user_groups":      {" meshora-users, operators, , "},
+		"settings_section": {"access"},
+	}
+	_, page = env.action(csrf, "/admin/settings/oidc", form)
+	assert.Contains(t, page, `value="meshora-users, operators"`)
+	assert.Contains(t, page, "Restart required")
+
+	_, document, saved, err := readOIDCSettings(path)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"meshora-users", "operators"}, saved.AllowedGroups)
+
+	admin := settingsMappingValue(settingsMappingValue(document.Content[0], "web_admin"), "oidc")
+
+	var adminGroups []string
+	require.NoError(t, settingsMappingValue(admin, "allowed_groups").Decode(&adminGroups))
+	assert.Equal(t, []string{"meshora-admins"}, adminGroups)
+	assert.Empty(t, env.handler.activeOIDC.AllowedGroups, "permissions only change after restart")
+
+	// Saving the provider page must preserve the separately configured groups.
+	form.Del("user_groups")
+	form.Set("settings_section", "provider")
+	env.action(csrf, "/admin/settings/oidc", form)
+
+	_, _, saved, err = readOIDCSettings(path)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"meshora-users", "operators"}, saved.AllowedGroups)
+
+	// Clearing the field explicitly removes the group restriction.
+	form.Set("user_groups", "")
+	form.Set("settings_section", "access")
+	env.action(csrf, "/admin/settings/oidc", form)
+
+	_, _, saved, err = readOIDCSettings(path)
+	require.NoError(t, err)
+	assert.Empty(t, saved.AllowedGroups)
+}

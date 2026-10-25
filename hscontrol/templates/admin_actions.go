@@ -2,6 +2,7 @@ package templates
 
 import (
 	"html"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -196,12 +197,17 @@ func AdminNodeDetail(info AdminPageInfo, node AdminNodeRow, extra AdminNodeExtra
 	return info.shell("Nodes",
 		backLink(info.Base+"/nodes", "Nodes"),
 		pageHeadNodes(elem.Text(node.GivenName), elem.Text(node.Hostname)),
+		nodeDiagnostics(node),
 		elem.Section(attrs.Props{attrs.Class: "card"}, detailList(
 			detail("Owner", ownerCell(node.Tags, node.Owner)),
 			detail("Status", statusCell(node.Online)),
 			detail("Addresses", elem.Span(attrs.Props{attrs.Class: "mono"}, addressCell(node.IPv4, node.IPv6))),
 			detail("Last seen", relCell(node.LastSeen, now)),
 			detail("Expiry", expiryCell(node.Expiry, node.Expired)),
+			detail("Last activity (UTC)", exactNodeTime(node.LastSeen)),
+			detail("Expiry (UTC)", exactNodeTime(node.Expiry)),
+			detail("Announced routes", routeList(node.AnnouncedRoutes)),
+			detail("Approved routes", routeList(node.ApprovedRoutes)),
 			detail("OS", textOrDash(node.OS)),
 			detail("Machine key", elem.Span(attrs.Props{attrs.Class: "mono"}, textOrDash(extra.MachineKey))),
 			detail("Registered", dateCell(extra.CreatedAt)),
@@ -226,6 +232,47 @@ func AdminNodeDetail(info AdminPageInfo, node AdminNodeRow, extra AdminNodeExtra
 			),
 		),
 	)
+}
+
+// nodeDiagnostics describes recorded state without inferring a failure cause.
+func nodeDiagnostics(node AdminNodeRow) elem.Node {
+	var connection string
+
+	switch {
+	case node.Online == nil:
+		connection = "Connection state unknown. Check the Tailscale client on the device; no cause can be determined from the available data."
+	case !*node.Online:
+		connection = "Offline: no active connection to the control server is recorded. The cause is unknown. Check whether the device is running, has network access and its Tailscale client is connected."
+	default:
+		connection = "Online: an active connection to the control server is recorded. This does not prove that services or routes are reachable."
+	}
+
+	items := []elem.Node{elem.P(nil, i18nText(connection))}
+	if node.Expired {
+		items = append(items, elem.P(nil, i18nText("Device authorization expired. Sign in again through the Tailscale client on this device. Connection state and expiry are separate; the data does not explain why authorization expired.")))
+	}
+
+	var unapproved []string
+
+	for _, route := range node.AnnouncedRoutes {
+		if !slices.Contains(node.ApprovedRoutes, route) {
+			unapproved = append(unapproved, route)
+		}
+	}
+
+	if len(unapproved) > 0 {
+		items = append(items,
+			elem.H3(nil, i18nText("Routes awaiting approval")),
+			routeList(unapproved),
+			elem.P(nil, i18nText("These advertised routes are not approved for this device. The reason is unknown. An administrator should verify the intended networks and approve them through route management (CLI or API), or check the policy's autoApprovers. This page does not change route approvals.")),
+		)
+	}
+
+	if len(node.AnnouncedRoutes) > 0 || len(node.ApprovedRoutes) > 0 {
+		items = append(items, elem.P(nil, i18nText("Approved routes do not guarantee reachability. If a connection fails, check the router's connection state, route advertisement, IP forwarding, access policy and the client's route settings.")))
+	}
+
+	return cardSection("Status and next steps", "", items...)
 }
 
 // AdminPendingReview renders one pending auth request with its decisions.
@@ -274,6 +321,7 @@ func AdminPendingReview(info AdminPageInfo, req AdminPendingRow, users []AdminCh
 	}
 
 	sections = append(sections,
+		cardSection("Registration pending", "A registration request is open. The available data does not show why it has not finished. Verify the device and intended owner before assigning it, or ask the user to complete sign-in. Reject unexpected requests. If the request expires, start sign-in again on the device."),
 		cardSection("Assign to a user",
 			"Registers the device for this user. It connects as soon as the client notices.",
 			assign,
@@ -405,6 +453,7 @@ func AdminConfirm(info AdminPageInfo, c AdminConfirmInfo) *elem.Element {
 
 // AdminOIDCSettings contains public settings only; secrets never enter templates.
 type AdminOIDCSettings struct {
+	UserGroups       string
 	Section          string
 	AdminGroups      string
 	AdminRoles       string
@@ -458,6 +507,9 @@ func AdminSettings(info AdminPageInfo, settings AdminOIDCSettings) *elem.Element
 					elem.P(attrs.Props{attrs.ID: "secret-hint", attrs.Class: "muted"}, i18nText(hint)))),
 			elem.Section(attrs.Props{attrs.Class: "card settings-section", attrs.ID: "access"},
 				elem.P(attrs.Props{attrs.Class: "settings-eyebrow"}, i18nText("02 / Permissions")),
+				elem.H2(nil, i18nText("Meshora access")),
+				textField("Authentik groups allowed to use Meshora", "user_groups", settings.UserGroups, false),
+				elem.P(attrs.Props{attrs.Class: "settings-note"}, i18nText("Enter exact groups claim values, separated by commas. Membership in any listed group allows OIDC sign-in and device registration. Leave empty to allow all users accepted by the OIDC provider. This does not grant admin access.")),
 				elem.H2(nil, i18nText("Admin access")),
 				elem.P(attrs.Props{attrs.Class: "muted"}, i18nText("Choose which Authentik identities can administer this instance.")),
 				elem.Div(attrs.Props{attrs.Class: "settings-fields"},
@@ -530,4 +582,25 @@ func AdminSettings(info AdminPageInfo, settings AdminOIDCSettings) *elem.Element
 		elem.Div(attrs.Props{attrs.Class: "settings-status", attrs.Role: "status"},
 			elem.Span(attrs.Props{attrs.Class: "settings-status-label"}, i18nText("Sign-in status")), elem.Span(nil, i18nText(status))),
 		elem.Div(attrs.Props{attrs.Class: "settings-page", attrs.ID: "settings-" + section}, content))
+}
+
+func exactNodeTime(value time.Time) elem.Node {
+	if value.IsZero() {
+		return i18nText("Not set")
+	}
+
+	return elem.Time(attrs.Props{attrs.Datetime: value.UTC().Format(time.RFC3339)}, elem.Text(value.UTC().Format("2006-01-02 15:04:05 UTC")))
+}
+
+func routeList(routes []string) elem.Node {
+	if len(routes) == 0 {
+		return i18nText("None")
+	}
+
+	items := make([]elem.Node, 0, len(routes))
+	for _, route := range routes {
+		items = append(items, elem.Li(nil, elem.Text(route)))
+	}
+
+	return elem.Ul(attrs.Props{attrs.Class: "mono"}, items...)
 }

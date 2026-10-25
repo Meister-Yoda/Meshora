@@ -17,6 +17,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/juanfont/headscale/hscontrol/state"
+	"github.com/juanfont/headscale/hscontrol/templates"
 	"github.com/juanfont/headscale/hscontrol/types"
 	"github.com/juanfont/headscale/hscontrol/types/change"
 	"github.com/stretchr/testify/assert"
@@ -407,7 +408,7 @@ func TestNodesPage(t *testing.T) {
 
 	resp, body := env.get(env.client, "/admin/nodes")
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	assert.Contains(t, body, "2 nodes registered.")
+	assert.Contains(t, body, "2 / 2 devices shown")
 	assert.Contains(t, body, ">tag:server<")
 	assert.Contains(t, body, ">Online<")
 	assert.Contains(t, body, owned.IPv4.String())
@@ -516,4 +517,90 @@ func TestCloseStopsDashboardCacheSweepers(t *testing.T) {
 	h.Close()
 	assert.Eventually(t, func() bool { return count() == baseline },
 		5*time.Second, 10*time.Millisecond)
+}
+
+func TestDeviceFilters(t *testing.T) {
+	online := true
+
+	node := templates.AdminNodeRow{GivenName: "Laptop", Hostname: "workstation", Owner: "alice", IPv4: "100.64.0.1", Online: &online}
+	for _, filters := range []templates.AdminNodeFilters{
+		{Query: "LAPTOP"},
+		{Query: "station"},
+		{Query: "100.64"},
+		{Query: "ALICE"},
+		{Status: "online", User: "alice", Expiry: "never", Query: "lap"},
+	} {
+		assert.True(t, matchesNodeFilters(node, filters), "%+v", filters)
+	}
+
+	for _, filters := range []templates.AdminNodeFilters{
+		{Status: "offline"},
+		{Status: "unknown"},
+		{User: "bob"},
+		{Tag: "tag:server"},
+		{Expiry: "expired"},
+		{Query: "missing"},
+		{Query: "lap", User: "bob"},
+	} {
+		assert.False(t, matchesNodeFilters(node, filters), "%+v", filters)
+	}
+
+	node.Tags = []string{"tag:server"}
+	assert.False(t, matchesNodeFilters(node, templates.AdminNodeFilters{User: "alice"}))
+	assert.True(t, matchesNodeFilters(node, templates.AdminNodeFilters{Tag: "tag:server"}))
+	node.Online = nil
+	node.Expired = true
+	assert.True(t, matchesNodeFilters(node, templates.AdminNodeFilters{Status: "unknown", Expiry: "expired"}))
+	assert.False(t, matchesNodeFilters(node, templates.AdminNodeFilters{Expiry: "valid"}))
+}
+
+func TestDeviceFiltersHTTP(t *testing.T) {
+	env := newTestEnv(t)
+
+	user := env.state.CreateUserForTest("filter-owner")
+	for _, name := range []string{"filter-laptop", "filter-server"} {
+		node := env.state.CreateRegisteredNodeForTest(user, name)
+		node.User = user
+		env.state.PutNodeInStoreForTest(*node)
+	}
+
+	resp, _ := env.login(env.client, testAdmin, testPassword)
+	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
+	resp, body := env.get(env.client, "/admin/nodes?q=LAPTOP&user=filter-owner&expiry=never&lang=de")
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Contains(t, body, "1 / 2 Geräte angezeigt")
+	assert.Contains(t, body, `title="filter-laptop"`)
+	assert.NotContains(t, body, `title="filter-server"`)
+	resp, body = env.get(env.client, "/admin/nodes?q=missing&lang=en")
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Contains(t, body, "No matching devices")
+	assert.Contains(t, body, "0 / 2 devices shown")
+}
+
+func TestPublicEnrollment(t *testing.T) {
+	env := newTestEnv(t)
+	for _, path := range []string{"/connect", "/connect?platform=linux", "/connect?platform=android"} {
+		resp, body := env.get(env.client, path)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.Contains(t, resp.Header.Get("Content-Security-Policy"), "script-src 'self'")
+		assert.Contains(t, resp.Header.Get("Cache-Control"), "no-store")
+		assert.NotContains(t, body, "Sign out")
+
+		if path != "/connect" {
+			assert.Contains(t, body, "http://localhost:8080")
+		}
+	}
+
+	resp, _ := env.get(env.client, "/connect?platform=invalid")
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	resp, script := env.get(env.client, "/admin/assets/enrollment.js")
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Contains(t, script, "navigator.clipboard.writeText")
+	assert.Contains(t, resp.Header.Get("Content-Type"), "text/javascript")
+
+	env.handler.activeOIDC.Issuer = "https://idp.example"
+	_, body := env.get(env.client, "/connect?platform=windows")
+	assert.Contains(t, body, "confirm registration")
+	assert.NotContains(t, body, "https://idp.example")
+	assert.Zero(t, env.changeCount())
 }

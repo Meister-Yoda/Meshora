@@ -1369,3 +1369,22 @@ html[lang="en"] .language-options a[lang="en"],
   background: var(--accent-soft);
   font-weight: 600;
 }
+
+/* Public device connection guide shares dashboard colors and focus styles. */
+.enrollment {
+  width: 100%;
+  max-width: 820px;
+  margin-inline: auto;
+}
+.enrollment > * + * {
+  margin-top: 24px;
+}
+.enrollment .field input {
+  width: 100%;
+  min-width: 0;
+}
+
+.enrollment .form-grid h2 {
+  grid-column: 1 / -1;
+  margin: 0;
+}
