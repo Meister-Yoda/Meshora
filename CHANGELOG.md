@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## Meshora v0.1.0-rc.7 (2026-10-25)
+
+- Add a public, bilingual /connect guide for desktop and mobile device sign-in.
+- Provide clipboard copying with a manual fallback and a self-hosted script under CSP.
+- Add intersecting device search, ownership, status, tag and expiry filters.
+- Explain device connection state, expired authorization, pending registration and route approvals.
+- Show exact UTC activity/expiry timestamps and advertised/approved routes on device details.
+- Configure OIDC device-access groups separately from administrator permissions.
+- Link a unique local user to an OIDC identity only through a verified email; reject ambiguous or already linked identities.
+- Fix development CLI parsing of string-encoded user IDs.
+- Keep real-device/Authentik acceptance as a follow-up; isolated HTTP, browser and container tests cover the local release.
+
+
 ## Meshora v0.1.0-rc.6 (2026-10-24)
 
 - Replace the horizontal admin navigation with a responsive sidebar.

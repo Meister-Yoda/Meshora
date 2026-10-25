@@ -1,15 +1,44 @@
 # Meshora starten und im Browser einrichten
 
-## Neu in v0.1.0-rc.6
+## Neu in v0.1.0-rc.7
 
-- Seitennavigation und getrennte Einstellungen für Identitätsanbieter, Zugriff und Darstellung.
-- Rückleitungs-URLs beim Identitätsanbieter und kompakter Sprachumschalter mit Flaggen.
-- Headscale-Stabilitätskorrekturen für Datenbank, Policy-Updates und Client-Verbindungen.
-- Sauberer Shutdown einschließlich der Authentifizierungs- und Dashboard-Caches.
-- Aktualisierte Abhängigkeiten und Go 1.27.3; weiterhin Images für AMD64 und ARM64.
+- Geführte Geräteanmeldung unter /connect, für Desktop und Mobilgeräte.
+- Kopierhilfe mit JavaScript und manuell auswählbarer Text ohne JavaScript.
+- Kombinierbare Gerätesuche und Filter für Status, Benutzer, Tags und Ablauf.
+- Diagnose mit UTC-Zeitpunkten, Routenfreigaben und konkreten Handlungshilfen.
+- Separate OIDC-Gruppenregeln für Gerätezugriff und Administration.
+- Verknüpfung eines eindeutigen lokalen Benutzers bei verifizierter OIDC-E-Mail.
+
+### Hinweise vor dem Update
+
+Konfiguration und Datenbank bei gestopptem Dienst sichern; vorhandene Volumes
+beibehalten. Das Image gezielt auf v0.1.0-rc.7 setzen. Der interne
+Proxy-Port bleibt 8080. Eine neue Datenbankmigration wird nicht eingeführt.
+Änderungen an OIDC-Anbieter und Gruppenregeln werden nach Neustart wirksam.
+
+Ein lokales Benutzerkonto mit passender, verifizierter E-Mail wird beim ersten
+OIDC-Login dauerhaft an diese Identität gebunden. Mehrdeutige Treffer oder
+bereits anderweitig gebundene Konten werden abgewiesen. E-Mail-Adressen und
+Gruppen-Claims vor dem Update prüfen und einen lokalen Admin-Zugang behalten.
+Gerätezugriff und Admin-Zugriff sind getrennte Berechtigungen.
+
+### Abnahme und Grenzen
+
+Die lokale Abnahme umfasst Go-/HTTP-Tests, gezielte Race-Prüfungen,
+einen OIDC-Durchlauf mit isolierten Tailscale-Containern und Chromium-Prüfungen
+für Deutsch/Englisch, Mobil/Desktop, Tastatur und Kopieren mit/ohne JavaScript.
+Die öffentliche Anleitung zeigt keine Gerätedaten oder Anmeldeschlüssel.
+Die Diagnose beschreibt gespeicherte Zustände; sie misst keine Erreichbarkeit.
+Routenfreigaben erfolgen weiterhin per CLI/API oder autoApprovers.
+
+Der begleitete Durchlauf mit echten Geräten und dem eigenen Authentik-Anbieter
+steht noch aus. Safari, Firefox und native Mobilclients sind nicht durch den
+Chromium-Test abgedeckt. Ein Abschlussbericht aus dem Koordinationschat war
+nicht verfügbar; geprüft wurde der im Changelog beschriebene Funktionsumfang.
+Dieses Release führt kein Deployment auf einer bestehenden Installation aus.
 
 Die Einrichtung von Claims und Scopes beschreibt die
-[Admin-OIDC-Anleitung](https://github.com/Meister-Yoda/Meshora/blob/v0.1.0-rc.6/README.de.md#admin-anmeldung-mit-authentik).
+[Admin-OIDC-Anleitung](https://github.com/Meister-Yoda/Meshora/blob/v0.1.0-rc.7/README.de.md#admin-anmeldung-mit-authentik).
 Bei OIDC-Problemen kann der lokale Admin-Login immer direkt unter
 `/admin/login?local=1` geöffnet werden.
 
@@ -96,7 +125,7 @@ Archive mit Prüfsummen. Beispiel:
 
 ```bash
 sha256sum --ignore-missing -c SHA256SUMS
-docker load -i meshora_v0.1.0-rc.6_linux_amd64.docker.tar.gz
+docker load -i meshora_v0.1.0-rc.7_linux_amd64.docker.tar.gz
 ```
 
 Für das lokal geladene Image `MESHORA_IMAGE=meshora` setzen.
