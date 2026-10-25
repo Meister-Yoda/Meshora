@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/juanfont/headscale/hscontrol/types"
@@ -173,4 +174,49 @@ func TestZonesExitLimitsAndPublicIPv6(t *testing.T) {
 	response, _ = env.post(env.client, "/admin/zones", invalid)
 	require.Equal(t, http.StatusBadRequest, response.StatusCode)
 	require.Equal(t, "2001:db8:42::10", zoneModel(t, env).Zones[0].IPv6Pools[0].Reservations[0].Address)
+}
+
+func TestZoneMatrixSelectionAndQuickActions(t *testing.T) {
+	env := newTestEnv(t)
+	csrf := env.signedIn()
+	source, loaded, err := env.state.PolicyEditorState()
+	require.NoError(t, err)
+
+	text := `{"networkZones":{"zones":[{"id":"private","name":"Privat"},{"id":"server","name":"Server"},{"id":"guest","name":"Gäste"}],"links":[{"from":"private","to":"server","services":["tcp:443","tcp:22"]},{"from":"server","to":"guest","services":["*"]}]}}`
+	_, err = env.state.SavePolicyDraft(text, source.Revision, loaded.Revision)
+	require.NoError(t, err)
+
+	response, body := env.get(env.client, "/admin/zones?from=private&to=server")
+	require.Equal(t, http.StatusOK, response.StatusCode)
+	require.Contains(t, body, "Zonenmatrix")
+	require.Contains(t, body, "zone-matrix-allow")
+	require.Contains(t, body, "zone-matrix-return")
+	require.Contains(t, body, "zone-matrix-blocked")
+	require.Contains(t, body, "zone-matrix-services")
+	require.Contains(t, body, `aria-current="true"`)
+	require.Contains(t, body, `selected value="private"`)
+	require.Contains(t, body, `<select id="zone-nodes" multiple name="nodes"`)
+	_, policySection, found := strings.Cut(body, `id="zone-policy-list"`)
+	require.True(t, found)
+
+	policySection, _, _ = strings.Cut(policySection, "</table>")
+	require.NotContains(t, policySection, "Gäste", "the policy list must be filtered without hiding matrix zones")
+
+	require.Contains(t, body, "tcp:443, tcp:22")
+	require.NotContains(t, body, "<script")
+	require.NotContains(t, body, "style=")
+	// A quick allow updates only the selected pair and retains its filter.
+	form := zonesForm(t, env, csrf, "link")
+	form.Set("from", "private")
+	form.Set("to", "server")
+	form.Set("services", "*")
+	response, _ = env.post(env.client, "/admin/zones", form)
+	require.Equal(t, http.StatusSeeOther, response.StatusCode)
+	require.Equal(t, "/admin/zones?from=private&to=server#zone-policy-list", response.Header.Get("Location"))
+	model := zoneModel(t, env)
+	require.Len(t, model.Links, 2)
+	require.Equal(t, []string{"*"}, model.Links[1].Services)
+	// Unknown zone IDs cannot enter the editor as selected options.
+	_, body = env.get(env.client, "/admin/zones?from=unknown&to=server")
+	require.NotContains(t, body, `value="unknown"`)
 }

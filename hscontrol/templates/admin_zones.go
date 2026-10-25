@@ -12,6 +12,11 @@ import (
 	"github.com/juanfont/headscale/hscontrol/types"
 )
 
+const (
+	zoneSettingsClass = "zone-settings"
+	zoneAriaLabel     = "aria-label"
+)
+
 type (
 	AdminZoneDevice struct{ ID, Name, Zone, Exits string }
 	AdminZonesInfo  struct {
@@ -23,6 +28,7 @@ type (
 		LoadedRevision                     uint64
 		Enabled, Active, Pending, Writable bool
 		Error                              string
+		FilterFrom, FilterTo               string
 	}
 )
 
@@ -50,7 +56,7 @@ func zoneField(label, name, id, value string, multiline bool) elem.Node {
 func zoneSelect(label, name, id string, choices []AdminChoice, selected []string, multiple bool) elem.Node {
 	props := attrs.Props{attrs.ID: id, attrs.Name: name}
 	if multiple {
-		props["multiple"] = "multiple"
+		props["multiple"] = "true"
 		props["size"] = "5"
 	}
 
@@ -65,7 +71,7 @@ func zoneSelect(label, name, id string, choices []AdminChoice, selected []string
 
 		option := attrs.Props{attrs.Value: html.EscapeString(choice.Value)}
 		if slices.Contains(selected, choice.Value) {
-			option[attrs.Selected] = "selected"
+			option[attrs.Selected] = "true"
 		}
 
 		options = append(options, elem.Option(option, elem.Text(choice.Label)))
@@ -73,7 +79,7 @@ func zoneSelect(label, name, id string, choices []AdminChoice, selected []string
 
 	for _, value := range selected {
 		if !seen[value] {
-			options = append(options, elem.Option(attrs.Props{attrs.Value: html.EscapeString(value), attrs.Selected: "selected"}, elem.Text("Nicht verfügbar: "+value)))
+			options = append(options, elem.Option(attrs.Props{attrs.Value: html.EscapeString(value), attrs.Selected: "true"}, elem.Text("Nicht verfügbar: "+value)))
 		}
 	}
 
@@ -81,7 +87,7 @@ func zoneSelect(label, name, id string, choices []AdminChoice, selected []string
 }
 
 func zonePanel(title string, children ...elem.Node) elem.Node {
-	return elem.Section(attrs.Props{attrs.Class: "panel"}, append([]elem.Node{elem.H2(nil, elem.Text(title))}, children...)...)
+	return elem.Section(attrs.Props{attrs.Class: "zone-panel"}, append([]elem.Node{elem.H2(nil, elem.Text(title))}, children...)...)
 }
 
 func AdminZones(info AdminPageInfo, page AdminZonesInfo) *elem.Element {
@@ -118,6 +124,10 @@ func AdminZones(info AdminPageInfo, page AdminZonesInfo) *elem.Element {
 			linkButton(info.Base+"/policy/edit", "Aktive Policy und Entwurf vergleichen", "btn-secondary")))
 	}
 
+	if page.Enabled {
+		content = append(content, zoneMatrix(info, page))
+	}
+
 	names := map[string]string{}
 
 	var rows []elem.Node
@@ -140,7 +150,7 @@ func AdminZones(info AdminPageInfo, page AdminZonesInfo) *elem.Element {
 			elem.Td(nil, textOrDash(ranges)), elem.Td(nil, textOrDash(strings.Join(zone.Exits, ", ")))))
 	}
 
-	content = append(content, dataTable("Zonen", []string{"Zone", "Zuordnung", "Adressbereiche", "Erlaubte Exit-Tags"}, rows))
+	zoneOverview := dataTable("Zonen", []string{"Zone", "Zuordnung", "Adressbereiche", "Erlaubte Exit-Tags"}, rows)
 
 	zone := types.NetworkZone{}
 	if page.Selected != nil {
@@ -184,22 +194,66 @@ func AdminZones(info AdminPageInfo, page AdminZonesInfo) *elem.Element {
 			form("delete-zone", zoneHidden("zone", zone.ID), elem.P(nil, elem.Text("Löschen entfernt auch die Verbindungen und IPv6-Reservierungen dieser Zone aus dem Entwurf.")), submitButton("Zone und Verbindungen löschen", "btn-danger")))
 	}
 
-	content = append(content, zonePanel(title, editor...))
+	settingsProps := attrs.Props{attrs.Class: zoneSettingsClass, attrs.ID: zoneSettingsClass}
+	if page.Selected != nil || !page.Enabled {
+		settingsProps["open"] = "true"
+	}
+
+	settings := elem.Details(settingsProps,
+		elem.Summary(nil, elem.Text("Zonen und Adressbereiche")),
+		zoneOverview, zonePanel(title, editor...))
 	if !page.Enabled {
+		content = append(content, settings)
 		return info.shell("Zonen", content...)
 	}
 
 	rows = nil
 	for _, link := range page.Model.Links {
+		if page.FilterFrom != "" && (link.From != page.FilterFrom || link.To != page.FilterTo) {
+			continue
+		}
 		rows = append(rows, elem.Tr(nil, elem.Td(nil, elem.Text(names[link.From])), elem.Td(nil, elem.Text(names[link.To])), elem.Td(nil, elem.Text(strings.Join(link.Services, ", "))),
 			elem.Td(nil, form("delete-link", zoneHidden("from", link.From), zoneHidden("to", link.To), submitButton("Freigabe entfernen", "btn-secondary")))))
 	}
 
-	content = append(content, zonePanel("Zonen verbinden",
+	services := "tcp:443"
+	policyTitle := "Alle Zonenfreigaben"
+
+	var selectedFrom, selectedTo []string
+	if page.FilterFrom != "" {
+		selectedFrom, selectedTo = []string{page.FilterFrom}, []string{page.FilterTo}
+
+		policyTitle = names[page.FilterFrom] + " → " + names[page.FilterTo]
+		for _, link := range page.Model.Links {
+			if link.From == page.FilterFrom && link.To == page.FilterTo {
+				services = strings.Join(link.Services, ", ")
+			}
+		}
+	}
+
+	policyContent := []elem.Node{
+		elem.Div(attrs.Props{attrs.Class: "zone-policy-heading"}, elem.H2(nil, elem.Text(policyTitle)),
+			elem.A(attrs.Props{attrs.Href: info.Base + "/zones#zone-policy-list", attrs.Class: "btn btn-secondary"}, elem.Text("Alle Freigaben"))),
 		dataTable("Gerichtete Freigaben", []string{"Von", "Nach", "Dienste", "Aktion"}, rows),
-		form("link", zoneSelect("Von", "from", "link-from", page.Zones, nil, false), zoneSelect("Nach", "to", "link-to", page.Zones, nil, false),
-			zoneField("Dienste: tcp:443, udp:53, icmp:* oder *", "services", "link-services", "tcp:443", false),
-			elem.P(nil, elem.Text("Eine bestehende Freigabe für dasselbe Zonenpaar wird ersetzt. Für die Gegenrichtung oder Verkehr innerhalb einer Zone eine eigene Freigabe anlegen.")), submitButton("Verbindung speichern", "btn-primary"))))
+	}
+	if page.FilterFrom != "" {
+		policyContent = append(policyContent, elem.Div(attrs.Props{attrs.Class: "zone-policy-actions"},
+			form("link", zoneHidden("from", page.FilterFrom), zoneHidden("to", page.FilterTo), zoneHidden("services", "*"), submitButton("Alles erlauben", "btn-primary")),
+			form("delete-link", zoneHidden("from", page.FilterFrom), zoneHidden("to", page.FilterTo), submitButton("Freigabe entfernen", "btn-danger"))))
+	}
+
+	if len(rows) == 0 {
+		policyContent = append(policyContent, elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text("Keine Freigabe für diese Auswahl. Neue Verbindungen sind gesperrt; Antworten auf erlaubte Verbindungen bleiben möglich.")))
+	}
+
+	policyContent = append(policyContent, form("link",
+		elem.Div(attrs.Props{attrs.Class: "zone-form-grid"},
+			zoneSelect("Quelle", "from", "link-from", page.Zones, selectedFrom, false),
+			zoneSelect("Ziel", "to", "link-to", page.Zones, selectedTo, false)),
+		zoneField("Erlaubte Dienste: tcp:443, udp:53, icmp:* oder *", "services", "link-services", services, false),
+		elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text("Eine Freigabe gilt für neue Verbindungen von der Quelle zum Ziel. Speichern ändert den Entwurf; erst Aktivieren wendet ihn an.")),
+		submitButton("Dienstfreigabe speichern", "btn-primary")))
+	content = append(content, elem.Section(attrs.Props{attrs.Class: "zone-panel", attrs.ID: "zone-policy-list"}, policyContent...), settings)
 
 	var targets []AdminChoice
 
@@ -240,7 +294,7 @@ func AdminZones(info AdminPageInfo, page AdminZonesInfo) *elem.Element {
 		rows = append(rows, elem.Tr(nil, elem.Td(nil, elem.Text(label)), elem.Td(nil, elem.Text(exits)), elem.Td(nil, form("delete-limit", zoneHidden("target", target), submitButton("Einschränkung entfernen", "btn-secondary")))))
 	}
 
-	content = append(content, zonePanel("Exits je Benutzer und Gerät",
+	content = append(content, elem.Details(attrs.Props{attrs.Class: zoneSettingsClass}, elem.Summary(nil, elem.Text("Exits je Benutzer und Gerät")),
 		elem.P(nil, elem.Text("Wirksam ist die Schnittmenge aus Zone, Benutzerregel und Geräteregel. Eine leere Auswahl sperrt alle Exits. Ohne Einschränkung wird die Zonenfreigabe geerbt. Ein Tag erlaubt alle Exits mit diesem Tag; für einzelne Exits eindeutige Tags verwenden.")),
 		dataTable("Exit-Einschränkungen", []string{"Gültig für", "Erlaubte Exit-Tags", "Aktion"}, rows),
 		form("limit", zoneSelect("Benutzer oder Gerät", "target", "limit-target", targets, nil, false), zoneSelect("Erlaubte Exit-Tags", "exits", "limit-exits", page.Gateways, nil, true), submitButton("Exit-Einschränkung speichern", "btn-primary"))))
@@ -250,7 +304,7 @@ func AdminZones(info AdminPageInfo, page AdminZonesInfo) *elem.Element {
 		rows = append(rows, elem.Tr(nil, elem.Td(nil, elem.Text(device.Name)), elem.Td(nil, elem.Text(device.Zone)), elem.Td(nil, elem.Text(device.Exits))))
 	}
 
-	content = append(content, dataTable("Wirksame Zuordnung im Entwurf", []string{"Gerät", "Zone", "Verfügbare Exit-Tags"}, rows))
+	content = append(content, elem.Details(attrs.Props{attrs.Class: zoneSettingsClass}, elem.Summary(nil, elem.Text("Wirksame Gerätezuordnung")), dataTable("Wirksame Zuordnung im Entwurf", []string{"Gerät", "Zone", "Verfügbare Exit-Tags"}, rows)))
 
 	public := []elem.Node{elem.P(nil, elem.Text("Öffentliche IPv6-Präfixe und Adressen werden hier reserviert. Sie werden nicht automatisch auf Clients eingerichtet. Das Präfix muss zum Gateway geroutet sein; Weiterleitung, Rückroute und Client-Adresse sind separat einzurichten. Ein Wechsel des Exits übernimmt dieses Präfix nicht."))}
 	if zone.ID == "" {
@@ -282,7 +336,83 @@ func AdminZones(info AdminPageInfo, page AdminZonesInfo) *elem.Element {
 		}
 	}
 
-	content = append(content, zonePanel("Öffentliche IPv6-Adressbereiche", public...))
+	publicProps := attrs.Props{attrs.Class: zoneSettingsClass}
+	if page.Selected != nil {
+		publicProps["open"] = "true"
+	}
+
+	content = append(content, elem.Details(publicProps, append([]elem.Node{elem.Summary(nil, elem.Text("Öffentliche IPv6-Adressbereiche"))}, public...)...))
 
 	return info.shell("Zonen", content...)
+}
+
+func zonePairHref(info AdminPageInfo, from, to string) string {
+	return info.Base + "/zones?" + url.Values{"from": {from}, "to": {to}}.Encode() + "#zone-policy-list"
+}
+
+func zoneMatrixCell(model types.NetworkZones, from, to string) (string, string) {
+	for _, link := range model.Links {
+		if link.From == from && link.To == to {
+			if slices.Contains(link.Services, "*") {
+				return "allow", "Alles erlaubt"
+			}
+
+			return "services", "Dienste (" + strconv.Itoa(len(link.Services)) + ")"
+		}
+	}
+
+	for _, link := range model.Links {
+		if link.From == to && link.To == from {
+			return "return", "Nur Antworten"
+		}
+	}
+
+	return "blocked", "Gesperrt"
+}
+
+func zoneMatrix(info AdminPageInfo, page AdminZonesInfo) elem.Node {
+	heading := elem.Div(attrs.Props{attrs.Class: "zone-policy-heading"}, elem.H2(nil, elem.Text("Zonenmatrix")),
+		elem.Span(attrs.Props{attrs.Class: "muted"}, elem.Text("Zonenpaar auswählen, um die Freigabe zu bearbeiten")))
+	if len(page.Model.Zones) == 0 {
+		return zonePanel("Zonenmatrix", elem.P(nil, elem.Text("Erstelle zuerst Zonen. Ihre Verbindungen erscheinen anschließend hier als Matrix.")))
+	}
+
+	allProps := attrs.Props{attrs.Href: info.Base + "/zones#zone-policy-list", attrs.Class: "zone-matrix-all"}
+	if page.FilterFrom == "" {
+		allProps["aria-current"] = "true"
+	}
+
+	headers := []elem.Node{elem.Th(attrs.Props{"scope": "col"}, elem.A(allProps, elem.Text("Alle Freigaben ("+strconv.Itoa(len(page.Model.Links))+")")))}
+	for _, zone := range page.Model.Zones {
+		headers = append(headers, elem.Th(attrs.Props{"scope": "col"}, elem.Text(zone.Name)))
+	}
+
+	var rows []elem.Node
+
+	for _, source := range page.Model.Zones {
+		cells := []elem.Node{elem.Th(attrs.Props{"scope": "row"}, elem.A(attrs.Props{attrs.Href: info.Base + "/zones?zone=" + url.QueryEscape(source.ID) + "#zone-settings"}, elem.Text(source.Name)))}
+		for _, destination := range page.Model.Zones {
+			state, label := zoneMatrixCell(page.Model, source.ID, destination.ID)
+
+			props := attrs.Props{attrs.Class: "zone-matrix-cell zone-matrix-" + state, attrs.Href: html.EscapeString(zonePairHref(info, source.ID, destination.ID)), zoneAriaLabel: html.EscapeString(source.Name + " → " + destination.Name + ": " + label)}
+			if page.FilterFrom == source.ID && page.FilterTo == destination.ID {
+				props["aria-current"] = "true"
+			}
+
+			cells = append(cells, elem.Td(nil, elem.A(props, elem.Text(label))))
+		}
+
+		rows = append(rows, elem.Tr(nil, cells...))
+	}
+
+	legend := elem.Div(attrs.Props{attrs.Class: "zone-matrix-legend"},
+		elem.Span(attrs.Props{attrs.Class: "zone-key zone-matrix-allow"}, elem.Text("Alles erlaubt")),
+		elem.Span(attrs.Props{attrs.Class: "zone-key zone-matrix-services"}, elem.Text("Dienstfreigabe")),
+		elem.Span(attrs.Props{attrs.Class: "zone-key zone-matrix-return"}, elem.Text("Nur Antwortverkehr")),
+		elem.Span(attrs.Props{attrs.Class: "zone-key zone-matrix-blocked"}, elem.Text("Neue Verbindungen gesperrt")))
+
+	return elem.Section(attrs.Props{attrs.Class: "zone-panel zone-matrix-panel"}, heading,
+		elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text("Quelle ↓ · Ziel → · Angezeigt werden die gespeicherten Freigaben des Entwurfs.")),
+		elem.Div(attrs.Props{attrs.Class: "zone-matrix-scroll", attrs.Role: "region", zoneAriaLabel: "Zonenmatrix; horizontal scrollbar", "tabindex": "0"},
+			elem.Table(attrs.Props{attrs.Class: "zone-matrix"}, elem.Caption(attrs.Props{attrs.Class: "sr-only"}, elem.Text("Gerichtete Zonenfreigaben: Quelle in den Zeilen, Ziel in den Spalten")), elem.THead(nil, elem.Tr(nil, headers...)), elem.TBody(nil, rows...))), legend)
 }

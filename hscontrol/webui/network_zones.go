@@ -38,6 +38,14 @@ func (h *Handler) renderZones(w http.ResponseWriter, r *http.Request, status int
 		model = &types.NetworkZones{}
 	}
 
+	from, to := r.URL.Query().Get("from"), r.URL.Query().Get("to")
+	if r.Method == http.MethodPost {
+		from, to = r.PostForm.Get("from"), r.PostForm.Get("to")
+	}
+
+	if zoneIndex(model, from) >= 0 && zoneIndex(model, to) >= 0 {
+		page.FilterFrom, page.FilterTo = from, to
+	}
 	page.Model = *model
 	active, _ := types.NetworkZonesFromPolicy(loaded.Text)
 	page.Active = active != nil
@@ -226,6 +234,13 @@ func (h *Handler) updateZones(w http.ResponseWriter, r *http.Request) {
 	target := "/zones"
 	if id := r.PostForm.Get("zone"); zoneIndex(model, id) >= 0 {
 		target += "?zone=" + url.QueryEscape(id)
+	}
+
+	if op := r.PostForm.Get("op"); op == "link" || op == "delete-link" {
+		from, to := r.PostForm.Get("from"), r.PostForm.Get("to")
+		if zoneIndex(model, from) >= 0 && zoneIndex(model, to) >= 0 {
+			target = "/zones?" + url.Values{"from": {from}, "to": {to}}.Encode() + "#zone-policy-list"
+		}
 	}
 
 	h.redirect(w, r, target, success("Zonenentwurf gespeichert und geprüft. Erst Aktivieren wendet die Änderungen an."))
