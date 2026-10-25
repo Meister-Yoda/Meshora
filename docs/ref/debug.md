@@ -281,3 +281,25 @@ delivery or reachability from an accepted snapshot. Follow-up failures
 after a successful engine switch mean new policy active with incomplete
 follow-up work, not rollback. Policy reload never activates saved global
 DNS settings; device-specific NextDNS capabilities remain separate.
+
+### Publication and CI follow-up
+
+The accepted feature set was published as `v0.1.0-rc.8`, commit
+`8a463df7fb1f3250feb9be5a03f4314e66325391`. Release workflow
+`40210745120` passed. Release-asset checksums, both GHCR platforms and the
+published AMD64 image's version, setup and health were verified.
+The tag and `latest` shared image-index digest
+`sha256:7a17871e79d76e1f4e11a5318d0b274e90e46a4de4387231c9766204ddd16e99`.
+
+Nix CI passed its build, Go tests, Go lint and race checks. Its whole-tree
+formatting check found one pre-existing extra blank line in
+`hscontrol/assets/style.css`, outside the original changed-file set.
+A follow-up removes only that blank line; CSS content excluding whitespace
+is identical. The tracked-tree Prettier check passes. No tag or history
+is rewritten and no new feature release is needed for that formatting-only
+follow-up.
+
+The separate documentation-site workflow built the docs successfully but
+could not push `gh-pages`: GitHub returned HTTP 403 for
+`github-actions[bot]`. This repository-permission/deployment follow-up
+remains open. No deployment settings or permissions were changed.
