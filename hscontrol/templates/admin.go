@@ -74,7 +74,7 @@ type AdminLoginInfo struct {
 // AdminLogin renders the web admin dashboard login page.
 func AdminLogin(info AdminLoginInfo) *elem.Element {
 	card := []elem.Node{
-		brand("Meshora"),
+		brand(),
 		elem.H1(nil, i18nText("Sign in")),
 		elem.P(attrs.Props{attrs.Class: "muted"}, i18nText("Sign in with your Meshora account.")),
 	}
@@ -90,7 +90,7 @@ func AdminLogin(info AdminLoginInfo) *elem.Element {
 		attrs.Props{
 			attrs.Class:  "stack",
 			attrs.Method: "POST",
-			attrs.Action: info.Base + "/login",
+			attrs.Action: strings.TrimSuffix(info.Base, "/admin") + "/",
 		},
 		adminCSRFInput(info.CSRFToken),
 		adminField("Email / previous login name", "username", "text", info.Username, "username"),
@@ -116,7 +116,7 @@ func AdminLogin(info AdminLoginInfo) *elem.Element {
 
 	if info.OIDCEnabled {
 		card = append(card, elem.P(attrs.Props{attrs.Class: "muted"},
-			elem.A(attrs.Props{attrs.Href: info.Base + "/login?local=1"}, i18nText("Use local admin login"))))
+			elem.A(attrs.Props{attrs.Href: strings.TrimSuffix(info.Base, "/admin") + "/?local=1"}, i18nText("Use local admin login"))))
 	}
 
 	return adminDocument(info.Base, "Sign in · Meshora", "auth",
@@ -736,17 +736,9 @@ func adminDocument(base, title, bodyClass string, body ...elem.Node) *elem.Eleme
 	)
 }
 
-// brand renders the Meshora logo and name, with an optional tag pill such as
-// "Admin". Admin and end-user pages share it.
-func brand(tag string) *elem.Element {
-	children := []elem.Node{
-		elem.Raw(meshoraMark),
-	}
-	if tag != "" {
-		children = append(children, elem.Span(attrs.Props{attrs.Class: "brand-tag"}, i18nText(tag)))
-	}
-
-	return elem.Div(attrs.Props{attrs.Class: "brand"}, children...)
+// brand renders the shared Meshora logo without an additional badge.
+func brand() *elem.Element {
+	return elem.Div(attrs.Props{attrs.Class: "brand"}, elem.Raw(meshoraMark))
 }
 
 func poweredBy() []elem.Node {
@@ -830,7 +822,7 @@ func adminField(label, name, inputType, value, autocomplete string) *elem.Elemen
 func AdminEnrollment(info AdminPageInfo, serverURL, platform string, oidc bool) *elem.Element {
 	shell := func(content ...elem.Node) *elem.Element {
 		return adminDocument(info.Base, "Add device · Meshora", "app",
-			elem.Header(attrs.Props{attrs.Class: "topbar"}, elem.Div(attrs.Props{attrs.Class: "topbar-inner"}, brand(""), languageSwitcher())),
+			elem.Header(attrs.Props{attrs.Class: "topbar"}, elem.Div(attrs.Props{attrs.Class: "topbar-inner"}, brand(), languageSwitcher())),
 			elem.Main(attrs.Props{attrs.Class: "content enrollment", attrs.ID: "main-content"}, content...),
 			elem.Footer(attrs.Props{attrs.Class: "app-footer"}, poweredBy()...))
 	}
@@ -911,7 +903,6 @@ func adminTopbar(base, username, csrf string, admin bool) elem.Node {
 	if admin {
 		home = base + "/"
 
-		brandChildren = append(brandChildren, elem.Span(attrs.Props{attrs.Class: "brand-tag"}, i18nText("Admin")))
 	}
 
 	initial := ""

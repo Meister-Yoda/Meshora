@@ -547,7 +547,10 @@ func (h *Headscale) createRouter(apiV1Mux, apiV2Mux http.Handler) *chi.Mux {
 	r.Get("/favicon.ico", FaviconHandler)
 	r.Get("/assets/meshora-logo.png", LogoHandler)
 	r.Get("/assets/meshora-logo-dark.png", LogoHandler)
-	r.Get("/", BlankHandler)
+
+	if !h.cfg.WebAdmin.Enabled {
+		r.Get("/", BlankHandler)
+	}
 
 	return r
 }

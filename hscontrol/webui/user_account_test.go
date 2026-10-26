@@ -70,7 +70,7 @@ func TestUnifiedUserFirstLoginAndPrivilegeIsolation(t *testing.T) {
 
 	_, _ = env.action(adminCSRF, path+"/admin", url.Values{"is_admin": {"on"}})
 	expired, _ := env.get(client, "/admin/account")
-	require.Equal(t, "/admin/login", expired.Header.Get("Location"))
+	require.Equal(t, "/", expired.Header.Get("Location"))
 
 	login, _ = env.login(client, user.Email, "new personal password")
 	require.Equal(t, "/admin/", login.Header.Get("Location"))

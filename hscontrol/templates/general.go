@@ -14,7 +14,7 @@ func publicBody(children ...elem.Node) *elem.Element {
 		attrs.Props{attrs.Class: "public", "translate": "no"},
 		elem.Raw(meshoraBackdrop),
 		languageSwitcher(),
-		elem.Header(attrs.Props{attrs.Class: "public-header"}, brand("")),
+		elem.Header(attrs.Props{attrs.Class: "public-header"}, brand()),
 		elem.Main(attrs.Props{attrs.Class: "md-typeset public-card"}, children...),
 		pageFooter(),
 	)

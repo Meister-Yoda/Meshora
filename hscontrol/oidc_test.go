@@ -699,3 +699,24 @@ func TestOIDCVerifiedEmailLinking(t *testing.T) {
 		})
 	}
 }
+
+func TestRouterServesRootLogin(t *testing.T) {
+	app := createTestApp(t)
+	app.cfg.WebAdmin.Enabled = true
+
+	t.Cleanup(func() {
+		if app.adminUI != nil {
+			app.adminUI.Close()
+		}
+
+		require.NoError(t, app.state.Close())
+	})
+
+	router := app.createRouter(nil, nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/?local=1", nil))
+	require.Equal(t, http.StatusOK, response.Code)
+	require.Contains(t, response.Body.String(), `name="password"`)
+	require.Contains(t, response.Body.String(), `action="/"`)
+	require.NotContains(t, response.Body.String(), `class="brand-tag"`)
+}

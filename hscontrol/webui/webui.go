@@ -174,15 +174,17 @@ func (h *Handler) Close() {
 	h.failures.Close()
 }
 
-// Routes mounts the dashboard on r under [BasePath].
+// Routes mounts the login at the root and the dashboard under [BasePath].
 func (h *Handler) Routes(r chi.Router) {
+	r.With(adminHeaders).Get("/", h.loginPage)
+	r.With(adminHeaders).Post("/", h.login)
 	r.With(adminHeaders).Get("/connect", h.enrollment)
 	r.With(adminHeaders).Get(BasePath+"/assets/enrollment.js", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 		_, _ = w.Write(assets.EnrollmentJS)
 	})
 	r.Get("/setup", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, h.serverURL+"/admin/login", http.StatusSeeOther)
+		http.Redirect(w, r, h.loginPath(), http.StatusSeeOther)
 	})
 
 	r.Route(BasePath, func(r chi.Router) {
@@ -192,7 +194,15 @@ func (h *Handler) Routes(r chi.Router) {
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			_, _ = w.Write(assets.ZonesJS)
 		})
-		r.Get("/login", h.loginPage)
+		r.Get("/login", func(w http.ResponseWriter, r *http.Request) {
+			target := h.loginPath()
+			if r.URL.RawQuery != "" {
+				target += "?" + r.URL.RawQuery
+			}
+
+			//nolint:gosec // G710: target starts with the configured local root; request data is appended only after ? as a query.
+			http.Redirect(w, r, target, http.StatusSeeOther)
+		})
 		r.Post("/login", h.login)
 		r.Post("/login/oidc", h.oidcLogin)
 		r.Get("/oidc/callback", h.oidcCallback)
@@ -287,8 +297,17 @@ func stylesheet(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (h *Handler) loginPage(w http.ResponseWriter, r *http.Request) {
-	if _, ok := h.currentSession(r); ok {
-		http.Redirect(w, r, h.publicPath+"/", http.StatusSeeOther)
+	if sess, ok := h.currentSession(r); ok {
+		target := h.publicPath + "/account"
+		if sess.isAdmin {
+			target = h.publicPath + "/"
+		}
+
+		if sess.mustChangePassword {
+			target = h.publicPath + "/account/password"
+		}
+
+		http.Redirect(w, r, target, http.StatusSeeOther)
 
 		return
 	}
@@ -396,7 +415,7 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.setCookie(w, r, sessionCookie, "", -1)
-	http.Redirect(w, r, h.publicPath+"/login?local=1", http.StatusSeeOther)
+	http.Redirect(w, r, h.loginPath()+"?local=1", http.StatusSeeOther)
 }
 
 func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
@@ -614,7 +633,7 @@ func (h *Handler) requireSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sess, ok := h.currentSession(r)
 		if !ok {
-			http.Redirect(w, r, h.publicPath+"/login", http.StatusSeeOther)
+			http.Redirect(w, r, h.loginPath(), http.StatusSeeOther)
 
 			return
 		}
@@ -721,14 +740,22 @@ func (h *Handler) clearFailures(key string) {
 	h.failures.Remove(key)
 }
 
-// setCookie sets an HttpOnly, SameSite=Strict cookie scoped to the
-// dashboard. maxAge 0 makes a session cookie, negative deletes it.
+// loginPath is the public application root, including any reverse-proxy prefix.
+func (h *Handler) loginPath() string {
+	return strings.TrimSuffix(h.publicPath, BasePath) + "/"
+}
+
+// setCookie sets an HttpOnly, SameSite=Strict cookie scoped to the application. maxAge 0 makes a session cookie, negative deletes it.
 func (h *Handler) setCookie(w http.ResponseWriter, r *http.Request, name, value string, maxAge int) {
+	// Remove cookies from the previous /admin scope before setting the root
+	// cookie, so browsers cannot send two competing session values.
+	//nolint:gosec // G124: deletion cookie retains Secure from the configured HTTPS URL or req.TLS, HttpOnly and Strict SameSite.
+	http.SetCookie(w, &http.Cookie{Name: name, Path: h.publicPath, MaxAge: -1, HttpOnly: true, Secure: h.secureCookies || r.TLS != nil, SameSite: http.SameSiteStrictMode})
 	//nolint:gosec // G124: Secure from server_url scheme or req.TLS; HttpOnly + SameSite set
 	http.SetCookie(w, &http.Cookie{
 		Name:     name,
 		Value:    value,
-		Path:     h.publicPath,
+		Path:     h.loginPath(),
 		MaxAge:   maxAge,
 		Secure:   h.secureCookies || r.TLS != nil,
 		HttpOnly: true,

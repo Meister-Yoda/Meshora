@@ -186,16 +186,6 @@ pre {
   height: auto;
 }
 
-.brand-tag {
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-}
 
 /* Forms */
 
@@ -1756,7 +1746,6 @@ summary { min-height: 36px; }
 @media (max-width: 640px) {
   .brand-logo { width: 132px; flex-basis: 132px; }
   .topbar-inner { gap: 8px; }
-  .brand-tag { display: none; }
   .btn, .btn-sm, .language-trigger, .language-options a { min-height: 44px; }
   .btn { max-width: 100%; }
   .page-head { margin-bottom: 20px; padding-bottom: 16px; }

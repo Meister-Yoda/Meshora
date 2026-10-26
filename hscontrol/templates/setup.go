@@ -59,7 +59,7 @@ func InitialSetup(info SetupInfo) *elem.Element {
 
 	return adminDocument("/admin", "Einrichtung · Meshora", "app",
 		elem.Header(attrs.Props{attrs.Class: "topbar"},
-			elem.Div(attrs.Props{attrs.Class: "topbar-inner"}, brand("Einrichtung"), languageSwitcher())),
+			elem.Div(attrs.Props{attrs.Class: "topbar-inner"}, brand(), languageSwitcher())),
 		elem.Main(attrs.Props{attrs.Class: "content"}, children...),
 		elem.Footer(attrs.Props{attrs.Class: "app-footer"}, poweredBy()...))
 }
@@ -78,7 +78,7 @@ func setupPassword(label, name string, required bool) *elem.Element {
 // InitialSetupDone refreshes through the handoff until the normal server is ready.
 func InitialSetupDone() *elem.Element {
 	page := adminDocument("/admin", "Einrichtung abgeschlossen · Meshora", "auth",
-		elem.Main(attrs.Props{attrs.Class: "auth-card"}, brand("Einrichtung"),
+		elem.Main(attrs.Props{attrs.Class: "auth-card"}, brand(),
 			elem.H1(nil, i18nText("Einrichtung abgeschlossen")),
 			elem.P(attrs.Props{attrs.Class: "muted"}, i18nText("Meshora startet jetzt mit deinen Einstellungen. Du wirst automatisch zur Anmeldung weitergeleitet.")),
 			elem.A(attrs.Props{attrs.Href: html.EscapeString("/setup"), attrs.Class: "btn btn-primary"}, i18nText("Zur Anmeldung"))))

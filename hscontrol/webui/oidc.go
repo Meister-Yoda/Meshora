@@ -4,12 +4,16 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"slices"
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
+	"github.com/juanfont/headscale/hscontrol/db"
+	hsstate "github.com/juanfont/headscale/hscontrol/state"
 	"github.com/juanfont/headscale/hscontrol/types"
+	"github.com/rs/zerolog/log"
 	"golang.org/x/oauth2"
 )
 
@@ -27,8 +31,8 @@ func (h *Handler) adminOIDCEnabled() bool {
 	return h.activeOIDC.Issuer != "" && h.activeOIDC.ClientID != ""
 }
 
-// oidcLogin starts a separate admin authorization flow. Tailnet access never
-// grants admin access, and local admin accounts are never linked by email/name.
+// oidcLogin starts the WebUI authorization flow. Administrator access requires
+// an explicit account flag; email-based linking requires a verified mailbox.
 func (h *Handler) oidcLogin(w http.ResponseWriter, r *http.Request) {
 	if !h.adminOIDCEnabled() {
 		http.NotFound(w, r)
@@ -198,9 +202,22 @@ func (h *Handler) oidcCallback(w http.ResponseWriter, r *http.Request) {
 
 	claims.Iss, claims.Sub = idToken.Issuer, idToken.Subject
 
-	user, err := h.state.ResolveOIDCUser(&claims, true)
+	user, err := h.state.ResolveOIDCUser(&claims, h.activeOIDC.EmailVerifiedRequired)
 	if err != nil {
-		h.renderLogin(w, r, http.StatusForbidden, "", "OIDC-Konto konnte nicht eindeutig zugeordnet werden. Eine verifizierte E-Mail-Adresse ist erforderlich.")
+		log.Warn().Err(err).Bool("email_present", claims.Email != "").Bool("email_verified", bool(claims.EmailVerified)).Msg("WebUI OIDC account resolution failed")
+
+		message := "OIDC-Konto konnte nicht geladen werden. Bitte Serverprotokoll prüfen."
+
+		switch {
+		case errors.Is(err, hsstate.ErrOIDCEmailUnverified):
+			message = "Der OIDC-Anbieter hat deine E-Mail-Adresse nicht bestätigt (email_verified fehlt oder ist false). Bitte die E-Mail-Verifizierung beim Anbieter abschließen."
+		case errors.Is(err, db.ErrAccountEmail):
+			message = "Der OIDC-Anbieter liefert keine gültige E-Mail-Adresse. Bitte den email-Scope und das E-Mail-Mapping beim Anbieter prüfen."
+		case errors.Is(err, hsstate.ErrOIDCEmailConflict), errors.Is(err, db.ErrAccountConflict):
+			message = "Die OIDC-Identität konnte keinem eindeutigen Konto zugeordnet werden. Bestehende Konten können nur über eine bestätigte E-Mail verknüpft werden; bitte die Kontozuordnung administrativ prüfen."
+		}
+
+		h.renderLogin(w, r, http.StatusForbidden, "", message)
 		return
 	}
 

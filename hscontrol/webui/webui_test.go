@@ -170,9 +170,9 @@ func csrfFrom(t *testing.T, body string) string {
 func (e *testEnv) login(client *http.Client, username, password string) (result, string) {
 	e.t.Helper()
 
-	_, body := e.get(client, "/admin/login")
+	_, body := e.get(client, "/")
 
-	return e.post(client, "/admin/login", url.Values{
+	return e.post(client, "/", url.Values{
 		"csrf_token": {csrfFrom(e.t, body)},
 		"username":   {username},
 		"password":   {password},
@@ -184,7 +184,7 @@ func TestDashboardRequiresLogin(t *testing.T) {
 
 	resp, _ := env.get(env.client, "/admin/")
 	assert.Equal(t, http.StatusSeeOther, resp.StatusCode)
-	assert.Contains(t, resp.Header.Get("Location"), "/admin/login")
+	assert.Contains(t, resp.Header.Get("Location"), "/")
 }
 
 func TestStylesheetIsPublic(t *testing.T) {
@@ -195,7 +195,7 @@ func TestStylesheetIsPublic(t *testing.T) {
 	assert.Equal(t, "text/css; charset=utf-8", resp.Header.Get("Content-Type"))
 	assert.Contains(t, body, ".auth-card")
 
-	_, login := env.get(env.client, "/admin/login")
+	_, login := env.get(env.client, "/")
 	assert.Contains(t, login, `href="/admin/assets/admin.css?v=`)
 	assert.NotContains(t, login, "style=", "the CSP forbids inline styles")
 }
@@ -215,7 +215,7 @@ func TestLoginAndLogout(t *testing.T) {
 
 			assert.True(t, c.HttpOnly)
 			assert.Equal(t, http.SameSiteStrictMode, c.SameSite)
-			assert.Equal(t, "/admin", c.Path)
+			assert.Equal(t, "/", c.Path)
 		}
 	}
 
@@ -255,7 +255,7 @@ func TestLoginRejectsBadCredentials(t *testing.T) {
 func TestLoginRequiresLoginCSRF(t *testing.T) {
 	env := newTestEnv(t)
 
-	resp, _ := env.post(env.client, "/admin/login", url.Values{
+	resp, _ := env.post(env.client, "/", url.Values{
 		"csrf_token": {"forged"},
 		"username":   {testAdmin},
 		"password":   {testPassword},
@@ -332,7 +332,7 @@ func TestListPagesRequireLogin(t *testing.T) {
 	for _, path := range []string{"/admin/users", "/admin/nodes", "/admin/pending"} {
 		resp, _ := env.get(env.client, path)
 		assert.Equal(t, http.StatusSeeOther, resp.StatusCode, path)
-		assert.Equal(t, "/admin/login", resp.Header.Get("Location"), path)
+		assert.Equal(t, "/", resp.Header.Get("Location"), path)
 	}
 }
 
@@ -457,24 +457,24 @@ func TestPendingPage(t *testing.T) {
 
 func TestLanguageSwitchPersistsAndPreservesUserText(t *testing.T) {
 	env := newTestEnv(t)
-	resp, page := env.get(env.client, "/admin/login?lang=de")
+	resp, page := env.get(env.client, "/?lang=de")
 	assert.Equal(t, "de", resp.Header.Get("Content-Language"))
 	assert.Contains(t, page, `<html lang="de">`)
 	assert.Contains(t, page, ">Anmelden<")
 	assert.Contains(t, page, ">E-Mail / bisheriger Anmeldename<")
 	assert.Contains(t, page, "Mit deinem Meshora-Konto anmelden.")
 	assert.NotContains(t, page, "<!--meshora-i18n-->")
-	resp, page = env.get(env.client, "/admin/login")
+	resp, page = env.get(env.client, "/")
 	assert.Equal(t, "de", resp.Header.Get("Content-Language"))
 	assert.Contains(t, page, ">Anmelden<")
-	resp, page = env.get(env.client, "/admin/login?lang=en")
+	resp, page = env.get(env.client, "/?lang=en")
 	assert.Equal(t, "en", resp.Header.Get("Content-Language"))
 	assert.Contains(t, page, ">Sign in<")
 	assert.Contains(t, page, ">Email / previous login name<")
 	assert.Contains(t, page, "Sign in with your Meshora account.")
 	assert.NotContains(t, page, "Mit deinem Meshora-Konto anmelden.")
 	// Browser language is used only in the absence of a saved selection.
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, env.server.URL+"/admin/login", nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, env.server.URL+"/", nil)
 	require.NoError(t, err)
 	req.Header.Set("Accept-Language", "de-DE,de;q=0.9,en;q=0.5")
 	result, err := newClient(t).Do(req)
@@ -487,7 +487,7 @@ func TestLanguageSwitchPersistsAndPreservesUserText(t *testing.T) {
 	env.handler.activeOIDC = types.OIDCConfig{Issuer: "https://auth.example.com", ClientID: "meshora"}
 	env.handler.adminOIDCGroups = []string{"admins"}
 	env.handler.oidcButtonText = "Settings"
-	_, page = env.get(env.client, "/admin/login?lang=de")
+	_, page = env.get(env.client, "/?lang=de")
 	assert.Contains(t, page, ">Settings</button>", "Custom button text is not a translation key")
 }
 
@@ -606,4 +606,41 @@ func TestPublicEnrollment(t *testing.T) {
 	assert.Contains(t, body, "confirm registration")
 	assert.NotContains(t, body, "https://idp.example")
 	assert.Zero(t, env.changeCount())
+}
+
+func TestRootLoginAndLegacyRedirect(t *testing.T) {
+	env := newTestEnv(t)
+	response, page := env.get(env.client, "/")
+	require.Equal(t, http.StatusOK, response.StatusCode)
+	require.Contains(t, page, `action="/"`)
+	require.NotContains(t, page, `class="brand-tag"`)
+	require.Equal(t, "no-store", response.Header.Get("Cache-Control"))
+
+	for _, path := range []string{"/admin/login?local=1&lang=de", "/setup"} {
+		response, _ = env.get(env.client, path)
+		require.Equal(t, http.StatusSeeOther, response.StatusCode)
+
+		if path == "/setup" {
+			require.Equal(t, "/", response.Header.Get("Location"))
+		} else {
+			require.Equal(t, "/?local=1&lang=de", response.Header.Get("Location"))
+		}
+	}
+
+	loginResponse, _ := env.login(env.client, testAdmin, testPassword)
+	require.Equal(t, http.StatusSeeOther, loginResponse.StatusCode)
+
+	response, _ = env.get(env.client, "/")
+	require.Equal(t, "/admin/", response.Header.Get("Location"))
+	// A prefixed reverse proxy must keep links and cookie scope inside its prefix.
+	env.handler.publicPath = "/mesh/admin"
+	response, page = env.get(newClient(t), "/")
+	require.Equal(t, http.StatusOK, response.StatusCode)
+	require.Contains(t, page, `action="/mesh/"`)
+
+	for _, cookie := range response.Cookies() {
+		if cookie.Name == loginCSRFCookie && cookie.MaxAge >= 0 {
+			require.Equal(t, "/mesh/", cookie.Path)
+		}
+	}
 }

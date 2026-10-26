@@ -29,7 +29,10 @@ func (s *State) ChangeUserPassword(id types.UserID, revision uint64, current, pa
 	return s.db.ChangeUserPassword(id, revision, current, password, oidc)
 }
 
-var ErrOIDCEmailConflict = errors.New("email matches multiple users or an already linked identity")
+var (
+	ErrOIDCEmailConflict   = errors.New("email matches multiple users or an already linked identity")
+	ErrOIDCEmailUnverified = errors.New("OIDC provider has not verified the email address")
+)
 
 func (s *State) ResolveOIDCUser(claims *types.OIDCClaims, emailVerifiedRequired bool) (*types.User, error) {
 	var (
@@ -79,7 +82,7 @@ func (s *State) ResolveOIDCUser(claims *types.OIDCClaims, emailVerifiedRequired 
 		}
 
 		if emailVerifiedRequired && (!bool(claims.EmailVerified) || claims.Email == "") {
-			return nil, db.ErrAccountEmail
+			return nil, ErrOIDCEmailUnverified
 		}
 
 		newUser = true

@@ -144,7 +144,7 @@ func TestOIDCSettingsRequireSessionAndCSRF(t *testing.T) {
 	env, path := settingsTestEnv(t, initial)
 	resp, _ := env.get(env.client, "/admin/settings")
 	assert.Equal(t, http.StatusSeeOther, resp.StatusCode)
-	assert.Equal(t, "/admin/login", resp.Header.Get("Location"))
+	assert.Equal(t, "/", resp.Header.Get("Location"))
 
 	form := url.Values{"issuer": {settingsIssuer}, "client_id": {"meshora"}, "client_secret": {"test-value"}}
 	resp, _ = env.post(env.client, "/admin/settings/oidc", form)
@@ -288,7 +288,7 @@ web_admin:
     allowed_groups: [meshora-admins]
 `)
 	resp, _ := env.post(env.client, "/admin/settings/oidc-button", url.Values{"button_text": {"SSO"}})
-	assert.Equal(t, "/admin/login", resp.Header.Get("Location"))
+	assert.Equal(t, "/", resp.Header.Get("Location"))
 
 	csrf := env.signedIn()
 	resp, _ = env.post(env.client, "/admin/settings/oidc-button", url.Values{"button_text": {"SSO"}})
@@ -319,7 +319,7 @@ web_admin:
 	env.handler.activeOIDC.Issuer = settingsIssuer
 	env.handler.activeOIDC.ClientID = "meshora"
 	env.handler.adminOIDCGroups = []string{"meshora-admins"}
-	_, page = env.get(newClient(t), "/admin/login?local=1")
+	_, page = env.get(newClient(t), "/?local=1")
 	assert.Contains(t, page, "Company SSO &lt;script&gt;")
 	assert.NotContains(t, page, "<script>")
 
@@ -336,7 +336,7 @@ web_admin:
 	}
 
 	env.action(csrf, "/admin/settings/oidc-button", url.Values{"button_text": {"  "}})
-	_, page = env.get(newClient(t), "/admin/login?local=1")
+	_, page = env.get(newClient(t), "/?local=1")
 	assert.Contains(t, page, "Sign in with Authentik")
 	assert.Empty(t, env.handler.oidcButtonText)
 }

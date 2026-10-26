@@ -32,6 +32,11 @@ func TestAdminOIDCFlow(t *testing.T) {
 	}{
 		{"success", http.StatusSeeOther},
 		{"no_admin", http.StatusSeeOther},
+		{"new_verified", http.StatusSeeOther},
+		{"new_unverified_required", http.StatusForbidden},
+		{"new_unverified_allowed", http.StatusSeeOther},
+		{"unverified_local", http.StatusForbidden},
+		{"missing_email", http.StatusForbidden},
 		{"roles_only", http.StatusSeeOther},
 		{"custom_roles_claim", http.StatusSeeOther},
 		{"role_and_group", http.StatusSeeOther},
@@ -54,7 +59,7 @@ func TestAdminOIDCFlow(t *testing.T) {
 			user, _, err := env.state.CreateUser(types.User{Name: "oidc-account", Email: "oidc-admin@example.test"})
 			require.NoError(t, err)
 
-			if tc.name != "no_admin" {
+			if tc.name != "no_admin" && !strings.HasPrefix(tc.name, "new_") && tc.name != "unverified_local" {
 				require.NoError(t, env.state.SetUserAdmin(types.UserID(user.ID), true))
 			}
 
@@ -94,6 +99,17 @@ func TestAdminOIDCFlow(t *testing.T) {
 						"preferred_username": testAdmin, "email": "oidc-admin@example.test", "email_verified": true,
 					}
 
+					if strings.HasPrefix(tc.name, "new_") {
+						claims["email"] = "new-oidc@example.test"
+					}
+
+					if strings.Contains(tc.name, "unverified") {
+						claims["email_verified"] = false
+					}
+
+					if tc.name == "missing_email" {
+						delete(claims, "email")
+					}
 					claims["roles"] = []string{"meshora-admin"}
 					if tc.name == "roles_only" {
 						delete(claims, "groups")
@@ -162,7 +178,7 @@ func TestAdminOIDCFlow(t *testing.T) {
 
 			issuer = provider.URL
 			env.handler.serverURL = env.server.URL
-			env.handler.activeOIDC = types.OIDCConfig{Issuer: issuer, ClientID: "meshora", ClientSecret: "test-secret"}
+			env.handler.activeOIDC = types.OIDCConfig{Issuer: issuer, ClientID: "meshora", ClientSecret: "test-secret", EmailVerifiedRequired: tc.name != "new_unverified_allowed" && tc.name != "unverified_local"}
 			env.handler.adminOIDCGroups = []string{"meshora-admins"}
 
 			switch tc.name {
@@ -177,7 +193,7 @@ func TestAdminOIDCFlow(t *testing.T) {
 				}
 			}
 
-			_, page := env.get(env.client, "/admin/login?local=1")
+			_, page := env.get(env.client, "/?local=1")
 			assert.Contains(t, page, "Sign in with Authentik")
 			resp, _ := env.post(env.client, "/admin/login/oidc", url.Values{"csrf_token": {csrfFrom(t, page)}})
 			require.Equal(t, http.StatusSeeOther, resp.StatusCode)
@@ -208,12 +224,24 @@ func TestAdminOIDCFlow(t *testing.T) {
 			other := newClient(t)
 			resp, _ = env.get(other, callback)
 			assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
-			resp, _ = env.get(env.client, callback)
+
+			resp, callbackPage := env.get(env.client, callback)
+			if tc.name == "new_unverified_required" {
+				assert.Contains(t, callbackPage, "email_verified fehlt oder ist false")
+			}
+
+			if tc.name == "missing_email" {
+				assert.Contains(t, callbackPage, "keine gültige E-Mail-Adresse")
+			}
+
+			if tc.name == "unverified_local" {
+				assert.Contains(t, callbackPage, "bestätigte E-Mail")
+			}
 			require.Equal(t, tc.status, resp.StatusCode)
 
 			if tc.status == http.StatusSeeOther {
 				target := "/admin/"
-				if tc.name == "no_admin" {
+				if tc.name == "no_admin" || strings.HasPrefix(tc.name, "new_") {
 					target = "/admin/account"
 				}
 
@@ -221,7 +249,7 @@ func TestAdminOIDCFlow(t *testing.T) {
 				resp, page = env.get(env.client, target)
 				assert.Equal(t, http.StatusOK, resp.StatusCode)
 
-				if tc.name == "no_admin" {
+				if tc.name == "no_admin" || strings.HasPrefix(tc.name, "new_") {
 					assert.Contains(t, page, "Mein Konto")
 				} else {
 					assert.Contains(t, page, "Overview")
@@ -247,7 +275,7 @@ func TestAdminOIDCFlow(t *testing.T) {
 				assert.False(t, ok)
 			} else {
 				resp, _ = env.get(env.client, "/admin/")
-				assert.Equal(t, "/admin/login", resp.Header.Get("Location"))
+				assert.Equal(t, "/", resp.Header.Get("Location"))
 			}
 			// Even restoring the flow cookie cannot replay a consumed callback.
 			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, callback, nil)
@@ -262,7 +290,7 @@ func TestAdminOIDCFlow(t *testing.T) {
 
 func TestAdminOIDCDisabledAndCSRF(t *testing.T) {
 	env := newTestEnv(t)
-	_, page := env.get(env.client, "/admin/login?local=1")
+	_, page := env.get(env.client, "/?local=1")
 	assert.NotContains(t, page, "Sign in with Authentik")
 
 	resp, _ := env.post(env.client, "/admin/login/oidc", nil)
@@ -298,7 +326,7 @@ func TestAdminOIDCAutomaticFallback(t *testing.T) {
 	issuer = provider.URL
 	env.handler.activeOIDC = types.OIDCConfig{Issuer: issuer, ClientID: "meshora"}
 	env.handler.adminOIDCRoles = []string{"meshora-admin"}
-	resp, _ := env.get(env.client, "/admin/login")
+	resp, _ := env.get(env.client, "/")
 	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
 	target, err := url.Parse(resp.Header.Get("Location"))
 	require.NoError(t, err)
@@ -310,16 +338,16 @@ func TestAdminOIDCAutomaticFallback(t *testing.T) {
 	assert.Empty(t, resp.Header.Get("Location"), "Failure must render local login without an automatic redirect loop")
 	assert.Contains(t, page, `name="password"`)
 	assert.Contains(t, page, "Use local admin login")
-	resp, page = env.get(env.client, "/admin/login?local=1")
+	resp, page = env.get(env.client, "/?local=1")
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Contains(t, page, `name="password"`)
 	// Language switching must not automatically bounce away from the login page.
-	resp, _ = env.get(env.client, "/admin/login?lang=de")
+	resp, _ = env.get(env.client, "/?lang=de")
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	// An unreachable provider must render a working local form as well.
 	provider.Close()
 
-	resp, page = env.get(env.client, "/admin/login")
+	resp, page = env.get(env.client, "/")
 	assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
 	assert.Contains(t, page, `name="password"`)
 	assert.Empty(t, resp.Header.Get("Location"))
