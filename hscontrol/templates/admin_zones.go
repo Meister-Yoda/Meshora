@@ -92,7 +92,7 @@ func zoneSelect(label, name, id string, choices []AdminChoice, selected []string
 		options = append(options, elem.Option(attrs.Props{attrs.Value: ""}, elem.Text("Bitte wählen")))
 	}
 
-	seen := map[string]bool{}
+	seen := map[string]bool{"": true}
 	for _, choice := range choices {
 		seen[choice.Value] = true
 
@@ -129,10 +129,14 @@ func AdminZones(info AdminPageInfo, page AdminZonesInfo) *elem.Element {
 	}
 
 	if page.Pending {
-		status += " Die angezeigte Einrichtung ist ein gespeicherter Entwurf und weicht von der aktiven Policy ab."
+		status += " Änderungen noch nicht angewendet."
 	}
 
-	content = append(content, elem.P(nil, elem.Text(status)), elem.P(nil, elem.Text("Ohne Freigabe ist kein Zugriff erlaubt, auch innerhalb derselben Zone. Verbindungen sind gerichtet; Antwortverkehr ist erlaubt. Exits werden am Client gewählt.")))
+	content = append(content,
+		elem.Div(attrs.Props{attrs.Class: "zone-summary"}, elem.Strong(nil, elem.Text(status)),
+			elem.Span(nil, elem.Text(strconv.Itoa(len(page.Model.Zones))+" Zonen · "+strconv.Itoa(len(page.Model.Links))+" Verbindungsregeln"))),
+		elem.Details(attrs.Props{attrs.Class: "zone-help"}, elem.Summary(nil, elem.Text("Wie funktionieren Zonen und Freigaben?")),
+			elem.P(nil, elem.Text("Ohne Freigabe ist kein Zugriff erlaubt, auch innerhalb derselben Zone. Verbindungen sind gerichtet; Antwortverkehr ist erlaubt. Exits werden am Client gewählt."))))
 	if !page.Writable {
 		return info.shell("Zonen", content...)
 	}
@@ -314,7 +318,7 @@ func AdminZones(info AdminPageInfo, page AdminZonesInfo) *elem.Element {
 
 		policyContent := []elem.Node{
 			elem.Div(attrs.Props{attrs.Class: "zone-policy-heading"}, elem.H2(nil, elem.Text(policyTitle)),
-				elem.A(attrs.Props{attrs.Href: info.Base + "/zones#zone-policy-list", attrs.Class: "btn btn-secondary"}, elem.Text("Alle Freigaben"))),
+				elem.A(attrs.Props{attrs.Href: info.Base + "/zones?rules=all#zone-all-links", attrs.Class: "btn btn-secondary"}, elem.Text("Alle Freigaben"))),
 			dataTable("Gerichtete Freigaben", []string{"Von", "Nach", "Dienste", "Aktion"}, rows),
 		}
 		if page.FilterFrom != "" {
@@ -360,7 +364,7 @@ func AdminZones(info AdminPageInfo, page AdminZonesInfo) *elem.Element {
 		children = append(children, pairEditor)
 		content = append(content, elem.Dialog(attrs.Props{attrs.ID: "zone-pair-editor", attrs.Class: "zone-editor", "open": "true", "aria-label": "Zonenverbindung bearbeiten"}, children...))
 	} else {
-		content = append(content, pairEditor)
+		content = append(content, elem.Details(attrs.Props{attrs.Class: zoneSettingsClass, attrs.ID: "zone-all-links"}, elem.Summary(nil, elem.Text("Alle Verbindungsregeln anzeigen")), pairEditor))
 	}
 
 	content = append(content, settings, zoneRouteOverview(info, page.Routes),
@@ -450,7 +454,7 @@ func zoneMatrix(info AdminPageInfo, page AdminZonesInfo) elem.Node {
 		return zonePanel("Zonenmatrix", elem.P(nil, elem.Text("Erstelle zuerst Zonen. Ihre Verbindungen erscheinen anschließend hier als Matrix.")))
 	}
 
-	allProps := attrs.Props{attrs.Href: info.Base + "/zones#zone-policy-list", attrs.Class: "zone-matrix-all"}
+	allProps := attrs.Props{attrs.Href: info.Base + "/zones?rules=all#zone-all-links", attrs.Class: "zone-matrix-all"}
 	if page.FilterFrom == "" {
 		allProps["aria-current"] = "true"
 	}
@@ -569,7 +573,8 @@ func adminZoneAssignment(info AdminPageInfo, path string, assignment *AdminZoneA
 		content = append(content, elem.P(nil, elem.Text("Entfernen löscht nur die direkte Gerätezuordnung. Bei benutzereigenen Geräten gilt danach wieder die Zone des Benutzers; getaggte Geräte erben keine Benutzerzone.")))
 	}
 
-	content = append(content, ownExitEntityEditor(info, path, assignment), entityExitLimits(info, path, assignment))
+	exitContent := make([]elem.Node, 0, 6)
+	exitContent = append(exitContent, ownExitEntityEditor(info, path, assignment), entityExitLimits(info, path, assignment))
 	providerStatus := "In der aktuellen Zone ist das Bereitstellen eines eigenen Exit Nodes erlaubt (Routenfreigabe bleibt erforderlich)."
 	providerButton, providerValue := "Eigene Exits in der Benutzerzone sperren", "true"
 
@@ -581,11 +586,12 @@ func adminZoneAssignment(info AdminPageInfo, path string, assignment *AdminZoneA
 		providerButton, providerValue = "Exit-Sperre der Benutzerzone entfernen", "false"
 	}
 
-	content = append(content, elem.H3(nil, elem.Text("Eigene Exit Nodes")), elem.P(nil, elem.Text(providerStatus)),
+	exitContent = append(exitContent, elem.H3(nil, elem.Text("Eigene Exit Nodes")), elem.P(nil, elem.Text(providerStatus)),
 		postForm(info, path+"/exit-provider", "action-form",
 			zoneHidden("source_revision", assignment.SourceRevision), zoneHidden("loaded_revision", strconv.FormatUint(assignment.LoadedRevision, 10)),
 			zoneHidden(zoneBlockedState, providerValue), submitButton(providerButton, "btn-secondary")),
 		elem.P(nil, elem.Text("Diese Benutzer-/Gerätesperre gilt nur in der unsichtbaren Benutzerzone. In einer ausdrücklich zugeordneten Zone gilt deren Einstellung für eigene Exits. Eine Geräteeinstellung hebt die Benutzersperre innerhalb der Benutzerzone nicht auf.")))
+	content = append(content, elem.Details(attrs.Props{attrs.Class: "entity-exit-settings"}, append([]elem.Node{elem.Summary(nil, elem.Text("Exit-Berechtigungen"))}, exitContent...)...))
 	content = append(content, elem.P(nil, elem.Text("Wird als Entwurf gespeichert. Erst die Aktivierung unter Zonen wendet die Änderung an. Bestehende IP-Adressen bleiben erhalten.")), linkButton(info.Base+"/zones", "Zonen und Aktivierung", "btn-secondary"))
 
 	return cardSection("Zone", "Wirksame Zone im Entwurf: "+assignment.Effective, content...)

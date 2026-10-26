@@ -1,5 +1,9 @@
 (() => {
   "use strict";
+  const rules = document.getElementById("zone-all-links");
+  if (rules && new URL(window.location.href).searchParams.get("rules") === "all") {
+    rules.open = true;
+  }
   const mode = document.getElementById("link-mode");
   const services = document.querySelector("[data-link-services]");
   if (mode && services) {

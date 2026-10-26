@@ -252,3 +252,22 @@ func TestPublicEnrollment(t *testing.T) {
 	body := AdminEnrollment(info, `https://mesh.example/'"><script>alert(1)</script>`, "linux", true).Render()
 	assert.NotContains(t, body, "<script>alert(1)</script>")
 }
+
+func TestAdminNavigationAndInheritedZoneSelection(t *testing.T) {
+	info := AdminPageInfo{Base: "/admin", Username: "alice"}
+	page := AdminZones(info, AdminZonesInfo{Writable: true, Enabled: true}).Render()
+	assert.Contains(t, page, `class="skip-link" href="#main-content"`)
+	assert.Contains(t, page, `id="main-content" tabindex="-1"`)
+	assert.NotContains(t, page, `<path d=""`)
+	assert.NotContains(t, page, `href="/admin/routes"`)
+
+	selection := zoneSelect("Zone", "zone", "assignment-zone", []AdminChoice{{Value: "a", Label: "A"}}, []string{""}, false).Render()
+	assert.NotContains(t, selection, "Nicht verfügbar")
+	assert.Contains(t, selection, "Bitte wählen")
+}
+
+func TestOverviewConnectionHintIsLocalized(t *testing.T) {
+	page := Localize(AdminOverview(AdminOverviewInfo{Base: "/admin", ServerURL: "https://mesh.example"}).Render(), "de")
+	assert.Contains(t, page, "Führe diesen Befehl auf dem Gerät aus.")
+	assert.NotContains(t, page, "Run this on the device.")
+}

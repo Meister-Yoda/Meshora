@@ -740,6 +740,8 @@ var translations = [][2]string{
 	{"Authorized as ", "Autorisiert als "},
 	{"Navigation", "Navigation"},
 	{"Workspace", "Arbeitsbereich"},
+	{"Network", "Netzwerk"},
+	{"Skip to content", "Zum Inhalt springen"},
 	{"Administration", "Verwaltung"},
 	{"Identity provider", "Identitätsanbieter"},
 	{"Access rules", "Zugriffsrechte"},

@@ -142,6 +142,11 @@ func AdminOverview(info AdminOverviewInfo) *elem.Element {
 		onlinePct = info.OnlineCount * 100 / info.NodeCount
 	}
 
+	onlineDot := "dot"
+	if info.OnlineCount == 0 {
+		onlineDot += " dot-off"
+	}
+
 	stats := elem.Section(
 		attrs.Props{attrs.Class: "stats"},
 		statCard(info.Base+"/users", "Users", info.UserCount, i18nText("Tailnet users")),
@@ -152,7 +157,7 @@ func AdminOverview(info AdminOverviewInfo) *elem.Element {
 			elem.Div(attrs.Props{attrs.Class: "stat-value"}, elem.Text(strconv.Itoa(info.OnlineCount))),
 			elem.Div(
 				attrs.Props{attrs.Class: "stat-hint"},
-				elem.Span(attrs.Props{attrs.Class: "dot"}),
+				elem.Span(attrs.Props{attrs.Class: onlineDot}),
 				i18nText(strconv.Itoa(onlinePct)+"% of nodes connected"),
 			),
 			elem.Div(
@@ -166,7 +171,7 @@ func AdminOverview(info AdminOverviewInfo) *elem.Element {
 	addDevice := elem.Section(
 		attrs.Props{attrs.Class: "card"},
 		elem.H2(nil, i18nText("Add a device")),
-		elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text(
+		elem.P(attrs.Props{attrs.Class: "muted"}, i18nText(
 			"Run this on the device. The user then signs in with their identity provider.",
 		)),
 		elem.Pre(attrs.Props{attrs.Class: adminCodeblockClass}, elem.Code(nil,
@@ -691,6 +696,7 @@ func adminShell(base, username, csrf, title string, flash *AdminFlash, content .
 	)
 
 	return adminDocument(base, title+" · Meshora", "app",
+		elem.A(attrs.Props{attrs.Href: "#main-content", attrs.Class: "skip-link"}, i18nText("Skip to content")),
 		topbar,
 		elem.Div(attrs.Props{attrs.Class: "workspace"},
 			elem.Aside(attrs.Props{attrs.Class: "sidebar"}, mainNavigation(base, title)),
@@ -698,7 +704,7 @@ func adminShell(base, username, csrf, title string, flash *AdminFlash, content .
 				elem.Details(attrs.Props{attrs.Class: "mobile-navigation"},
 					elem.Summary(nil, i18nText("Navigation"), elem.Span(attrs.Props{"aria-hidden": "true"}, elem.Text("☰"))),
 					mainNavigation(base, title)),
-				elem.Main(attrs.Props{attrs.Class: "content", attrs.ID: "main-content"}, append([]elem.Node{flashBanner(flash)}, content...)...),
+				elem.Main(attrs.Props{attrs.Class: "content", attrs.ID: "main-content", "tabindex": "-1"}, append([]elem.Node{flashBanner(flash)}, content...)...),
 				elem.Footer(attrs.Props{attrs.Class: "app-footer"}, poweredBy()...))),
 	)
 }
@@ -709,12 +715,13 @@ func mainNavigation(base, current string) elem.Node {
 		navLink(base+"/", "Overview", current == "Overview"),
 		navLink(base+"/users", "Users", current == "Users"),
 		navLink(base+"/nodes", "Nodes", current == "Nodes"),
+		navLink(base+"/pending", "Pending", current == "Pending"),
+		elem.P(attrs.Props{attrs.Class: "sidebar-label"}, i18nText("Network")),
 		navLink(base+"/zones", "Zonen", current == "Zonen"),
 		navLink(base+"/dns", "DNS", current == "DNS"),
 		navLink(base+"/policy", "Policy", current == "Policy"),
-		navLink(base+"/pending", "Pending", current == "Pending"),
-		navLink(base+"/keys", "Keys", current == "Keys"),
 		elem.P(attrs.Props{attrs.Class: "sidebar-label"}, i18nText("Administration")),
+		navLink(base+"/keys", "Keys", current == "Keys"),
 		navLink(base+"/settings", "Settings", current == "Settings"),
 	}
 	if current == "Settings" {
@@ -783,6 +790,9 @@ func navLink(href, label string, current bool) *elem.Element {
 	}
 
 	paths := map[string]string{
+		"Zonen":    "M4 4h6v6H4z M14 14h6v6h-6z M7 10v7h7 M10 7h7v7",
+		"DNS":      "M3 5h18v5H3z M3 14h18v5H3z M7 7.5h.01 M7 16.5h.01 M16 7.5h2 M16 16.5h2",
+		"Policy":   "M12 3l8 3v5c0 5-4 8-8 10-4-2-8-5-8-10V6z M8 12l3 3 5-6",
 		"Overview": "M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z",
 		"Users":    "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8 M20 21v-2a4 4 0 0 0-3-3.87 M16 3.13a4 4 0 0 1 0 7.75",
 		"Nodes":    "M3 4h18v12H3z M8 21h8 M12 16v5",
