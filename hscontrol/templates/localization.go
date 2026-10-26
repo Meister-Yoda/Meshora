@@ -460,6 +460,8 @@ var translations = [][2]string{
 	{"Sign in", "Anmelden"},
 	{"Use your Meshora admin account.", "Melde dich mit deinem Meshora-Admin-Konto an."},
 	{"Username", "Benutzername"},
+	{"Email / previous login name", "E-Mail / bisheriger Anmeldename"},
+	{"Sign in with your Meshora account.", "Mit deinem Meshora-Konto anmelden."},
 	{"Password", "Passwort"},
 	{"Sign in with Authentik", "Mit Authentik anmelden"},
 	{"Use local admin login", "Lokal als Admin anmelden"},

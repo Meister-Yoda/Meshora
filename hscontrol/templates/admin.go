@@ -76,7 +76,7 @@ func AdminLogin(info AdminLoginInfo) *elem.Element {
 	card := []elem.Node{
 		brand("Meshora"),
 		elem.H1(nil, i18nText("Sign in")),
-		elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text("Mit deinem Meshora-Konto anmelden.")),
+		elem.P(attrs.Props{attrs.Class: "muted"}, i18nText("Sign in with your Meshora account.")),
 	}
 
 	if info.Error != "" {
@@ -93,7 +93,7 @@ func AdminLogin(info AdminLoginInfo) *elem.Element {
 			attrs.Action: info.Base + "/login",
 		},
 		adminCSRFInput(info.CSRFToken),
-		adminField("E-Mail / bisheriger Anmeldename", "username", "text", info.Username, "username"),
+		adminField("Email / previous login name", "username", "text", info.Username, "username"),
 		adminField("Password", "password", "password", "", "current-password"),
 		elem.Button(
 			attrs.Props{attrs.Type: submitType, attrs.Class: "btn btn-primary btn-block"},
