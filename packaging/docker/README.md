@@ -1,6 +1,12 @@
 # Meshora starten und im Browser einrichten
 
-## Neu in v0.1.1-rc.1
+## Neu in v0.2.0
+
+- Überarbeitete responsive Oberfläche mit Hell-/Dunkelansicht und dezenter Glasoptik für Navigation und Dialoge.
+- Kontomenü mit kompaktem DE/EN-Umschalter, GitHub-Link und geschütztem Abmelden.
+- Versionsanzeige und Repository-Links im Footer.
+- Zonenpaare im Popup bearbeiten; Routenfreigaben direkt bei den Geräten verwalten.
+- Vererbbare Regeln für eigene Exits mit Benutzer-/Geräteausnahmen und verbindlicher Zonensperre.
 
 - Zonen mit Benutzern, Geräten, gerouteten Subnetzen und gerichteten Dienstfreigaben.
 - Klickbare Zonenmatrix mit farbigen Freigaben, Filterung nach Zonenpaar und direkter Regelbearbeitung.
@@ -13,7 +19,7 @@
 ### Hinweise vor dem Update
 
 Konfiguration und Datenbank bei gestopptem Dienst sichern; vorhandene Volumes
-beibehalten. Das Image gezielt auf `v0.1.1-rc.1` setzen. Der interne Proxy-Port
+beibehalten. Das Image gezielt auf `v0.2.0` setzen. Der interne Proxy-Port
 bleibt 8080. Es wird keine neue Datenbankmigration eingeführt.
 
 Der erste Wechsel in den Zonenmodus ersetzt vorhandene ACLs und Grants,
@@ -23,8 +29,11 @@ Zone kein Zugriff erlaubt. Neue Entwürfe werden erst nach Aktivierung wirksam.
 Vor einem Downgrade auf eine Version ohne Zonenunterstützung die vorherige
 Policy wiederherstellen; ältere Versionen verstehen `networkZones` nicht.
 
-Diese Vorabversion wird mit versionierten Image-Tags veröffentlicht und
-aktualisiert weder das Docker-Tag `latest` noch GitHubs Latest-Kennzeichnung.
+Diese stabile Version wird als `v0.2.0` und `latest` für AMD64 und ARM64
+veröffentlicht und als neueste stabile GitHub-Version markiert. Compose bleibt
+für reproduzierbare Installationen auf `v0.2.0` festgelegt. Mit
+`MESHORA_VERSION=latest` lässt sich ausdrücklich der jeweils aktuelle stabile
+Stand verwenden.
 
 ### Abnahme und Grenzen
 
@@ -40,11 +49,11 @@ Container-Starttest.
 Öffentliche IPv6-Reservierungen konfigurieren weder Gateway noch Client.
 Subnetzrouten müssen weiterhin angekündigt und genehmigt werden; erlaubte
 Exits werden am Client gewählt. Die ausführliche
-[Zonen-Anleitung](https://github.com/Meister-Yoda/Meshora/blob/v0.1.1-rc.1/docs/network-zones.md)
+[Zonen-Anleitung](https://github.com/Meister-Yoda/Meshora/blob/v0.2.0/docs/network-zones.md)
 beschreibt die Voraussetzungen und verbleibenden Grenzen.
 
 Für bestehende OIDC-Einstellungen gilt weiterhin die
-[Admin-OIDC-Anleitung](https://github.com/Meister-Yoda/Meshora/blob/v0.1.1-rc.1/README.de.md#admin-anmeldung-mit-authentik).
+[Admin-OIDC-Anleitung](https://github.com/Meister-Yoda/Meshora/blob/v0.2.0/README.de.md#admin-anmeldung-mit-authentik).
 Der lokale Admin-Login ist unter `/admin/login?local=1` erreichbar.
 
 Benötigt werden Docker und Docker Compose v2 mit Linux-Containern
@@ -130,7 +139,7 @@ Archive mit Prüfsummen. Beispiel:
 
 ```bash
 sha256sum --ignore-missing -c SHA256SUMS
-docker load -i meshora_v0.1.1-rc.1_linux_amd64.docker.tar.gz
+docker load -i meshora_v0.2.0_linux_amd64.docker.tar.gz
 ```
 
 Für das lokal geladene Image `MESHORA_IMAGE=meshora` setzen.

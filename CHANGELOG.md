@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## Meshora v0.2.0 (2026-10-26)
+
+- Ship the network-zone feature set as a stable release with versioned AMD64/ARM64 images and an updated `latest` tag.
+- Refine shared dashboard layout, navigation icons, light/dark colors, keyboard focus, touch targets and larger-text behavior.
+- Apply restrained glass materials to navigation, account menus and zone dialogs, with opaque accessibility fallbacks.
+- Combine language selection, repository access and CSRF-protected sign-out in a compact native account popover.
+- Display the running build version and Meshora/Headscale repository links in the footer.
+- Keep zone-pair editing exclusively in modals; show route state in zones and perform approvals on device details.
+- Provide hidden personal user zones, scoped exit-provider blocks and inherited own-exit service rules with device/user/group/zone precedence.
+- Verify browser form submissions, validation recovery, language changes, sign-out, desktop/mobile views and accessibility appearance settings.
+- Preserve the existing zone deployment limits: public IPv6 provisioning is manual, clients select exits, and real-client zone traffic has not yet been verified.
+
+
 ## Meshora v0.1.1-rc.1 (2026-10-25)
 
 - Add logical network zones with user/device membership, routed subnets and directed service permissions.

@@ -9,7 +9,13 @@
   --surface-2: #eef1f5;
   --border: #d5dbe4;
   --control-border: #8390a2;
-  --glass-border: var(--border);
+  --glass-border: rgba(255, 255, 255, 0.85);
+  --glass-surface: rgba(255, 255, 255, 0.9);
+  --glass-shadow: 0 8px 28px rgba(29, 54, 91, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  --ambient-blue: rgba(90, 155, 255, 0.3);
+  --ambient-violet: rgba(161, 130, 242, 0.2);
+  --ambient-green: rgba(91, 190, 171, 0.14);
+  --ambient-warm: rgba(244, 185, 131, 0.12);
   --row-hover: #f1f5fb;
   --text: #182333;
   --muted: #536176;
@@ -36,6 +42,13 @@
     --bg: #11151c;
     --surface: #1a202a;
     --surface-2: #232c39;
+    --glass-border: rgba(190, 214, 255, 0.2);
+    --glass-surface: rgba(26, 32, 42, 0.88);
+    --glass-shadow: 0 10px 32px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    --ambient-blue: rgba(56, 110, 205, 0.3);
+    --ambient-violet: rgba(113, 76, 183, 0.24);
+    --ambient-green: rgba(45, 128, 111, 0.16);
+    --ambient-warm: rgba(152, 103, 59, 0.1);
     --border: #3b485c;
     --control-border: #6f8097;
     --row-hover: #232f40;
@@ -78,7 +91,17 @@ body {
 }
 
 /* Opaque content surfaces keep network data readable in both appearances. */
-.meshora-backdrop { display: none; }
+.meshora-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at 4% 0%, var(--ambient-blue), transparent 52%),
+    radial-gradient(ellipse at 98% 42%, var(--ambient-violet), transparent 54%),
+    radial-gradient(ellipse at 50% 100%, var(--ambient-warm), transparent 48%),
+    radial-gradient(ellipse at 50% 6%, var(--ambient-green), transparent 46%);
+}
 
 .auth-card,
 .topbar,
@@ -1771,4 +1794,170 @@ summary { min-height: 36px; }
   max-width: 12rem;
   white-space: normal;
   overflow-wrap: anywhere;
+}
+
+/* Account controls share one native popover, with no nested language menu. */
+.account-trigger {
+  anchor-name: --account-trigger;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  max-width: min(24rem, 50vw);
+  padding: 5px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.account-trigger .avatar { flex: none; }
+.account-trigger:hover { background: var(--surface-2); }
+.account-trigger .account-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.account-options {
+  position: fixed;
+  position-anchor: --account-trigger;
+  inset: auto;
+  top: clamp(8px, calc(anchor(bottom) + 6px), calc(100dvh - 240px));
+  left: clamp(12px, calc(anchor(right) - 240px), calc(100vw - 252px));
+  width: 240px;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
+  margin: 0;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-lg);
+}
+.account-menu-label {
+  color: var(--muted);
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+.account-language-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 4px 6px;
+  padding: 8px 8px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.account-languages {
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-2);
+}
+.account-options a,
+.account-signout {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+.account-options a:hover,
+.account-signout:hover { background: var(--row-hover); text-decoration: none; }
+.account-options form { margin: 0; padding: 0; }
+.account-item-icon { width: 18px; height: 18px; flex: none; color: var(--muted); }
+.account-options .account-languages a {
+  justify-content: center;
+  min-height: 30px;
+  width: 40px;
+  padding: 4px 8px;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  border-radius: 6px;
+}
+.account-options .account-languages a[aria-current="true"] {
+  color: var(--text);
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+@media (pointer: coarse) {
+  .account-options .account-languages a { min-height: 44px; width: 44px; }
+}
+@media (max-width: 640px) {
+  .topbar-inner > .account { width: auto; margin-left: auto; justify-content: flex-end; }
+  .account-trigger { gap: 6px; max-width: 48vw; padding-inline: 6px; }
+  .account-trigger .avatar { width: 28px; height: 28px; font-size: 0.75rem; }
+}
+
+/* Functional glass sits above the stable content layer. Opaque backgrounds
+ * above remain the fallback when backdrop filtering is unavailable. */
+.sidebar {
+  padding: 12px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+@supports ((backdrop-filter: blur(24px)) or (-webkit-backdrop-filter: blur(24px))) {
+  .topbar,
+  .sidebar,
+  .mobile-navigation,
+  .account-options,
+  .language-options,
+  .zone-editor {
+    background: var(--glass-surface);
+    border-color: var(--glass-border);
+    box-shadow: var(--glass-shadow);
+    backdrop-filter: blur(24px) saturate(1.25);
+    -webkit-backdrop-filter: blur(24px) saturate(1.25);
+  }
+  .zone-editor { box-shadow: var(--glass-shadow), 0 24px 64px rgba(0, 0, 0, 0.18); }
+}
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .meshora-backdrop { display: none; }
+  .topbar,
+  .sidebar,
+  .mobile-navigation,
+  .account-options,
+  .language-options,
+  .zone-editor {
+    background: var(--surface);
+    border-color: var(--border);
+    box-shadow: var(--shadow);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .zone-editor::backdrop { backdrop-filter: none; }
+}
+@media (forced-colors: active) {
+  .meshora-backdrop { display: none; }
+  .topbar,
+  .sidebar,
+  .mobile-navigation,
+  .account-options,
+  .language-options,
+  .zone-editor {
+    background: Canvas;
+    border-color: CanvasText;
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
 }

@@ -9,7 +9,12 @@ für Benutzer, Geräte, Registrierungen, Vorab-Schlüssel und Netzwerkeinstellun
 > Meshora ist ein unabhängiger Fork und gehört weder zu Tailscale Inc. noch
 > zum Headscale-Projekt. Bitte melde Meshora-Probleme in diesem Repository.
 
-## v0.1.1-rc.1
+## v0.2.0
+
+- Überarbeitete Hell-/Dunkeloberfläche mit gut bedienbaren Steuerelementen, dezenter Glasnavigation und responsiven Ansichten.
+- Kompaktes Kontomenü mit Sprachwahl, Repository-Link und Abmelden; laufende Version im Footer.
+- Zonenpaare im Popup bearbeiten; Routen beim Gerät freigeben und unter Zonen überblicken.
+- Regeln für eigene Exits aus Zonen und Policy-Gruppen erben, mit Benutzer-/Geräteausnahmen und optional verbindlichen Zonensperren.
 
 - Logische Netzwerkzonen mit Benutzern, Geräten und gerouteten IPv4-/IPv6-Subnetzen erstellen.
 - Freigaben in einer klickbaren Quelle-/Zielmatrix filtern und bearbeiten; Exits je Zone, Benutzer oder Gerät einschränken.
@@ -19,7 +24,7 @@ für Benutzer, Geräte, Registrierungen, Vorab-Schlüssel und Netzwerkeinstellun
 - Betroffene Pakettests, Race-Checks, Lint und vollständiger Build sind bestanden. Matrix-Darstellung, Kontrast und Fokus sind mit Chromium-Desktop-/Mobilansichten und Beispieldaten geprüft; Zonenverkehr mit echten Clients ist noch nicht geprüft.
 
 Die [Zonen-Anleitung](docs/network-zones.md) beschreibt Einrichtung, Policy-Übernahme und Grenzen.
-Diese Vorabversion verschiebt das Image-Tag `latest` nicht.
+Diese stabile Version aktualisiert auch `ghcr.io/meister-yoda/meshora:latest`.
 
 ## Mit Docker starten
 
@@ -36,7 +41,7 @@ unter **Einstellungen** eingerichtet werden. Der Assistent speichert die
 Konfiguration und aktiviert den Server automatisch. Bestehende Installationen
 behalten ihre Daten und überspringen die Einrichtung.
 
-Das Release-Image lautet `ghcr.io/meister-yoda/meshora:v0.1.1-rc.1`, für Linux
+Das Release-Image lautet `ghcr.io/meister-yoda/meshora:v0.2.0`, für Linux
 AMD64 und ARM64. Volumes, Reverse Proxies und Updates beschreibt die
 [Docker-Anleitung](packaging/docker/README.md). Ein Reverse Proxy muss den
 **Container-Port 8080** ansprechen.

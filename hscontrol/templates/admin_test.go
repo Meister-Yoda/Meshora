@@ -271,3 +271,16 @@ func TestOverviewConnectionHintIsLocalized(t *testing.T) {
 	assert.Contains(t, page, "Führe diesen Befehl auf dem Gerät aus.")
 	assert.NotContains(t, page, "Run this on the device.")
 }
+
+func TestAccountMenuGroupsLanguageAndSignOut(t *testing.T) {
+	page := Localize(AdminUsers(AdminPageInfo{Base: "/admin", Username: "<alice>", CSRFToken: "csrf-test"}, nil).Render(), "de")
+	assert.Contains(t, page, `class="account-trigger" popovertarget="account-options" type="button"`)
+	assert.Contains(t, page, `class="account-name">&lt;alice&gt;</span>`)
+	assert.Contains(t, page, `id="account-options" popover="auto"`)
+	assert.Contains(t, page, `class="account-menu-label">Sprache</p>`)
+	assert.Contains(t, page, `aria-current="true" href="?lang=de"`)
+	assert.Contains(t, page, `action="/admin/logout" method="POST"`)
+	assert.Contains(t, page, `value="csrf-test"`)
+	assert.NotContains(t, page, `class="language-switcher"`)
+	assert.Contains(t, AdminLogin(AdminLoginInfo{Base: "/admin"}).Render(), `class="language-switcher"`)
+}

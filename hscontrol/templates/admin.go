@@ -13,6 +13,7 @@ import (
 	"github.com/chasefleming/elem-go"
 	"github.com/chasefleming/elem-go/attrs"
 	"github.com/juanfont/headscale/hscontrol/assets"
+	"github.com/juanfont/headscale/hscontrol/types"
 )
 
 // The admin dashboard pages use their own stylesheet (assets.AdminCSS) and
@@ -32,6 +33,8 @@ const (
 
 // submitType is the type of every submit button.
 const submitType = "submit"
+
+const buttonType = "button"
 
 // AdminStylesheetPath is the stylesheet's path below the dashboard base.
 const AdminStylesheetPath = "/assets/admin.css"
@@ -678,19 +681,22 @@ func adminShell(base, username, csrf, title string, flash *AdminFlash, content .
 				elem.Raw(meshoraMark),
 				elem.Span(attrs.Props{attrs.Class: "brand-tag"}, i18nText("Admin")),
 			),
-			elem.Div(
-				attrs.Props{attrs.Class: "account"},
-				languageSwitcher(),
-				elem.Span(attrs.Props{attrs.Class: "avatar", "aria-hidden": "true"}, elem.Text(initial)),
-				elem.Span(attrs.Props{attrs.Class: "account-name"}, elem.Text(username)),
-				elem.Form(
-					attrs.Props{attrs.Method: "POST", attrs.Action: base + "/logout"},
-					adminCSRFInput(csrf),
-					elem.Button(
-						attrs.Props{attrs.Type: submitType, attrs.Class: "btn btn-ghost btn-sm"},
-						i18nText("Sign out"),
-					),
-				),
+			elem.Div(attrs.Props{attrs.Class: "account"},
+				elem.Button(attrs.Props{attrs.Type: buttonType, attrs.Class: "account-trigger", "popovertarget": "account-options"},
+					elem.Span(attrs.Props{attrs.Class: "avatar", "aria-hidden": "true"}, elem.Text(initial)),
+					elem.Span(attrs.Props{attrs.Class: "account-name"}, elem.Text(username)),
+					elem.Raw(`<svg class="language-chevron" viewBox="0 0 12 12" aria-hidden="true"><path d="m3 4.5 3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`)),
+				elem.Div(attrs.Props{attrs.ID: "account-options", attrs.Class: "account-options", "popover": "auto", "aria-label": "Account / Konto"},
+					elem.Div(attrs.Props{attrs.Class: "account-language-row"},
+						elem.P(attrs.Props{attrs.Class: "account-menu-label"}, i18nText("Language")),
+						elem.Div(attrs.Props{attrs.Class: "account-languages"},
+							elem.A(attrs.Props{attrs.Href: "?lang=de", "lang": "de", "hreflang": "de", attrs.Title: "Deutsch", "aria-label": "Deutsch"}, elem.Text("DE")),
+							elem.A(attrs.Props{attrs.Href: "?lang=en", "lang": "en", "hreflang": "en", attrs.Title: "English", "aria-label": "English"}, elem.Text("EN")))),
+					elem.A(attrs.Props{attrs.Href: "https://github.com/Meister-Yoda/Meshora", attrs.Rel: "noreferrer noopener", attrs.Target: "_blank", attrs.Class: "account-repo"},
+						elem.Raw(`<svg class="account-item-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H5v14h14v-4 M14 4h6v6 M20 4 10 14"/></svg>`), elem.Text("GitHub Repository")),
+					elem.Form(attrs.Props{attrs.Method: "POST", attrs.Action: base + "/logout"}, adminCSRFInput(csrf),
+						elem.Button(attrs.Props{attrs.Type: submitType, attrs.Class: "account-signout"},
+							elem.Raw(`<svg class="account-item-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 4H5v16h5 M9 12h12 M17 8l4 4-4 4"/></svg>`), i18nText("Sign out")))),
 			),
 		),
 	)
@@ -774,7 +780,12 @@ func brand(tag string) *elem.Element {
 
 func poweredBy() []elem.Node {
 	return []elem.Node{
-		i18nText("Meshora · powered by "),
+		elem.A(attrs.Props{
+			attrs.Href:   "https://github.com/Meister-Yoda/Meshora",
+			attrs.Rel:    "noreferrer noopener",
+			attrs.Target: "_blank",
+		}, elem.Text("Meshora")),
+		elem.Text(" " + types.GetVersionInfo().Version + " · powered by "),
 		elem.A(attrs.Props{
 			attrs.Href:   "https://github.com/juanfont/headscale",
 			attrs.Rel:    "noreferrer noopener",
@@ -899,7 +910,7 @@ func AdminEnrollment(info AdminPageInfo, serverURL, platform string, oidc bool) 
 		elem.H2(nil, i18nText(heading)), elem.P(nil, i18nText(instruction)),
 		download,
 		elem.Div(attrs.Props{attrs.Class: "field"}, elem.Label(attrs.Props{attrs.For: "enrollment-value"}, i18nText(label)), copyField),
-		elem.Button(attrs.Props{attrs.Type: "button", attrs.Class: "btn btn-ghost", attrs.ID: "enrollment-copy", attrs.Disabled: "true"}, i18nText("Copy")),
+		elem.Button(attrs.Props{attrs.Type: buttonType, attrs.Class: "btn btn-ghost", attrs.ID: "enrollment-copy", attrs.Disabled: "true"}, i18nText("Copy")),
 		elem.P(attrs.Props{attrs.ID: "enrollment-copy-status", "role": statusClass, "aria-live": "polite"}, i18nText("You can also select the text and copy it manually.")),
 		elem.Span(attrs.Props{attrs.ID: "enrollment-copied", "hidden": "true"}, i18nText("Copied.")),
 		elem.Span(attrs.Props{attrs.ID: "enrollment-copy-failed", "hidden": "true"}, i18nText("Copy failed. Select the text and copy it manually.")),

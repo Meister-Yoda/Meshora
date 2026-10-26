@@ -9,7 +9,12 @@ managing users, devices, registrations, pre-auth keys and network settings.
 > Meshora is an independent fork, unaffiliated with Tailscale Inc. and the
 > Headscale project. Please report Meshora issues in this repository.
 
-## v0.1.1-rc.1
+## v0.2.0
+
+- Refreshed light/dark dashboard with accessible controls, restrained glass navigation and responsive layouts.
+- Compact account menu with language selection, repository link and sign-out; running version in the footer.
+- Edit zone pairs in focused popups; approve routes on device details and inspect them in zones.
+- Inherit own-exit permissions from zones and policy groups, with user/device overrides and optional binding zone blocks.
 
 - Create logical network zones with users, devices and routed IPv4/IPv6 subnets.
 - Use a clickable source/destination matrix to filter and edit zone permissions; limit exits per zone, user or device.
@@ -19,7 +24,7 @@ managing users, devices, registrations, pre-auth keys and network settings.
 - Verified with affected package tests, race checks, lint and a full build. Matrix rendering, contrast and focus are checked with Chromium desktop/mobile fixtures; real-client zone traffic is not yet verified.
 
 See the [network zones guide](docs/network-zones.md) for setup, policy takeover and limits.
-This is a prerelease and does not update the `latest` image tag.
+This stable release also updates `ghcr.io/meister-yoda/meshora:latest`.
 
 ## Start with Docker
 
@@ -35,7 +40,7 @@ least 12 characters. OIDC is optional and can also be configured later under
 **Settings**. The setup assistant saves the configuration and activates the
 server automatically. Existing installations keep their data and skip setup.
 
-The release image is `ghcr.io/meister-yoda/meshora:v0.1.1-rc.1`, for Linux
+The release image is `ghcr.io/meister-yoda/meshora:v0.2.0`, for Linux
 AMD64 and ARM64. See the [Docker guide](packaging/docker/README.md) for volumes,
 reverse proxies and updates. Route a reverse proxy to **container port 8080**.
 

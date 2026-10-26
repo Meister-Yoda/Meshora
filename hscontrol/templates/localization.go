@@ -39,6 +39,8 @@ func Localize(body, lang string) string {
 		return "<title>" + html.EscapeString(strings.Join(pieces, " · ")) + "</title>"
 	})
 
+	body = strings.ReplaceAll(body, `href="?lang=`+lang+`"`, `aria-current="true" href="?lang=`+lang+`"`)
+
 	return strings.Replace(body, `<html lang="en">`, `<html lang="`+lang+`">`, 1)
 }
 
@@ -742,6 +744,7 @@ var translations = [][2]string{
 	{"Workspace", "Arbeitsbereich"},
 	{"Network", "Netzwerk"},
 	{"Skip to content", "Zum Inhalt springen"},
+	{"Language", "Sprache"},
 	{"Administration", "Verwaltung"},
 	{"Identity provider", "Identitätsanbieter"},
 	{"Access rules", "Zugriffsrechte"},
