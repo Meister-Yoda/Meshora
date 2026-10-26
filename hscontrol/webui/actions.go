@@ -115,33 +115,28 @@ func serverError(w http.ResponseWriter, msg string, err error) {
 // Users
 
 func (h *Handler) createUser(w http.ResponseWriter, r *http.Request) {
-	name := formValue(r, "name")
-	if name == "" {
-		h.redirect(w, r, "/users", failure("Enter a username."))
-
-		return
-	}
-
-	if _, err := h.state.GetUserByName(name); err == nil { //nolint:noinlineerr
-		h.redirect(w, r, "/users", failure("A user named %q already exists.", name))
-
-		return
-	}
-
-	user, policyChange, err := h.state.CreateUser(types.User{
-		Name:        name,
-		DisplayName: formValue(r, "display_name"),
-		Email:       formValue(r, "email"),
-	})
+	email, err := db.NormalizeAccountEmail(formValue(r, "email"))
 	if err != nil {
-		h.redirect(w, r, "/users", failure("Could not create the user: %v", err))
-
+		h.redirect(w, r, "/users", failure("Bitte eine gültige E-Mail-Adresse eingeben."))
 		return
 	}
 
-	h.change(policyChange)
+	user, changes, err := h.state.CreateUser(types.User{Name: "user-" + hashToken(randomToken())[:16], Email: email})
+	if err != nil {
+		h.redirect(w, r, "/users", failure("Benutzer nicht angelegt: %v", err))
+		return
+	}
 
-	h.redirect(w, r, fmt.Sprintf("/users/%d", user.ID), success("Created user %s.", user.Name))
+	if r.PostForm.Get("is_admin") == "on" {
+		err = h.state.SetUserAdmin(types.UserID(user.ID), true)
+		if err != nil {
+			h.redirect(w, r, "/users", failure("Benutzer angelegt, Admin-Zugang nicht gesetzt: %v", err))
+			return
+		}
+	}
+
+	h.change(changes)
+	h.redirect(w, r, fmt.Sprintf("/users/%d", user.ID), success("Benutzer angelegt. UID: %d. Ein lokales Startpasswort kann hier erzeugt werden.", user.ID))
 }
 
 func (h *Handler) userDetail(w http.ResponseWriter, r *http.Request) {
@@ -169,7 +164,16 @@ func (h *Handler) userDetail(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeHTML(w, http.StatusOK, templates.AdminUserDetail(h.pageInfo(r), userRow(u, len(nodes)), nodes, h.zoneAssignment(types.UserID(id), 0)).Render())
+	row := userRow(u, len(nodes))
+
+	account, accountErr := h.state.UserAccount(types.UserID(id))
+	if accountErr == nil {
+		row.IsAdmin = account.IsAdmin
+		row.HasPassword = len(account.PasswordHash) > 0
+		row.MustChangePassword = account.MustChangePassword
+	}
+
+	writeHTML(w, http.StatusOK, templates.AdminUserDetail(h.pageInfo(r), row, nodes, h.zoneAssignment(types.UserID(id), 0)).Render())
 }
 
 func userRow(u types.UserView, nodeCount int) templates.AdminUserRow {

@@ -124,3 +124,11 @@ CREATE TABLE database_versions(
   version text NOT NULL,
   updated_at datetime
 );
+
+CREATE TABLE user_accounts (
+ user_id bigint PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+ login_email text UNIQUE, legacy_login text UNIQUE,
+ is_admin boolean NOT NULL DEFAULT false,
+ password_hash blob, must_change_password boolean NOT NULL DEFAULT false,
+ revision bigint NOT NULL DEFAULT 1, last_login_at datetime
+);

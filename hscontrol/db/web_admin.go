@@ -160,6 +160,10 @@ func (hsdb *HSDatabase) CreateWebAdmin(username, password string) (*types.WebAdm
 			return nil, fmt.Errorf("creating web admin: %w", err)
 		}
 
+		err = ensureLegacyAccount(tx, &admin)
+		if err != nil {
+			return nil, err
+		}
 		return &admin, nil
 	})
 }
@@ -203,7 +207,7 @@ func (hsdb *HSDatabase) DeleteWebAdmin(username string) error {
 			return ErrWebAdminNotFound
 		}
 
-		return nil
+		return tx.Model(&types.UserAccount{}).Where("legacy_login = ?", username).Updates(map[string]any{"is_admin": false, accountPasswordColumn: nil, "revision": gorm.Expr("revision + 1")}).Error
 	})
 }
 
@@ -220,7 +224,7 @@ func (hsdb *HSDatabase) SetWebAdminPassword(username, password string) error {
 	return hsdb.Write(func(tx *gorm.DB) error {
 		res := tx.Model(&types.WebAdmin{}).
 			Where("username = ?", username).
-			Updates(map[string]any{"password_hash": hash, "updated_at": time.Now()})
+			Updates(map[string]any{accountPasswordColumn: hash, "updated_at": time.Now()})
 		if res.Error != nil {
 			return res.Error
 		}
@@ -229,7 +233,7 @@ func (hsdb *HSDatabase) SetWebAdminPassword(username, password string) error {
 			return ErrWebAdminNotFound
 		}
 
-		return nil
+		return tx.Model(&types.UserAccount{}).Where("legacy_login = ?", username).Updates(map[string]any{accountPasswordColumn: hash, "must_change_password": false, "revision": gorm.Expr("revision + 1")}).Error
 	})
 }
 
@@ -333,6 +337,10 @@ func (hsdb *HSDatabase) CreateInitialWebAdmin(username, password string, configu
 			return createErr
 		}
 
+		err = ensureLegacyAccount(tx, &admin)
+		if err != nil {
+			return err
+		}
 		return configure()
 	})
 }

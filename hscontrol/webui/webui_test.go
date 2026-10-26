@@ -343,7 +343,6 @@ func TestListPagesEmpty(t *testing.T) {
 	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
 
 	for path, want := range map[string]string{
-		"/admin/users":   "No users yet",
 		"/admin/nodes":   "No nodes yet",
 		"/admin/pending": "Nothing pending",
 	} {

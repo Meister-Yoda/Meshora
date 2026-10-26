@@ -65,9 +65,13 @@ var (
 
 // session is the server-side state of a logged-in admin.
 type session struct {
-	oidcSubject string
-	expires     time.Time
-	adminID     uint64
+	userID             types.UserID
+	accountRevision    uint64
+	isAdmin            bool
+	mustChangePassword bool
+	oidcSubject        string
+	expires            time.Time
+	adminID            uint64
 	// passwordFP fingerprints the account's password hash at login. Setting a
 	// password always draws a new salt, so a password change ends every
 	// session started with the old one.
@@ -195,6 +199,16 @@ func (h *Handler) Routes(r chi.Router) {
 
 		r.Group(func(r chi.Router) {
 			r.Use(h.requireSession)
+			r.Get("/account", h.accountPage)
+			r.Post("/account/profile", h.saveAccountProfile)
+			r.Get("/account/password", h.accountPasswordPage)
+			r.Post("/account/password", h.saveAccountPassword)
+			r.Get("/account/devices/{id}", h.accountDevice)
+			r.Post("/users/{id}/admin", h.setAccountAdmin)
+			r.Post("/users/{id}/password", h.resetAccountPassword)
+			r.Post("/users/{id}/profile", h.saveUserProfile)
+			r.Get("/users/{id}/merge", h.mergeAccountPage)
+			r.Post("/users/{id}/merge", h.mergeAccount)
 			r.Get("/", h.overview)
 			r.Get("/users", h.users)
 			r.Post("/users", h.createUser)
@@ -336,7 +350,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	admin, err := h.state.AuthenticateWebAdmin(username, password)
+	account, err := h.state.AuthenticateUserAccount(username, password)
 	if err != nil {
 		if !errors.Is(err, db.ErrWebAdminInvalidCredentials) {
 			log.Error().Err(err).Msg("web admin login failed")
@@ -350,21 +364,30 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	user, err := h.state.GetUserByID(types.UserID(account.UserID))
+	if err != nil {
+		h.renderLogin(w, r, http.StatusUnauthorized, username, msgInvalidLogin)
+		return
+	}
 	h.clearFailures(userKey)
-
 	token := randomToken()
 	h.sessions.Add(hashToken(token), &session{
-		adminID:    admin.ID,
-		passwordFP: hashToken(string(admin.PasswordHash)),
-		username:   admin.Username,
-		csrf:       randomToken(),
+		userID: types.UserID(user.ID), accountRevision: account.Revision, isAdmin: account.IsAdmin, mustChangePassword: account.MustChangePassword,
+		username: cmp.Or(user.Email, account.LegacyLogin.String, user.DisplayName, user.Name), csrf: randomToken(),
 	})
-
 	h.setCookie(w, r, loginCSRFCookie, "", -1)
 	h.setCookie(w, r, sessionCookie, token, 0)
-	log.Info().Str("username", admin.Username).Str("remote", r.RemoteAddr).Msg("web admin logged in")
 
-	http.Redirect(w, r, h.publicPath+"/", http.StatusSeeOther)
+	target := h.publicPath + "/account"
+	if account.IsAdmin {
+		target = h.publicPath + "/"
+	}
+
+	if account.MustChangePassword {
+		target = h.publicPath + "/account/password"
+	}
+
+	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
 func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
@@ -596,6 +619,21 @@ func (h *Handler) requireSession(next http.Handler) http.Handler {
 			return
 		}
 
+		personal := r.URL.Path == BasePath+"/account" || strings.HasPrefix(r.URL.Path, BasePath+"/account/")
+		if sess.mustChangePassword && r.URL.Path != BasePath+"/account/password" && r.URL.Path != BasePath+"/logout" {
+			http.Redirect(w, r, h.publicPath+"/account/password", http.StatusSeeOther)
+			return
+		}
+
+		if !sess.isAdmin && !personal && r.URL.Path != BasePath+"/logout" {
+			if r.URL.Path == BasePath+"/" {
+				http.Redirect(w, r, h.publicPath+"/account", http.StatusSeeOther)
+			} else {
+				http.Error(w, "Admin-Zugang erforderlich", http.StatusForbidden)
+			}
+
+			return
+		}
 		if r.Method == http.MethodPost {
 			limit := int64(maxFormBytes)
 			if strings.HasPrefix(r.URL.Path, BasePath+"/policy/") {
@@ -638,22 +676,22 @@ func (h *Handler) currentSession(r *http.Request) (*session, bool) {
 		return nil, false
 	}
 
-	if sess.oidcSubject != "" {
-		if !h.adminOIDCEnabled() || !time.Now().Before(sess.expires) {
-			h.sessions.Remove(key)
-			return nil, false
-		}
-
-		return sess, true
-	}
-
-	admin, err := h.state.GetWebAdminByID(sess.adminID)
-	if err != nil || hashToken(string(admin.PasswordHash)) != sess.passwordFP {
+	account, err := h.state.UserAccount(sess.userID)
+	if err != nil || account.Revision != sess.accountRevision {
 		h.sessions.Remove(key)
-
 		return nil, false
 	}
 
+	_, err = h.state.GetUserByID(sess.userID)
+	if err != nil {
+		h.sessions.Remove(key)
+		return nil, false
+	}
+
+	if sess.oidcSubject != "" && (!h.adminOIDCEnabled() || !time.Now().Before(sess.expires)) {
+		h.sessions.Remove(key)
+		return nil, false
+	}
 	return sess, true
 }
 

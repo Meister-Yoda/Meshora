@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/golang-lru/v2/expirable"
+	"github.com/juanfont/headscale/hscontrol/db"
 	"github.com/juanfont/headscale/hscontrol/types"
 	"github.com/oauth2-proxy/mockoidc"
 	"github.com/stretchr/testify/assert"
@@ -628,11 +629,12 @@ func TestOIDCVerifiedEmailLinking(t *testing.T) {
 		linked       bool
 		wantLink     bool
 		wantConflict bool
+		reject       bool
 	}{
 		{name: "verified local account", email: "Admin@example.com", verified: true, wantLink: true},
-		{name: "unverified email", email: "admin@example.com"},
-		{name: "missing email", verified: true},
-		{name: "invalid email", email: "Admin <admin@example.com>", verified: true},
+		{name: "unverified email", email: "admin@example.com", reject: true},
+		{name: "missing email", verified: true, reject: true},
+		{name: "invalid email", email: "Admin <admin@example.com>", verified: true, reject: true},
 		{name: "different email", email: "other@example.com", verified: true},
 		{name: "ambiguous email", email: "admin@example.com", verified: true, duplicate: true, wantConflict: true},
 		{name: "another OIDC identity", email: "admin@example.com", verified: true, linked: true, wantConflict: true},
@@ -652,13 +654,25 @@ func TestOIDCVerifiedEmailLinking(t *testing.T) {
 
 			if tc.duplicate {
 				_, _, err = app.state.CreateUser(types.User{Name: "duplicate", Email: local.Email})
-				require.NoError(t, err)
+				require.ErrorIs(t, err, db.ErrAccountConflict)
+
+				return
 			}
 
 			provider := &AuthProviderOIDC{h: app, cfg: &types.OIDCConfig{}}
 			claims := &types.OIDCClaims{Iss: "https://issuer.example", Sub: "subject", Username: "remote", Email: tc.email, EmailVerified: types.FlexibleBoolean(tc.verified)}
 
 			user, err := provider.createOrUpdateUserFromClaim(claims)
+			if tc.reject {
+				require.Error(t, err)
+
+				users, listErr := app.state.ListAllUsers()
+				require.NoError(t, listErr)
+				require.Len(t, users, 1)
+				assert.False(t, users[0].ProviderIdentifier.Valid)
+
+				return
+			}
 			if tc.wantConflict {
 				require.ErrorIs(t, err, errOIDCEmailConflict)
 				return

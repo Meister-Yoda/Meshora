@@ -309,24 +309,28 @@ func TestUserActions(t *testing.T) {
 	_, list := env.get(env.client, "/admin/users")
 	assert.Contains(t, list, ">Add a user<")
 
-	_, body := env.action(csrf, "/admin/users", url.Values{"name": {""}})
-	assert.Contains(t, body, "Enter a username.")
+	_, body := env.action(csrf, "/admin/users", url.Values{"email": {""}})
+	assert.Contains(t, body, "gültige E-Mail-Adresse")
+	location, body := env.action(csrf, "/admin/users", url.Values{"email": {"dave@example.com"}})
+	assert.Contains(t, body, "Benutzer angelegt")
 
-	location, body := env.action(csrf, "/admin/users", url.Values{
-		"name":         {"dave"},
-		"display_name": {xssPayload},
-		"email":        {"dave@example.com"},
-	})
-	assert.Contains(t, body, "Created user dave.")
-	assertEscaped(t, body)
+	var user *types.User
 
-	user, err := env.state.GetUserByName("dave")
+	users, err := env.state.ListAllUsers()
 	require.NoError(t, err)
-	assert.Equal(t, fmt.Sprintf("/admin/users/%d", user.ID), location)
-	assert.Contains(t, body, "&lt;script&gt;alert(1)&lt;/script&gt;")
 
-	_, body = env.action(csrf, "/admin/users", url.Values{"name": {"dave"}})
-	assert.Contains(t, body, "already exists")
+	for i := range users {
+		if users[i].Email == "dave@example.com" {
+			user = &users[i]
+		}
+	}
+
+	require.NotNil(t, user)
+	assert.Equal(t, fmt.Sprintf("/admin/users/%d", user.ID), location)
+	_, body = env.action(csrf, location+"/profile", url.Values{"email": {"dave@example.com"}, "display_name": {xssPayload}})
+	assertEscaped(t, body)
+	_, body = env.action(csrf, "/admin/users", url.Values{"email": {"dave@example.com"}})
+	assert.Contains(t, body, "bereits")
 
 	_, body = env.action(csrf, location+"/rename", url.Values{"name": {"david"}})
 	assert.Contains(t, body, "Renamed the user to david.")

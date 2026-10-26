@@ -151,10 +151,16 @@ func AdminUserDetail(info AdminPageInfo, user AdminUserRow, nodes []AdminNodeRow
 	if len(assignments) > 0 {
 		assignment = assignments[0]
 	}
+
+	adminProps := attrs.Props{attrs.Type: "checkbox", attrs.Name: "is_admin"}
+	if user.IsAdmin {
+		adminProps[attrs.Checked] = "true"
+	}
 	return info.shell("Users",
 		backLink(info.Base+"/users", "Users"),
 		pageHeadNodes(elem.Text(user.displayName()), elem.Text(user.Provider+" user")),
 		elem.Section(attrs.Props{attrs.Class: "card"}, detailList(
+			detail("UID", elem.Text(strconv.FormatUint(uint64(user.ID), 10))),
 			detail("Username", textOrDash(user.Name)),
 			detail("Display name", textOrDash(user.DisplayName)),
 			detail("Email", textOrDash(user.Email)),
@@ -163,12 +169,13 @@ func AdminUserDetail(info AdminPageInfo, user AdminUserRow, nodes []AdminNodeRow
 		elem.H2(attrs.Props{attrs.Class: "section-title"}, i18nText("Devices")),
 		nodeList,
 		adminZoneAssignment(info, path, assignment),
-		cardSection("Rename", "Changes the username used in ACL policies.",
-			postForm(info, path+"/rename", "form-inline",
-				textField("New username", "name", user.Name, true),
-				submitButton("Rename", "btn-primary"),
-			),
-		),
+		cardSection("Benutzerprofil", "E-Mail und Anzeigename ändern die UID nicht.",
+			postForm(info, path+"/profile", "action-form", textField("Email", "email", user.Email, true), textField("Display name", "display_name", user.DisplayName, false), submitButton("Profil speichern", "btn-primary"))),
+		cardSection("Admin-Zugang", "Nur ausdrücklich freigegebene Benutzer dürfen die gesamte Instanz verwalten.",
+			postForm(info, path+"/admin", "action-form", elem.Label(attrs.Props{attrs.Class: "check"}, elem.Input(adminProps), elem.Span(nil, elem.Text("Admin-Zugang erlauben"))), submitButton("Admin-Zugang speichern", "btn-primary"))),
+		cardSection("Lokale Anmeldung", "Ein zufälliges Startpasswort wird nur einmal angezeigt. Der Benutzer muss es beim ersten Login ändern. OIDC bleibt mit derselben UID verknüpft.",
+			postForm(info, path+"/password", "action-form", submitButton("Zufälliges Startpasswort erzeugen", "btn-secondary"))),
+		cardSection("Doppelte Konten", "Vorhandene lokale und OIDC-Konten ausdrücklich mit einer gemeinsamen UID verbinden.", linkButton(info.Base+path+"/merge", "Mit einem anderen Konto zusammenführen", "btn-secondary")),
 		cardSection("Delete user", "Only possible once the user owns no devices.",
 			linkButton(info.Base+path+"/delete", "Delete user…", "btn-danger"),
 		),

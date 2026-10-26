@@ -31,6 +31,7 @@ func TestAdminOIDCFlow(t *testing.T) {
 		status int
 	}{
 		{"success", http.StatusSeeOther},
+		{"no_admin", http.StatusSeeOther},
 		{"roles_only", http.StatusSeeOther},
 		{"custom_roles_claim", http.StatusSeeOther},
 		{"role_and_group", http.StatusSeeOther},
@@ -50,6 +51,12 @@ func TestAdminOIDCFlow(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env := newTestEnv(t)
+			user, _, err := env.state.CreateUser(types.User{Name: "oidc-account", Email: "oidc-admin@example.test"})
+			require.NoError(t, err)
+
+			if tc.name != "no_admin" {
+				require.NoError(t, env.state.SetUserAdmin(types.UserID(user.ID), true))
+			}
 
 			var issuer string
 
@@ -84,7 +91,7 @@ func TestAdminOIDCFlow(t *testing.T) {
 						"iss": issuer, "sub": "stable-admin-subject", "aud": "meshora", "exp": time.Now().Add(time.Hour).Unix(),
 						"iat": time.Now().Unix(), "nonce": code[0], "groups": []string{"meshora-admins"},
 						// An existing local username must not link the SSO session to that account.
-						"preferred_username": testAdmin,
+						"preferred_username": testAdmin, "email": "oidc-admin@example.test", "email_verified": true,
 					}
 
 					claims["roles"] = []string{"meshora-admin"}
@@ -205,10 +212,20 @@ func TestAdminOIDCFlow(t *testing.T) {
 			require.Equal(t, tc.status, resp.StatusCode)
 
 			if tc.status == http.StatusSeeOther {
-				assert.Equal(t, "/admin/", resp.Header.Get("Location"))
-				resp, page = env.get(env.client, "/admin/")
+				target := "/admin/"
+				if tc.name == "no_admin" {
+					target = "/admin/account"
+				}
+
+				assert.Equal(t, target, resp.Header.Get("Location"))
+				resp, page = env.get(env.client, target)
 				assert.Equal(t, http.StatusOK, resp.StatusCode)
-				assert.Contains(t, page, "Overview")
+
+				if tc.name == "no_admin" {
+					assert.Contains(t, page, "Mein Konto")
+				} else {
+					assert.Contains(t, page, "Overview")
+				}
 
 				u, _ := url.Parse(env.server.URL + "/admin/")
 

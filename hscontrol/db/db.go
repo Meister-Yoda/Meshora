@@ -288,6 +288,11 @@ WHERE tags IS NOT NULL AND tags != '[]' AND tags != '' AND tags != 'null'
 				Migrate:  ensureWebAdminsTable,
 				Rollback: func(db *gorm.DB) error { return nil },
 			},
+			{
+				ID:       "202610261930-unify-user-accounts",
+				Migrate:  ensureUserAccounts,
+				Rollback: func(db *gorm.DB) error { return nil },
+			},
 		},
 	)
 
@@ -350,7 +355,7 @@ WHERE tags IS NOT NULL AND tags != '[]' AND tags != '' AND tags != 'null'
 			}
 		}
 
-		return nil
+		return ensureUserAccounts(tx)
 	})
 
 	err = runMigrations(cfg.Database, dbConn, migrations)

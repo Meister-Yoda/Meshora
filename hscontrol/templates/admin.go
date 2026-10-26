@@ -74,9 +74,9 @@ type AdminLoginInfo struct {
 // AdminLogin renders the web admin dashboard login page.
 func AdminLogin(info AdminLoginInfo) *elem.Element {
 	card := []elem.Node{
-		brand("Admin"),
+		brand("Meshora"),
 		elem.H1(nil, i18nText("Sign in")),
-		elem.P(attrs.Props{attrs.Class: "muted"}, i18nText("Use your Meshora admin account.")),
+		elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text("Mit deinem Meshora-Konto anmelden.")),
 	}
 
 	if info.Error != "" {
@@ -93,7 +93,7 @@ func AdminLogin(info AdminLoginInfo) *elem.Element {
 			attrs.Action: info.Base + "/login",
 		},
 		adminCSRFInput(info.CSRFToken),
-		adminField("Username", "username", "text", info.Username, "username"),
+		adminField("E-Mail / bisheriger Anmeldename", "username", "text", info.Username, "username"),
 		adminField("Password", "password", "password", "", "current-password"),
 		elem.Button(
 			attrs.Props{attrs.Type: submitType, attrs.Class: "btn btn-primary btn-block"},
@@ -232,7 +232,10 @@ func (p AdminPageInfo) shell(title string, content ...elem.Node) *elem.Element {
 
 // AdminUserRow is one row of [AdminUsers].
 type AdminUserRow struct {
-	ID uint
+	IsAdmin            bool
+	HasPassword        bool
+	MustChangePassword bool
+	ID                 uint
 	// Name is the login name, DisplayName the full name; either may be empty.
 	Name        string
 	DisplayName string
@@ -252,6 +255,7 @@ func AdminUsers(info AdminPageInfo, users []AdminUserRow) *elem.Element {
 		rows := make([]elem.Node, 0, len(users))
 		for _, u := range users {
 			rows = append(rows, elem.Tr(nil,
+				elem.Td(nil, elem.Text(strconv.FormatUint(uint64(u.ID), 10))),
 				elem.Td(nil, twoLine(userHref(info.Base, u.ID), cmp.Or(u.DisplayName, u.Name), u.Name)),
 				elem.Td(nil, textOrDash(u.Email)),
 				elem.Td(nil, elem.Span(attrs.Props{attrs.Class: "pill"}, elem.Text(u.Provider))),
@@ -260,22 +264,20 @@ func AdminUsers(info AdminPageInfo, users []AdminUserRow) *elem.Element {
 			))
 		}
 
-		body = dataTable("Users", []string{"User", "Email", "Provider", "Nodes", "Created"}, rows)
+		body = dataTable("Users", []string{"UID", "User", "Email", "Provider", "Nodes", "Created"}, rows)
 	}
 
 	create := elem.Section(
 		attrs.Props{attrs.Class: "card"},
 		elem.H2(nil, i18nText("Add a user")),
 		elem.P(attrs.Props{attrs.Class: "muted"}, i18nText(
-			"Users who sign in with your identity provider are created automatically. "+
-				"Add one here to register devices for them before they sign in.",
+			"Zum Anlegen ist nur eine E-Mail-Adresse erforderlich. Lokaler Login und OIDC verwenden dasselbe Konto und dieselbe unveränderliche UID.",
 		)),
 		elem.Form(
 			attrs.Props{attrs.Class: "form-grid", attrs.Method: "POST", attrs.Action: info.Base + "/users"},
 			adminCSRFInput(info.CSRFToken),
-			textField("Username", "name", "", true),
-			textField("Display name", "display_name", "", false),
-			textField("Email", "email", "", false),
+			textField("Email", "email", "", true),
+			checkboxField("Admin-Zugang", "is_admin"),
 			elem.Div(attrs.Props{attrs.Class: "form-actions"}, submitButton("Add user", "btn-primary")),
 		),
 	)
@@ -668,38 +670,7 @@ func relativeTime(t, now time.Time) string {
 
 // adminShell wraps a signed-in page in the top bar and footer.
 func adminShell(base, username, csrf, title string, flash *AdminFlash, content ...elem.Node) *elem.Element {
-	initial := ""
-	if r := []rune(username); len(r) > 0 {
-		initial = string(r[0])
-	}
-
-	topbar := elem.Header(
-		attrs.Props{attrs.Class: "topbar"},
-		elem.Div(
-			attrs.Props{attrs.Class: "topbar-inner"},
-			elem.A(attrs.Props{attrs.Href: base + "/", attrs.Class: "brand"},
-				elem.Raw(meshoraMark),
-				elem.Span(attrs.Props{attrs.Class: "brand-tag"}, i18nText("Admin")),
-			),
-			elem.Div(attrs.Props{attrs.Class: "account"},
-				elem.Button(attrs.Props{attrs.Type: buttonType, attrs.Class: "account-trigger", "popovertarget": "account-options"},
-					elem.Span(attrs.Props{attrs.Class: "avatar", "aria-hidden": "true"}, elem.Text(initial)),
-					elem.Span(attrs.Props{attrs.Class: "account-name"}, elem.Text(username)),
-					elem.Raw(`<svg class="language-chevron" viewBox="0 0 12 12" aria-hidden="true"><path d="m3 4.5 3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`)),
-				elem.Div(attrs.Props{attrs.ID: "account-options", attrs.Class: "account-options", "popover": "auto", "aria-label": "Account / Konto"},
-					elem.Div(attrs.Props{attrs.Class: "account-language-row"},
-						elem.P(attrs.Props{attrs.Class: "account-menu-label"}, i18nText("Language")),
-						elem.Div(attrs.Props{attrs.Class: "account-languages"},
-							elem.A(attrs.Props{attrs.Href: "?lang=de", "lang": "de", "hreflang": "de", attrs.Title: "Deutsch", "aria-label": "Deutsch"}, elem.Text("DE")),
-							elem.A(attrs.Props{attrs.Href: "?lang=en", "lang": "en", "hreflang": "en", attrs.Title: "English", "aria-label": "English"}, elem.Text("EN")))),
-					elem.A(attrs.Props{attrs.Href: "https://github.com/Meister-Yoda/Meshora", attrs.Rel: "noreferrer noopener", attrs.Target: "_blank", attrs.Class: "account-repo"},
-						elem.Raw(`<svg class="account-item-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H5v14h14v-4 M14 4h6v6 M20 4 10 14"/></svg>`), elem.Text("GitHub Repository")),
-					elem.Form(attrs.Props{attrs.Method: "POST", attrs.Action: base + "/logout"}, adminCSRFInput(csrf),
-						elem.Button(attrs.Props{attrs.Type: submitType, attrs.Class: "account-signout"},
-							elem.Raw(`<svg class="account-item-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 4H5v16h5 M9 12h12 M17 8l4 4-4 4"/></svg>`), i18nText("Sign out")))),
-			),
-		),
-	)
+	topbar := adminTopbar(base, username, csrf, true)
 
 	return adminDocument(base, title+" · Meshora", "app",
 		elem.A(attrs.Props{attrs.Href: "#main-content", attrs.Class: "skip-link"}, i18nText("Skip to content")),
@@ -931,4 +902,46 @@ func AdminEnrollment(info AdminPageInfo, serverURL, platform string, oidc bool) 
 	)
 
 	return shell(body...)
+}
+
+func adminTopbar(base, username, csrf string, admin bool) elem.Node {
+	home := base + "/account"
+	brandChildren := []elem.Node{elem.Raw(meshoraMark)}
+
+	if admin {
+		home = base + "/"
+
+		brandChildren = append(brandChildren, elem.Span(attrs.Props{attrs.Class: "brand-tag"}, i18nText("Admin")))
+	}
+
+	initial := ""
+	if r := []rune(username); len(r) > 0 {
+		initial = string(r[0])
+	}
+
+	return elem.Header(
+		attrs.Props{attrs.Class: "topbar"},
+		elem.Div(
+			attrs.Props{attrs.Class: "topbar-inner"},
+			elem.A(attrs.Props{attrs.Href: home, attrs.Class: "brand"}, brandChildren...),
+			elem.Div(attrs.Props{attrs.Class: "account"},
+				elem.Button(attrs.Props{attrs.Type: buttonType, attrs.Class: "account-trigger", "popovertarget": "account-options"},
+					elem.Span(attrs.Props{attrs.Class: "avatar", "aria-hidden": "true"}, elem.Text(initial)),
+					elem.Span(attrs.Props{attrs.Class: "account-name"}, elem.Text(username)),
+					elem.Raw(`<svg class="language-chevron" viewBox="0 0 12 12" aria-hidden="true"><path d="m3 4.5 3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`)),
+				elem.Div(attrs.Props{attrs.ID: "account-options", attrs.Class: "account-options", "popover": "auto", "aria-label": "Account / Konto"},
+					elem.Div(attrs.Props{attrs.Class: "account-language-row"},
+						elem.P(attrs.Props{attrs.Class: "account-menu-label"}, i18nText("Language")),
+						elem.Div(attrs.Props{attrs.Class: "account-languages"},
+							elem.A(attrs.Props{attrs.Href: "?lang=de", "lang": "de", "hreflang": "de", attrs.Title: "Deutsch", "aria-label": "Deutsch"}, elem.Text("DE")),
+							elem.A(attrs.Props{attrs.Href: "?lang=en", "lang": "en", "hreflang": "en", attrs.Title: "English", "aria-label": "English"}, elem.Text("EN")))),
+					elem.A(attrs.Props{attrs.Href: base + "/account"}, elem.Text("Mein Konto")),
+					elem.A(attrs.Props{attrs.Href: "https://github.com/Meister-Yoda/Meshora", attrs.Rel: "noreferrer noopener", attrs.Target: "_blank", attrs.Class: "account-repo"},
+						elem.Raw(`<svg class="account-item-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H5v14h14v-4 M14 4h6v6 M20 4 10 14"/></svg>`), elem.Text("GitHub Repository")),
+					elem.Form(attrs.Props{attrs.Method: "POST", attrs.Action: base + "/logout"}, adminCSRFInput(csrf),
+						elem.Button(attrs.Props{attrs.Type: submitType, attrs.Class: "account-signout"},
+							elem.Raw(`<svg class="account-item-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 4H5v16h5 M9 12h12 M17 8l4 4-4 4"/></svg>`), i18nText("Sign out")))),
+			),
+		),
+	)
 }

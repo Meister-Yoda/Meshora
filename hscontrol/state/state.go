@@ -216,6 +216,10 @@ type State struct {
 
 // lockRegistration serialises registration for a single machine key and
 // returns the unlock function.
+var (
+	errUser1 = errors.New("user UID is immutable")
+)
+
 func (s *State) lockRegistration(machineKey key.MachinePublic) func() {
 	mu, _ := s.registerLocks.LoadOrStore(machineKey, &sync.Mutex{})
 	mu.Lock()
@@ -437,7 +441,15 @@ func (s *State) reloadPolicyBytes(pol []byte) ([]change.Change, error) {
 // CreateUser creates a new user and updates the policy manager.
 // Returns the created user, change set, and any error.
 func (s *State) CreateUser(user types.User) (*types.User, change.Change, error) {
-	if err := s.db.DB.Save(&user).Error; err != nil { //nolint:noinlineerr
+	err := s.db.Write(func(tx *gorm.DB) error {
+		err := tx.Create(&user).Error
+		if err != nil {
+			return err
+		}
+
+		return hsdb.EnsureUserAccount(tx, &user)
+	})
+	if err != nil {
 		return nil, change.Change{}, fmt.Errorf("creating user: %w", err)
 	}
 
@@ -475,6 +487,14 @@ func (s *State) UpdateUser(userID types.UserID, updateFn func(*types.User) error
 			return nil, err
 		}
 
+		if types.UserID(user.ID) != userID {
+			return nil, errUser1
+		}
+
+		err = hsdb.EnsureUserAccount(tx, user)
+		if err != nil {
+			return nil, err
+		}
 		// Use Updates() to only update modified fields, preserving unchanged values.
 		err = tx.Updates(user).Error
 		if err != nil {

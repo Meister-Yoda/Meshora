@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
+	"github.com/juanfont/headscale/hscontrol/types"
 	"golang.org/x/oauth2"
 )
 
@@ -23,7 +24,7 @@ type adminOIDCFlow struct {
 }
 
 func (h *Handler) adminOIDCEnabled() bool {
-	return h.activeOIDC.Issuer != "" && h.activeOIDC.ClientID != "" && (len(h.adminOIDCGroups) > 0 || len(h.adminOIDCRoles) > 0)
+	return h.activeOIDC.Issuer != "" && h.activeOIDC.ClientID != ""
 }
 
 // oidcLogin starts a separate admin authorization flow. Tailnet access never
@@ -161,62 +162,73 @@ func (h *Handler) oidcCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var claims struct {
-		Groups   []string `json:"groups"`
-		Username string   `json:"preferred_username"`
+	var adminClaims struct {
+		Groups []string `json:"groups"`
 	}
-	if idToken.Claims(&claims) != nil {
+	if idToken.Claims(&adminClaims) != nil {
 		h.oidcRejected(w, r)
 		return
 	}
-	// If role restrictions are configured, they are mandatory, including when
-	// a legacy group restriction also matches. Configured group and role filters
-	// are ANDed; each individual list matches any one exact value.
-	allowedGroup := len(h.adminOIDCGroups) == 0
-	for _, group := range claims.Groups {
+
+	adminGroupAllowed := len(h.adminOIDCGroups) == 0
+	for _, group := range adminClaims.Groups {
 		if group != "" && slices.Contains(h.adminOIDCGroups, group) {
-			allowedGroup = true
+			adminGroupAllowed = true
 		}
 	}
 
-	allowedRole := len(h.adminOIDCRoles) == 0
-	if !allowedRole {
+	adminRoleAllowed := len(h.adminOIDCRoles) == 0
+	if !adminRoleAllowed {
 		var rawClaims map[string]json.RawMessage
-		if idToken.Claims(&rawClaims) != nil {
-			h.oidcRejected(w, r)
-			return
-		}
-
 		var roles []string
-		if json.Unmarshal(rawClaims[cmp.Or(h.adminOIDCRolesClaim, "roles")], &roles) != nil {
-			h.renderLogin(w, r, http.StatusForbidden, "", "Your Authentik account does not have an authorized admin role.")
-			return
-		}
-
-		for _, role := range roles {
-			if role != "" && slices.Contains(h.adminOIDCRoles, role) {
-				allowedRole = true
+		if idToken.Claims(&rawClaims) == nil && json.Unmarshal(rawClaims[cmp.Or(h.adminOIDCRolesClaim, "roles")], &roles) == nil {
+			for _, role := range roles {
+				if role != "" && slices.Contains(h.adminOIDCRoles, role) {
+					adminRoleAllowed = true
+				}
 			}
 		}
 	}
 
-	if !allowedGroup || !allowedRole {
-		h.renderLogin(w, r, http.StatusForbidden, "", "Your Authentik account does not satisfy the configured admin groups and roles.")
+	var claims types.OIDCClaims
+	if idToken.Claims(&claims) != nil {
+		h.oidcRejected(w, r)
 		return
 	}
 
-	username := claims.Username
-	if username == "" {
-		username = idToken.Subject
+	claims.Iss, claims.Sub = idToken.Issuer, idToken.Subject
+
+	user, err := h.state.ResolveOIDCUser(&claims, true)
+	if err != nil {
+		h.renderLogin(w, r, http.StatusForbidden, "", "OIDC-Konto konnte nicht eindeutig zugeordnet werden. Eine verifizierte E-Mail-Adresse ist erforderlich.")
+		return
 	}
 
+	account, err := h.state.UserAccount(types.UserID(user.ID))
+	if err != nil {
+		h.oidcRejected(w, r)
+		return
+	}
+
+	if account.IsAdmin && (!adminGroupAllowed || !adminRoleAllowed) {
+		h.renderLogin(w, r, http.StatusForbidden, "", "Your Authentik account does not satisfy the configured admin groups and roles.")
+		return
+	}
 	sessionToken := randomToken()
-	h.sessions.Add(hashToken(sessionToken), &session{
-		oidcSubject: idToken.Subject, username: username, csrf: randomToken(), expires: idToken.Expiry,
-	})
+	h.sessions.Add(hashToken(sessionToken), &session{userID: types.UserID(user.ID), accountRevision: account.Revision, isAdmin: account.IsAdmin, mustChangePassword: account.MustChangePassword, oidcSubject: idToken.Subject, username: user.Username(), csrf: randomToken(), expires: idToken.Expiry})
 	h.setCookie(w, r, loginCSRFCookie, "", -1)
 	h.setCookie(w, r, sessionCookie, sessionToken, 0)
-	http.Redirect(w, r, h.publicPath+"/", http.StatusSeeOther)
+
+	target := h.publicPath + "/account"
+	if account.IsAdmin {
+		target = h.publicPath + "/"
+	}
+
+	if account.MustChangePassword {
+		target = h.publicPath + "/account/password"
+	}
+
+	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
 func (h *Handler) oidcRejected(w http.ResponseWriter, r *http.Request) {

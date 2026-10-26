@@ -38,6 +38,10 @@ func CreateUser(tx *gorm.DB, user types.User) (*types.User, error) {
 		return nil, fmt.Errorf("creating user: %w", err)
 	}
 
+	err = EnsureUserAccount(tx, &user)
+	if err != nil {
+		return nil, err
+	}
 	return &user, nil
 }
 
@@ -56,6 +60,16 @@ func DestroyUser(tx *gorm.DB, uid types.UserID) error {
 		return err
 	}
 
+	var account types.UserAccount
+
+	err = tx.Where("user_id = ?", uid).First(&account).Error
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+
+	if account.IsAdmin {
+		return ErrLastAdmin
+	}
 	nodes, err := ListNodesByUser(tx, uid)
 	if err != nil {
 		return err
