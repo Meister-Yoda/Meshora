@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/netip"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -85,4 +86,38 @@ func TestNetworkZoneRegistrationAndRestart(t *testing.T) {
 	require.NoError(t, err)
 	_, err = st.SavePolicyDraft(string(data), source.Revision, loaded.Revision)
 	require.ErrorContains(t, err, "outside the configured mesh prefix")
+}
+
+func TestExitProviderRestrictionRevokesApprovals(t *testing.T) {
+	cfg := &types.Config{ServerURL: "http://localhost:8080", Database: types.DatabaseConfig{Type: types.DatabaseSqlite, Sqlite: types.SqliteConfig{Path: filepath.Join(t.TempDir(), "provider.db")}}, Policy: types.PolicyConfig{Mode: types.PolicyModeDB}, Tuning: types.Tuning{RegisterCacheExpiration: time.Minute, RegisterCacheMaxEntries: 100}}
+	st, err := NewState(cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, st.Close()) })
+
+	user := st.CreateUserForTest("provider")
+	node := st.CreateRegisteredNodeForTest(user, "provider-node")
+	defaults := []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0"), netip.MustParsePrefix("::/0")}
+	subnet := netip.MustParsePrefix("192.168.42.0/24")
+	routes := slices.Concat(defaults, []netip.Prefix{subnet})
+	node.Hostinfo = &tailcfg.Hostinfo{RoutableIPs: routes}
+	st.PutNodeInStoreForTest(*node)
+	_, _, err = st.SetApprovedRoutes(node.ID, routes)
+	require.NoError(t, err)
+	source, loaded, err := st.PolicyEditorState()
+	require.NoError(t, err)
+	raw, err := json.Marshal(map[string]any{"networkZones": types.NetworkZones{ExitProviderUsers: []types.UserID{types.UserID(user.ID)}}})
+	require.NoError(t, err)
+	source, err = st.SavePolicyDraft(string(raw), source.Revision, loaded.Revision)
+	require.NoError(t, err)
+	_, err = st.ActivatePolicySource(source.Revision, loaded.Revision)
+	require.NoError(t, err)
+
+	fresh, ok := st.GetNodeByID(node.ID)
+	require.True(t, ok)
+	require.Equal(t, []netip.Prefix{subnet}, fresh.ApprovedRoutes().AsSlice(), "activation revokes exits while retaining subnet routes")
+
+	_, _, err = st.SetApprovedRoutes(node.ID, defaults)
+	require.ErrorIs(t, err, ErrExitProviderBlocked)
+	_, _, err = st.SetApprovedRoutes(node.ID, []netip.Prefix{subnet})
+	require.NoError(t, err)
 }

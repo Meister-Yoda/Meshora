@@ -47,6 +47,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/tailscale/hujson"
 	"gorm.io/gorm"
+	"tailscale.com/net/tsaddr"
 	"tailscale.com/tailcfg"
 	"tailscale.com/types/key"
 	"tailscale.com/types/views"
@@ -1077,7 +1078,13 @@ func (s *State) SetNodeTags(nodeID types.NodeID, tags []string) (types.NodeView,
 // SetApprovedRoutes sets the network routes that a node is approved to advertise.
 // It returns a PolicyChange when a primary moved, the policy manager saw a
 // policy input change, or the node's peers changed; otherwise NodeAdded.
+var ErrExitProviderBlocked = errors.New("exit node provision is blocked for this device or its user")
+
 func (s *State) SetApprovedRoutes(nodeID types.NodeID, routes []netip.Prefix) (types.NodeView, change.Change, error) {
+	if node, ok := s.GetNodeByID(nodeID); ok && !s.polMan.NodeCanProvideExit(node) && slices.ContainsFunc(routes, tsaddr.IsExitRoute) {
+		return node, change.Change{}, ErrExitProviderBlocked
+	}
+
 	// TODO(kradalby): In principle we should call the AutoApprove logic here
 	// because even if the CLI removes an auto-approved route, it will be added
 	// back automatically.

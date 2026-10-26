@@ -201,6 +201,7 @@ func (pol *Policy) compileFilterRulesForNode(
 	}
 
 	grants := pol.compileGrants(users, nodes)
+	grants = pol.ownExitLegacyGrants(grants, nodes, node)
 	userIdx := buildUserNodeIndex(nodes)
 
 	return append(

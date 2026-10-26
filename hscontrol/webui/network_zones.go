@@ -24,8 +24,9 @@ func (h *Handler) zonesPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) renderZones(w http.ResponseWriter, r *http.Request, status int, message string) {
+	w.Header().Set("Content-Security-Policy", strings.Replace(adminCSP, "default-src 'none';", "default-src 'none'; script-src 'self';", 1))
 	source, loaded, err := h.state.PolicyEditorState()
-	page := templates.AdminZonesInfo{SourceRevision: source.Revision, LoadedRevision: loaded.Revision, Pending: source.Text != loaded.Text, Error: message, Writable: err == nil}
+	page := templates.AdminZonesInfo{OpenZoneEditor: r.URL.Query().Get("new") == "1", SourceRevision: source.Revision, LoadedRevision: loaded.Revision, Pending: source.Text != loaded.Text, Error: message, Writable: err == nil}
 
 	model, parseErr := types.NetworkZonesFromPolicy(source.Text)
 	if err != nil || parseErr != nil {
@@ -43,10 +44,41 @@ func (h *Handler) renderZones(w http.ResponseWriter, r *http.Request, status int
 		from, to = r.PostForm.Get("from"), r.PostForm.Get("to")
 	}
 
-	if zoneIndex(model, from) >= 0 && zoneIndex(model, to) >= 0 {
+	if zoneIndex(model, from) >= 0 && (zoneIndex(model, to) >= 0 || to == types.OwnExitsTarget) {
 		page.FilterFrom, page.FilterTo = from, to
 	}
+
+	if r.Method == http.MethodPost && r.PostForm.Get("op") == "zone" && message != "" {
+		page.ZoneForm = &templates.AdminZoneForm{
+			ID: r.PostForm.Get("zone"), Name: r.PostForm.Get("name"), BlockOwnExits: r.PostForm.Get("block_own_exits") == "on", AddressRange: r.PostForm.Get("address_range"),
+			Nodes: slices.Clone(r.PostForm["nodes"]), Users: slices.Clone(r.PostForm["users"]),
+			Subnets: r.PostForm.Get("subnets"), Pool4: r.PostForm.Get("pool4"), Pool6: r.PostForm.Get("pool6"),
+			Exits: slices.Clone(r.PostForm["exits"]), ReplaceNetwork: r.PostForm.Get("replace_network") == "on",
+		}
+		// A rejected stale form must retain its original concurrency tokens.
+		// Merely redisplaying attempted values must not authorize an overwrite.
+		page.SourceRevision = r.PostForm.Get("source_revision")
+		page.LoadedRevision, _ = strconv.ParseUint(r.PostForm.Get("loaded_revision"), 10, 64)
+	}
+
+	if h.runtimeConfig.PrefixV4 != nil {
+		page.MeshPrefix4 = h.runtimeConfig.PrefixV4.String()
+	}
+
+	if h.runtimeConfig.PrefixV6 != nil {
+		page.MeshPrefix6 = h.runtimeConfig.PrefixV6.String()
+	}
 	page.Model = *model
+	page.PolicyGroups, _ = ownExitPolicyGroups(source.Text)
+
+	page.SelectedOwnGroup = r.URL.Query().Get("own_group")
+	if r.Method == http.MethodPost && (r.PostForm.Get("op") == "own-exits" || r.PostForm.Get("op") == "own-exit-group") && message != "" {
+		page.SelectedOwnGroup = r.PostForm.Get("group")
+		page.OwnAttempt = &types.OwnExitRule{Mode: r.PostForm.Get("own_mode"), Services: strings.FieldsFunc(r.PostForm.Get("own_services"), func(c rune) bool { return c == ',' || c == ' ' || c == '\n' || c == '\r' }), Locked: r.PostForm.Get("own_locked") == "on"}
+		page.SourceRevision = r.PostForm.Get("source_revision")
+		page.LoadedRevision, _ = strconv.ParseUint(r.PostForm.Get("loaded_revision"), 10, 64)
+	}
+
 	active, _ := types.NetworkZonesFromPolicy(loaded.Text)
 	page.Active = active != nil
 
@@ -226,19 +258,29 @@ func (h *Handler) updateZones(w http.ResponseWriter, r *http.Request) {
 			status = http.StatusConflict
 		}
 
-		h.renderZones(w, r, status, err.Error())
+		h.renderZones(w, r, status, strings.TrimPrefix(err.Error(), errZoneForm.Error()+": "))
 
 		return
 	}
 
 	target := "/zones"
-	if id := r.PostForm.Get("zone"); zoneIndex(model, id) >= 0 {
+
+	id := r.PostForm.Get("zone")
+	if id == "" && r.PostForm.Get("op") == "zone" && len(model.Zones) > 0 {
+		id = model.Zones[len(model.Zones)-1].ID
+	}
+
+	if r.PostForm.Get("op") != "zone" && zoneIndex(model, id) >= 0 {
 		target += "?zone=" + url.QueryEscape(id)
 	}
 
-	if op := r.PostForm.Get("op"); op == "link" || op == "delete-link" {
+	if r.PostForm.Get("op") == "own-exit-group" {
+		target = "/zones?" + url.Values{"own_group": {r.PostForm.Get("group")}}.Encode() + "#own-exit-groups"
+	}
+
+	if op := r.PostForm.Get("op"); op == "link" || op == "delete-link" || op == "own-exits" {
 		from, to := r.PostForm.Get("from"), r.PostForm.Get("to")
-		if zoneIndex(model, from) >= 0 && zoneIndex(model, to) >= 0 {
+		if zoneIndex(model, from) >= 0 && (zoneIndex(model, to) >= 0 || to == types.OwnExitsTarget) {
 			target = "/zones?" + url.Values{"from": {from}, "to": {to}}.Encode() + "#zone-policy-list"
 		}
 	}
@@ -254,6 +296,15 @@ func (h *Handler) mutateZones(model *types.NetworkZones, r *http.Request) error 
 	case "zone":
 		return h.upsertNetworkZone(model, r, index)
 
+	case "own-exits":
+		return mutateOwnExitZone(model, r)
+	case "own-exit-group":
+		rule, err := parseOwnExitForm(r, false)
+		if err != nil {
+			return err
+		}
+
+		setOwnExitOverride(model, types.OwnExitOverride{Group: form.Get("group"), Rule: rule})
 	case "delete-zone":
 		if index < 0 {
 			return fmt.Errorf("%w: Zone existiert nicht mehr", errZoneForm)
@@ -392,9 +443,47 @@ func (h *Handler) mutateZoneIPv6(model *types.NetworkZones, r *http.Request, ind
 
 func (h *Handler) upsertNetworkZone(model *types.NetworkZones, r *http.Request, index int) error {
 	form := r.PostForm
-	zone := types.NetworkZone{ID: form.Get("zone"), Name: strings.TrimSpace(form.Get("name")), Subnets: dnsLines(form.Get("subnets")), Pool4: strings.TrimSpace(form.Get("pool4")), Pool6: strings.TrimSpace(form.Get("pool6")), Exits: form["exits"]}
 
-	var err error
+	name := strings.TrimSpace(form.Get("name"))
+	if name == "" {
+		return fmt.Errorf("%w: Bitte gib einen Namen für die Zone ein", errZoneForm)
+	}
+
+	if len(name) > 128 {
+		return fmt.Errorf("%w: Der Zonenname ist zu lang. Bitte verwende einen kürzeren Namen", errZoneForm)
+	}
+
+	zone := types.NetworkZone{ID: form.Get("zone"), Name: name, Subnets: dnsLines(form.Get("subnets")), Pool4: strings.TrimSpace(form.Get("pool4")), Pool6: strings.TrimSpace(form.Get("pool6")), Exits: form["exits"]}
+
+	if form.Get("simple_zone") == "on" {
+		for _, raw := range strings.FieldsFunc(form.Get("address_range"), func(c rune) bool { return c == ',' || c == '\n' || c == ' ' }) {
+			prefix, parseErr := netip.ParsePrefix(raw)
+			if parseErr != nil {
+				return fmt.Errorf("%w: Bitte einen gültigen IP-Adressbereich angeben", errZoneForm)
+			}
+
+			if prefix.Addr().Is4() {
+				if zone.Pool4 != "" {
+					return fmt.Errorf("%w: Nur einen IPv4-Bereich angeben", errZoneForm)
+				}
+
+				zone.Pool4 = raw
+			} else {
+				if zone.Pool6 != "" {
+					return fmt.Errorf("%w: Nur einen IPv6-Bereich angeben", errZoneForm)
+				}
+
+				zone.Pool6 = raw
+			}
+		}
+	}
+
+	zone.BlockOwnExits = form.Get("block_own_exits") == "on"
+
+	err := h.validateZonePools(zone)
+	if err != nil {
+		return err
+	}
 
 	zone.Nodes, err = parseZoneIDs[types.NodeID](form["nodes"])
 	if err != nil {
@@ -421,6 +510,19 @@ func (h *Handler) upsertNetworkZone(model *types.NetworkZones, r *http.Request, 
 
 	if index >= 0 {
 		zone.IPv6Pools = model.Zones[index].IPv6Pools
+
+		zone.OwnExits = model.Zones[index].OwnExits
+		if !form.Has("nodes") {
+			zone.Nodes = model.Zones[index].Nodes
+		}
+
+		if !form.Has("users") {
+			zone.Users = model.Zones[index].Users
+		}
+
+		if !form.Has("subnets") {
+			zone.Subnets = model.Zones[index].Subnets
+		}
 		model.Zones[index] = zone
 	} else {
 		if zone.ID != "" {
@@ -428,9 +530,210 @@ func (h *Handler) upsertNetworkZone(model *types.NetworkZones, r *http.Request, 
 		}
 
 		zone.ID = randomToken()
-		form.Set("zone", zone.ID)
 		model.Zones = append(model.Zones, zone)
 	}
 
 	return nil
+}
+
+func (h *Handler) validateZonePools(zone types.NetworkZone) error {
+	for family, raw := range []string{zone.Pool4, zone.Pool6} {
+		if raw == "" {
+			continue
+		}
+
+		label := "IPv4"
+		allowed := netip.MustParsePrefix("100.64.0.0/10")
+		configured := h.runtimeConfig.PrefixV4
+
+		if family == 1 {
+			label = "IPv6"
+			allowed = netip.MustParsePrefix("fd7a:115c:a1e0::/48")
+			configured = h.runtimeConfig.PrefixV6
+		}
+
+		prefix, err := netip.ParsePrefix(raw)
+		if err != nil || prefix != prefix.Masked() {
+			return fmt.Errorf("%w: Der Mesh-%s-Pool ist kein gültiges Netzpräfix", errZoneForm, label)
+		}
+
+		if prefix.Addr().BitLen() != allowed.Addr().BitLen() || prefix.Bits() < allowed.Bits() || !allowed.Contains(prefix.Addr()) {
+			return fmt.Errorf("%w: Der Mesh-%s-Pool muss innerhalb von %s liegen. Ein vorhandenes LAN wie 10.3.1.0/24 gehört in das Feld Geroutete Subnetze", errZoneForm, label, allowed)
+		}
+
+		if configured == nil {
+			return fmt.Errorf("%w: Die Mesh-%s-Adressvergabe ist auf diesem Server nicht aktiviert. Lass dieses Feld leer", errZoneForm, label)
+		}
+
+		if prefix.Bits() < configured.Bits() || !configured.Contains(prefix.Addr()) {
+			return fmt.Errorf("%w: Der Mesh-%s-Pool muss innerhalb des auf diesem Server konfigurierten Bereichs %s liegen", errZoneForm, label, configured)
+		}
+	}
+
+	return nil
+}
+
+func (h *Handler) zoneAssignment(user types.UserID, node types.NodeID) *templates.AdminZoneAssignment {
+	source, loaded, err := h.state.PolicyEditorState()
+
+	result := &templates.AdminZoneAssignment{SourceRevision: source.Revision, LoadedRevision: loaded.Revision, Effective: "Standardzuordnung"}
+	if err != nil {
+		return result
+	}
+
+	model, err := types.NetworkZonesFromPolicy(source.Text)
+	if err != nil || model == nil {
+		return result
+	}
+
+	result.Available = true
+	if node == 0 {
+		result.ProviderDirectBlocked = slices.Contains(model.ExitProviderUsers, user)
+		result.ProviderBlocked = result.ProviderDirectBlocked
+	} else {
+		result.ProviderDirectBlocked = slices.Contains(model.ExitProviderNodes, node)
+		if view, ok := h.state.GetNodeByID(node); ok {
+			result.ProviderBlocked = model.ExitProviderBlocked(view)
+		}
+	}
+
+	for _, zone := range model.Zones {
+		result.Choices = append(result.Choices, templates.AdminChoice{Value: zone.ID, Label: zone.Name})
+		if (node != 0 && slices.Contains(zone.Nodes, node)) || (node == 0 && slices.Contains(zone.Users, user)) {
+			result.Selected = zone.ID
+
+			result.Effective = zone.Name
+			if node == 0 {
+				result.ProviderBlocked = zone.BlockOwnExits
+			}
+		}
+	}
+
+	if node != 0 {
+		if view, ok := h.state.GetNodeByID(node); ok {
+			if zone := model.ZoneForNode(view); zone != nil {
+				result.Effective = zone.Name
+			}
+		}
+	}
+
+	result.OwnRule, result.OwnDecision, err = h.state.InspectOwnExitDraft(source.Text, user, node)
+	if err != nil {
+		result.OwnDecision = types.OwnExitDecision{Rule: types.OwnExitRule{Mode: "deny"}, Source: "Auflösung fehlgeschlagen"}
+	}
+
+	return result
+}
+
+func (h *Handler) assignUserZone(w http.ResponseWriter, r *http.Request) {
+	h.saveZoneAssignment(w, r, false)
+}
+
+func (h *Handler) assignNodeZone(w http.ResponseWriter, r *http.Request) {
+	h.saveZoneAssignment(w, r, true)
+}
+
+func (h *Handler) saveZoneAssignment(w http.ResponseWriter, r *http.Request, isNode bool) {
+	id, ok := urlID(r)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+
+	path := fmt.Sprintf("/users/%d", id)
+	if isNode {
+		path = fmt.Sprintf("/nodes/%d", id)
+		if _, exists := h.state.GetNodeByID(types.NodeID(id)); !exists {
+			http.NotFound(w, r)
+			return
+		}
+	} else {
+		_, err := h.state.GetUserByID(types.UserID(id))
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+	}
+
+	source, loaded, err := h.state.PolicyEditorState()
+
+	revision, parseErr := strconv.ParseUint(r.PostForm.Get("loaded_revision"), 10, 64)
+	if err != nil || parseErr != nil || revision != loaded.Revision || source.Revision != r.PostForm.Get("source_revision") {
+		h.redirect(w, r, path, failure("Die Policy wurde geändert. Bitte die Detailseite neu laden."))
+		return
+	}
+
+	model, err := types.NetworkZonesFromPolicy(source.Text)
+	if err != nil || model == nil {
+		h.redirect(w, r, path, failure("Zuerst eine Zone unter Zonen erstellen."))
+		return
+	}
+
+	if strings.HasSuffix(r.URL.Path, "/exit-provider") {
+		value := r.PostForm.Get("blocked")
+		if value != "true" && value != "false" {
+			h.redirect(w, r, path, failure("Ungültige Einstellung für eigene Exit Nodes."))
+			return
+		}
+
+		if isNode {
+			model.ExitProviderNodes = slices.DeleteFunc(model.ExitProviderNodes, func(old types.NodeID) bool { return old == types.NodeID(id) })
+			if value == "true" {
+				model.ExitProviderNodes = append(model.ExitProviderNodes, types.NodeID(id))
+			}
+		} else {
+			model.ExitProviderUsers = slices.DeleteFunc(model.ExitProviderUsers, func(old types.UserID) bool { return old == types.UserID(id) })
+			if value == "true" {
+				model.ExitProviderUsers = append(model.ExitProviderUsers, types.UserID(id))
+			}
+		}
+	} else if strings.HasSuffix(r.URL.Path, "/own-exits") {
+		rule, ruleErr := parseOwnExitForm(r, false)
+		if ruleErr != nil {
+			h.redirect(w, r, path, failure("Exit-Regel nicht gespeichert: %v", ruleErr))
+			return
+		}
+
+		override := types.OwnExitOverride{Rule: rule}
+		if isNode {
+			override.Node = types.NodeID(id)
+		} else {
+			override.User = types.UserID(id)
+		}
+
+		setOwnExitOverride(model, override)
+	} else {
+		target := r.PostForm.Get("zone")
+		if target != "" && zoneIndex(model, target) < 0 {
+			h.redirect(w, r, path, failure("Die ausgewählte Zone existiert nicht mehr."))
+			return
+		}
+
+		for i := range model.Zones {
+			zone := &model.Zones[i]
+			if isNode {
+				zone.Nodes = slices.DeleteFunc(zone.Nodes, func(old types.NodeID) bool { return old == types.NodeID(id) })
+				if zone.ID == target {
+					zone.Nodes = append(zone.Nodes, types.NodeID(id))
+				}
+			} else {
+				zone.Users = slices.DeleteFunc(zone.Users, func(old types.UserID) bool { return old == types.UserID(id) })
+				if zone.ID == target {
+					zone.Users = append(zone.Users, types.UserID(id))
+				}
+			}
+		}
+	}
+
+	text, err := zonePolicyText(source.Text, model)
+	if err == nil {
+		_, err = h.state.SavePolicyDraft(text, source.Revision, loaded.Revision)
+	}
+
+	if err != nil {
+		h.redirect(w, r, path, failure("Zuordnung nicht gespeichert: %v", err))
+		return
+	}
+
+	h.redirect(w, r, path, success("Einstellung als Entwurf gespeichert. Unter Zonen aktivieren."))
 }

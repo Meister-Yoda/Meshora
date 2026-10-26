@@ -32,6 +32,8 @@ const (
 	// grantCategoryVia has Via tags that route rules to specific
 	// nodes based on their tags and advertised routes.
 	grantCategoryVia
+
+	grantCategoryOwnExit
 )
 
 // compiledGrant is a grant with its sources already resolved to IP
@@ -39,7 +41,8 @@ const (
 // here. Extracting rules for a specific node reads from pre-resolved
 // data without re-resolving.
 type compiledGrant struct {
-	category grantCategory
+	exitProvider types.NodeID
+	category     grantCategory
 
 	// srcIPStrings is the final SrcIPs for non-self rules, with
 	// nonWildcardSrcs appended to match Tailscale SaaS behavior.
@@ -266,7 +269,7 @@ func (pol *Policy) compileGrants(
 		}
 	}
 
-	return compiled
+	return append(compiled, pol.compileOwnExitGrants(users, nodes)...)
 }
 
 // compileOneGrant resolves a single grant into a [compiledGrant].
@@ -692,7 +695,7 @@ func globalFilterRules(grants []compiledGrant) []tailcfg.FilterRule {
 	var rules []tailcfg.FilterRule
 
 	for i := range grants {
-		if grants[i].category == grantCategoryVia {
+		if grants[i].category == grantCategoryVia || grants[i].category == grantCategoryOwnExit {
 			continue
 		}
 
@@ -716,13 +719,16 @@ func filterRulesForNode(
 
 	for i := range grants {
 		cg := &grants[i]
+		if cg.category == grantCategoryOwnExit && cg.exitProvider != node.ID() {
+			continue
+		}
 
 		// Pre-compiled rules apply to all grant categories
 		// (empty for via-only grants).
 		rules = append(rules, cg.rules...)
 
 		switch cg.category {
-		case grantCategoryRegular:
+		case grantCategoryRegular, grantCategoryOwnExit:
 			// Nothing more to do.
 
 		case grantCategorySelf:

@@ -1,6 +1,7 @@
 package v2
 
 import (
+	"maps"
 	"slices"
 
 	"github.com/go-json-experiment/json"
@@ -38,7 +39,23 @@ func (pol *Policy) materializeNetworkZones(nodes views.Slice[types.NodeView]) (*
 		}
 	}
 
+	// Hidden default zones contain only otherwise unassigned, user-owned
+	// device IPs. Explicit zones and tagged devices never join these groups.
+	private := map[types.UserID][]string{}
+
+	for _, node := range nodes.All() {
+		if !node.IsTagged() && node.TypedUserID() != 0 && model.ZoneForNode(node) == nil {
+			for _, ip := range node.IPs() {
+				private[node.TypedUserID()] = append(private[node.TypedUserID()], ip.String())
+			}
+		}
+	}
 	var wire []zoneGrant
+
+	for _, id := range slices.Sorted(maps.Keys(private)) {
+		ips := private[id]
+		wire = append(wire, zoneGrant{Src: ips, Dst: ips, IP: []string{"*"}})
+	}
 
 	for _, link := range model.Links {
 		src, dst := members[link.From], members[link.To]

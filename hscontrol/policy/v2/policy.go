@@ -301,7 +301,7 @@ func (pm *PolicyManager) updateLocked() (bool, error) {
 	pm.pol = zonePolicy
 	pm.compiledGrants = grants
 	pm.userNodeIdx = buildUserNodeIndex(pm.nodes)
-	pm.needsPerNodeFilter = hasPerNodeGrants(pm.compiledGrants)
+	pm.needsPerNodeFilter = hasPerNodeGrants(pm.compiledGrants) || (pm.pol != nil && pm.pol.NetworkZones.HasOwnExitAllow())
 	pm.viaTargetTags = collectViaTargetTags(pm.compiledGrants)
 	pm.relayTargetIPs = relayTargetIPs
 
@@ -734,7 +734,8 @@ func (pm *PolicyManager) BuildPeerMap(nodes views.Slice[types.NodeView]) map[typ
 	// If we have a global filter, use it for all nodes (normal case).
 	// Via grants require the per-node path because the global filter
 	// skips via grants (compileFilterRules: if len(grant.Via) > 0 { continue }).
-	if !pm.needsPerNodeFilter {
+	ownExitFast := pm.ownExitPeerFastPath()
+	if !pm.needsPerNodeFilter || ownExitFast {
 		ret := make(map[types.NodeID][]types.NodeID, nodes.Len())
 
 		// A matcher lets a reach b when a satisfies its source side and b
@@ -810,6 +811,10 @@ func (pm *PolicyManager) BuildPeerMap(nodes views.Slice[types.NodeView]) map[typ
 			}
 		}
 
+		if ownExitFast {
+			pm.addOwnExitPeers(ret, nodes)
+		}
+
 		return ret
 	}
 
@@ -869,12 +874,20 @@ func (pm *PolicyManager) BuildPeerMap(nodes views.Slice[types.NodeView]) map[typ
 // filterRulesForNodeLocked returns the unreduced compiled filter rules
 // for a node, combining pre-compiled global rules with per-node self
 // and via rules from the stored compiled grants.
-func (pm *PolicyManager) filterRulesForNodeLocked(
-	node types.NodeView,
-) []tailcfg.FilterRule {
-	return filterRulesForNode(
-		pm.compiledGrants, node, pm.userNodeIdx,
-	)
+func (pm *PolicyManager) filterRulesForNodeLocked(node types.NodeView) []tailcfg.FilterRule {
+	grants := pm.pol.ownExitLegacyGrants(pm.compiledGrants, pm.nodes, node)
+	if pm.pol != nil && pm.pol.NetworkZones.ExitProviderBlocked(node) {
+		grants = slices.Clone(grants)
+		for i := range grants {
+			if grants[i].via != nil {
+				via := *grants[i].via
+				via.hasAutoGroupInternet = false
+				grants[i].via = &via
+			}
+		}
+	}
+
+	return filterRulesForNode(grants, node, pm.userNodeIdx)
 }
 
 // filterForNodeLocked returns the filter rules for a specific node,
@@ -1376,6 +1389,9 @@ func (pm *PolicyManager) NodeCanApproveRoute(node types.NodeView, route netip.Pr
 	// However, an auto approver might be /0, meaning that they can approve
 	// all routes available, just not exit nodes.
 	if tsaddr.IsExitRoute(route) {
+		if pm.pol != nil && pm.pol.NetworkZones.ExitProviderBlocked(node) {
+			return false
+		}
 		if pm.exitSet == nil {
 			return false
 		}
@@ -1431,6 +1447,22 @@ func (pm *PolicyManager) ViaRoutesForPeer(viewer, peer types.NodeView) types.Via
 
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
+
+	if pm.pol != nil && pm.pol.NetworkZones.ExitProviderBlocked(peer) {
+		result.Exclude = append(result.Exclude, peer.ExitRoutes()...)
+		return result
+	}
+
+	if pm.pol != nil && pm.pol.NetworkZones != nil && peer.IsExitNode() && pm.pol.NetworkZones.OwnExitProviderFor(viewer, peer) {
+		decision := pm.pol.ownExitDecision(viewer, pm.users)
+		if decision.Rule.Mode == "allow" {
+			result.Include = append(result.Include, peer.ExitRoutes()...)
+		} else {
+			result.Exclude = append(result.Exclude, peer.ExitRoutes()...)
+		}
+
+		return result
+	}
 
 	// A source with no permitted zone exit must not receive default routes,
 	// including when it has no via grant at all. Packet filtering alone would
@@ -2207,4 +2239,15 @@ func (pm *PolicyManager) PolicySnapshot() types.PolicySnapshot {
 	defer pm.mu.RUnlock()
 
 	return pm.policySnapshot
+}
+
+func (pm *PolicyManager) NodeCanProvideExit(node types.NodeView) bool {
+	if pm == nil {
+		return true
+	}
+
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+
+	return pm.pol == nil || !pm.pol.NetworkZones.ExitProviderBlocked(node)
 }

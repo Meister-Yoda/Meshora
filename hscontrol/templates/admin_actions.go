@@ -139,7 +139,7 @@ func cardSection(title, hint string, children ...elem.Node) *elem.Element {
 }
 
 // AdminUserDetail renders one user with their nodes and actions.
-func AdminUserDetail(info AdminPageInfo, user AdminUserRow, nodes []AdminNodeRow) *elem.Element {
+func AdminUserDetail(info AdminPageInfo, user AdminUserRow, nodes []AdminNodeRow, assignments ...*AdminZoneAssignment) *elem.Element {
 	path := "/users/" + strconv.FormatUint(uint64(user.ID), 10)
 
 	var nodeList elem.Node = elem.P(attrs.Props{attrs.Class: "muted"}, i18nText("No devices yet."))
@@ -147,6 +147,10 @@ func AdminUserDetail(info AdminPageInfo, user AdminUserRow, nodes []AdminNodeRow
 		nodeList = nodeTable(info, nodes)
 	}
 
+	var assignment *AdminZoneAssignment
+	if len(assignments) > 0 {
+		assignment = assignments[0]
+	}
 	return info.shell("Users",
 		backLink(info.Base+"/users", "Users"),
 		pageHeadNodes(elem.Text(user.displayName()), elem.Text(user.Provider+" user")),
@@ -158,6 +162,7 @@ func AdminUserDetail(info AdminPageInfo, user AdminUserRow, nodes []AdminNodeRow
 		)),
 		elem.H2(attrs.Props{attrs.Class: "section-title"}, i18nText("Devices")),
 		nodeList,
+		adminZoneAssignment(info, path, assignment),
 		cardSection("Rename", "Changes the username used in ACL policies.",
 			postForm(info, path+"/rename", "form-inline",
 				textField("New username", "name", user.Name, true),
@@ -180,6 +185,7 @@ func (u AdminUserRow) displayName() string {
 
 // AdminNodeExtra holds node details only shown on [AdminNodeDetail].
 type AdminNodeExtra struct {
+	Zone           *AdminZoneAssignment
 	Routes         []AdminRouteRow
 	MachineKey     string
 	RegisterMethod string
@@ -202,6 +208,7 @@ func AdminNodeDetail(info AdminPageInfo, node AdminNodeRow, extra AdminNodeExtra
 		pageHeadNodes(elem.Text(node.GivenName), elem.Text(node.Hostname)),
 		nodeDiagnostics(node),
 		adminRouteSection(info, extra.Routes, false),
+		adminZoneAssignment(info, path, extra.Zone),
 		elem.Section(attrs.Props{attrs.Class: "card"}, detailList(
 			detail("Owner", ownerCell(node.Tags, node.Owner)),
 			detail("Status", statusCell(node.Online)),

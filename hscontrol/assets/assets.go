@@ -43,3 +43,8 @@ var LogoDark []byte
 //
 //go:embed enrollment.js
 var EnrollmentJS []byte
+
+// ZonesJS enhances the native zone editor dialog with focus and dismissal handling.
+//
+//go:embed zones.js
+var ZonesJS []byte

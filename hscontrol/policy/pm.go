@@ -12,6 +12,7 @@ import (
 )
 
 type PolicyManager interface {
+	NodeCanProvideExit(node types.NodeView) bool
 	// Filter returns the current filter rules for the entire tailnet and the associated matchers.
 	Filter() ([]tailcfg.FilterRule, []matcher.Match)
 	// FilterForNode returns filter rules for a specific node, handling autogroup:self

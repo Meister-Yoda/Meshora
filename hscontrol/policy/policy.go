@@ -8,6 +8,7 @@ import (
 	"github.com/juanfont/headscale/hscontrol/types"
 	"github.com/juanfont/headscale/hscontrol/util"
 	"github.com/rs/zerolog/log"
+	"tailscale.com/net/tsaddr"
 )
 
 // ReduceRoutes returns a reduced list of routes for a given node that it can access.
@@ -45,8 +46,16 @@ func ApproveRoutesWithPolicy(pm PolicyManager, nv types.NodeView, currentApprove
 	// Start with ALL currently approved routes - we never remove approved routes
 	newApproved := slices.Clone(currentApproved)
 
+	canProvideExit := pm.NodeCanProvideExit(nv)
+	if !canProvideExit {
+		newApproved = slices.DeleteFunc(newApproved, tsaddr.IsExitRoute)
+	}
+
 	// Then, check for new routes that can be auto-approved
 	for _, route := range announcedRoutes {
+		if !canProvideExit && tsaddr.IsExitRoute(route) {
+			continue
+		}
 		// Skip if already approved
 		if slices.Contains(newApproved, route) {
 			continue

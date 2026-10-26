@@ -1654,3 +1654,55 @@ html[lang="en"] .language-options a[lang="en"],
     min-width: 140px;
   }
 }
+
+/* Native modal for creating and editing a zone. */
+.zone-editor {
+  position: fixed;
+  inset: 0;
+  width: min(820px, calc(100% - 32px));
+  max-height: calc(100dvh - 48px);
+  margin: auto;
+  padding: 24px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+.zone-editor::backdrop {
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(5px);
+}
+body:has(.zone-editor:modal) {
+  overflow: hidden;
+}
+.zone-editor .action-form {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+}
+.zone-editor .action-form .btn {
+  justify-self: start;
+}
+.zone-editor .field {
+  min-width: 0;
+}
+.zone-editor h2 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+.zone-editor p {
+  margin: 0;
+}
+.zone-editor [data-zone-error] {
+  margin-bottom: 18px;
+}
+@media (max-width: 640px) {
+  .zone-editor {
+    padding: 18px;
+    width: calc(100% - 20px);
+    max-height: calc(100dvh - 20px);
+  }
+}

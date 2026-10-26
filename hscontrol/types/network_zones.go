@@ -15,21 +15,26 @@ import (
 // NetworkZones replaces network ACLs and grants with a deny-by-default zone policy.
 // Stable IDs keep membership independent of mutable usernames and device names.
 type NetworkZones struct {
-	Zones      []NetworkZone   `json:"zones"`
-	Links      []ZoneLink      `json:"links"`
-	ExitLimits []ZoneExitLimit `json:"exitLimits"`
+	OwnExitOverrides  []OwnExitOverride `json:"ownExitOverrides,omitempty"`
+	ExitProviderUsers []UserID          `json:"exitProviderUsers,omitempty"`
+	ExitProviderNodes []NodeID          `json:"exitProviderNodes,omitempty"`
+	Zones             []NetworkZone     `json:"zones"`
+	Links             []ZoneLink        `json:"links"`
+	ExitLimits        []ZoneExitLimit   `json:"exitLimits"`
 }
 
 type NetworkZone struct {
-	ID        string         `json:"id"`
-	Name      string         `json:"name"`
-	Nodes     []NodeID       `json:"nodes"`
-	Users     []UserID       `json:"users"`
-	Subnets   []string       `json:"subnets"`
-	Pool4     string         `json:"pool4,omitempty"`
-	Pool6     string         `json:"pool6,omitempty"`
-	Exits     []string       `json:"exits"`
-	IPv6Pools []ZoneIPv6Pool `json:"ipv6Pools"`
+	OwnExits      *OwnExitRule   `json:"ownExits,omitempty"`
+	BlockOwnExits bool           `json:"blockOwnExits,omitempty"`
+	ID            string         `json:"id"`
+	Name          string         `json:"name"`
+	Nodes         []NodeID       `json:"nodes"`
+	Users         []UserID       `json:"users"`
+	Subnets       []string       `json:"subnets"`
+	Pool4         string         `json:"pool4,omitempty"`
+	Pool6         string         `json:"pool6,omitempty"`
+	Exits         []string       `json:"exits"`
+	IPv6Pools     []ZoneIPv6Pool `json:"ipv6Pools"`
 }
 
 type ZoneLink struct {
@@ -254,10 +259,13 @@ func (n *NetworkZones) Validate() error {
 		return nil
 	}
 
-	if len(n.Zones) > 128 || len(n.Links) > 1024 || len(n.ExitLimits) > 4096 {
+	if len(n.Zones) > 128 || len(n.Links) > 1024 || len(n.ExitLimits) > 4096 || len(n.ExitProviderUsers) > 4096 || len(n.ExitProviderNodes) > 4096 {
 		return fmt.Errorf("%w: too many zones, links or exit limits", ErrNetworkZones)
 	}
 
+	if slices.Contains(n.ExitProviderUsers, UserID(0)) || slices.Contains(n.ExitProviderNodes, NodeID(0)) {
+		return fmt.Errorf("%w: exit provider restrictions require nonzero user and device IDs", ErrNetworkZones)
+	}
 	ids := map[string]bool{}
 	nodes := map[NodeID]bool{}
 	users := map[UserID]bool{}
@@ -318,7 +326,12 @@ func (n *NetworkZones) Validate() error {
 		return err
 	}
 
-	return n.validateExitLimits()
+	err = n.validateExitLimits()
+	if err != nil {
+		return err
+	}
+
+	return n.ValidateOwnExits()
 }
 
 // ValidateMeshPrefixes also checks the installation's narrower allocation pools.
@@ -412,4 +425,22 @@ func NetworkZonesFromPolicy(text string) (*NetworkZones, error) {
 	}
 
 	return document.NetworkZones, nil
+}
+
+// ExitProviderBlocked applies a named zone's rule first. Per-user/device
+// restrictions only govern the hidden personal zone, never other zones.
+func (n *NetworkZones) ExitProviderBlocked(node NodeView) bool {
+	if n == nil || !node.Valid() {
+		return false
+	}
+
+	if zone := n.ZoneForNode(node); zone != nil {
+		return zone.BlockOwnExits
+	}
+
+	if node.IsTagged() || node.TypedUserID() == 0 {
+		return false
+	}
+
+	return slices.Contains(n.ExitProviderNodes, node.ID()) || slices.Contains(n.ExitProviderUsers, node.TypedUserID())
 }

@@ -3234,6 +3234,14 @@ func unmarshalPolicy(b []byte) (*Policy, error) {
 				}
 			}
 		}
+
+		for _, override := range policy.NetworkZones.OwnExitOverrides {
+			if override.Group != "" {
+				if _, exists := policy.Groups[Group(override.Group)]; !exists {
+					return nil, fmt.Errorf("%w: unknown own exit policy group %q", types.ErrNetworkZones, override.Group)
+				}
+			}
+		}
 		// An empty zone model must never fall through to implicit allow-all.
 		policy.ACLs = []ACL{}
 	}

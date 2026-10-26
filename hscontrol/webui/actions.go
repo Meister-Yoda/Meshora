@@ -169,7 +169,7 @@ func (h *Handler) userDetail(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeHTML(w, http.StatusOK, templates.AdminUserDetail(h.pageInfo(r), userRow(u, len(nodes)), nodes).Render())
+	writeHTML(w, http.StatusOK, templates.AdminUserDetail(h.pageInfo(r), userRow(u, len(nodes)), nodes, h.zoneAssignment(types.UserID(id), 0)).Render())
 }
 
 func userRow(u types.UserView, nodeCount int) templates.AdminUserRow {
@@ -316,6 +316,7 @@ func (h *Handler) nodeDetail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeHTML(w, http.StatusOK, templates.AdminNodeDetail(h.pageInfo(r), nodeRow(node), templates.AdminNodeExtra{
+		Zone:           h.zoneAssignment(0, node.ID()),
 		MachineKey:     shortMachineKey(node.MachineKey().String()),
 		RegisterMethod: node.RegisterMethod(),
 		CreatedAt:      node.CreatedAt(),

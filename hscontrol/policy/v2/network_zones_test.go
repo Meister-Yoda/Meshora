@@ -93,3 +93,72 @@ func TestNetworkZonesDenyDefaultAndPolicyTests(t *testing.T) {
 	require.ErrorContains(t, err, "cannot be combined")
 	require.Equal(t, string(data), pm.PolicySnapshot().Text)
 }
+
+func TestHiddenUserZonesAndExitProviderBlocks(t *testing.T) {
+	user := types.User{ID: 1, Name: "alice"}
+	other := types.User{ID: 2, Name: "bob"}
+	a := node("a", "100.64.1.1", "fd7a:115c:a1e0::1", user)
+	a.ID = 1
+	b := node("b", "100.64.1.2", "fd7a:115c:a1e0::2", user)
+	b.ID = 2
+	c := node("c", "100.64.2.1", "fd7a:115c:a1e0::3", other)
+	c.ID = 3
+	defaults := []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0"), netip.MustParsePrefix("::/0")}
+	a.ApprovedRoutes = defaults
+	a.Hostinfo = &tailcfg.Hostinfo{RoutableIPs: defaults}
+	nodes := types.Nodes{a, b, c}
+	data := []byte(`{"networkZones":{"zones":[],"exitProviderUsers":[1]},"tests":[{"src":"100.64.1.1","accept":["100.64.1.2:443"],"deny":["100.64.2.1:443"]},{"src":"100.64.2.1","deny":["100.64.1.1:443"]}]}`)
+	pm, err := NewPolicyManager(data, []types.User{user, other}, nodes.ViewSlice())
+	require.NoError(t, err)
+	_, err = pm.SetPolicy(data)
+	require.NoError(t, err)
+	require.Empty(t, pm.pol.NetworkZones.Zones, "default zones must not be stored as visible zones")
+	require.False(t, pm.NodeCanProvideExit(a.View()))
+	require.False(t, pm.NodeCanApproveRoute(a.View(), defaults[0]))
+	require.ElementsMatch(t, defaults, pm.ViaRoutesForPeer(b.View(), a.View()).Exclude)
+	tagged := a.Clone()
+	tagged.Tags = []string{"tag:server"}
+	require.True(t, pm.NodeCanProvideExit(tagged.View()), "creator tracking is not user ownership")
+
+	data = []byte(`{"networkZones":{"zones":[],"exitProviderNodes":[1]}}`)
+	_, err = pm.SetPolicy(data)
+	require.NoError(t, err)
+	require.True(t, pm.NodeCanProvideExit(tagged.View()), "personal-zone device block does not govern tagged identity")
+
+	data = []byte(`{"networkZones":{"zones":[{"id":"managed","name":"Managed","nodes":[1]}],"exitProviderUsers":[1],"exitProviderNodes":[1]}}`)
+	_, err = pm.SetPolicy(data)
+	require.NoError(t, err)
+	require.True(t, pm.NodeCanProvideExit(a.View()), "personal restrictions do not carry into named zones")
+
+	data = []byte(`{"networkZones":{"zones":[{"id":"managed","name":"Managed","nodes":[1],"blockOwnExits":true}]}}`)
+	_, err = pm.SetPolicy(data)
+	require.NoError(t, err)
+	require.False(t, pm.NodeCanProvideExit(a.View()))
+	require.False(t, pm.NodeCanProvideExit(tagged.View()), "named zone restriction also covers assigned tagged devices")
+}
+
+func TestZoneProviderBlockRemovesInternetFilters(t *testing.T) {
+	user := types.User{ID: 1, Name: "alice"}
+	client := node("client", "100.64.1.1", "fd7a:115c:a1e0::1", user)
+	client.ID = 1
+	gateway := node("gateway", "100.64.2.1", "fd7a:115c:a1e0::2", types.User{})
+	gateway.ID = 2
+	gateway.Tags = []string{"tag:exit-a"}
+	defaults := []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0"), netip.MustParsePrefix("::/0")}
+	gateway.ApprovedRoutes = defaults
+	gateway.Hostinfo = &tailcfg.Hostinfo{RoutableIPs: defaults}
+	model := types.NetworkZones{Zones: []types.NetworkZone{{ID: "clients", Name: "Clients", Users: []types.UserID{1}, Exits: []string{"tag:exit-a"}}, {ID: "providers", Name: "Providers", Nodes: []types.NodeID{2}}}}
+	pm, err := NewPolicyManager(zoneTestPolicy(t, model), []types.User{user}, types.Nodes{client, gateway}.ViewSlice())
+	require.NoError(t, err)
+	before, err := pm.FilterForNode(gateway.View())
+	require.NoError(t, err)
+	require.NotEmpty(t, before)
+
+	model.Zones[1].BlockOwnExits = true
+	_, err = pm.SetPolicy(zoneTestPolicy(t, model))
+	require.NoError(t, err)
+	after, err := pm.FilterForNode(gateway.View())
+	require.NoError(t, err)
+	require.Empty(t, after)
+	require.ElementsMatch(t, defaults, pm.ViaRoutesForPeer(client.View(), gateway.View()).Exclude)
+}

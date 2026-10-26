@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/netip"
 
+	policyv2 "github.com/juanfont/headscale/hscontrol/policy/v2"
 	"github.com/juanfont/headscale/hscontrol/types"
 )
 
@@ -19,4 +20,49 @@ func (s *State) allocateZoneIPs(node types.NodeView) (*netip.Addr, *netip.Addr, 
 	}
 
 	return s.ipAlloc.NextForZone(zone, zones)
+}
+
+// InspectOwnExitDraft resolves policy-group membership with the same identity
+// resolver as the running engine, without activating the draft.
+func (s *State) InspectOwnExitDraft(text string, user types.UserID, node types.NodeID) (types.OwnExitRule, types.OwnExitDecision, error) {
+	rule := types.OwnExitRule{Mode: "inherit"}
+
+	users, err := s.ListAllUsers()
+	if err != nil {
+		return rule, types.OwnExitDecision{}, err
+	}
+
+	model, err := types.NetworkZonesFromPolicy(text)
+	if err != nil {
+		return rule, types.OwnExitDecision{}, err
+	}
+
+	var view types.NodeView
+	if node != 0 {
+		view, _ = s.GetNodeByID(node)
+	} else {
+		owner, err := s.GetUserByID(user)
+		if err != nil {
+			return rule, types.OwnExitDecision{}, err
+		}
+
+		working := types.Node{User: owner, UserID: &owner.ID}
+		view = working.View()
+	}
+
+	if model != nil {
+		for _, override := range model.OwnExitOverrides {
+			if (node != 0 && override.Node == node) || (node == 0 && override.User == user && override.Group == "") {
+				rule = override.Rule
+				break
+			}
+		}
+	}
+
+	manager, err := policyv2.NewPolicyManager([]byte(text), users, s.ListNodes())
+	if err != nil {
+		return rule, types.OwnExitDecision{}, err
+	}
+
+	return rule, manager.OwnExitDecision(view), nil
 }

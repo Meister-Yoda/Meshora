@@ -6,11 +6,16 @@ creating a zone does not configure an IEEE 802.1Q VLAN on a switch or router.
 
 ## Configure and activate
 
-1. Create a zone and assign devices or users. Device assignments take precedence
+Use **Neue Zone** to open the creation dialog, or **Bearbeiten** on a zone to
+edit it. Escape or **Schließen** dismisses the dialog without saving. Validation
+errors keep the dialog open with the attempted values. Successful saves return
+to the overview; activation is still a separate action.
+
+1. Create a zone with its name, allocation range and permitted exits. Assign users on their user detail pages and devices on their device detail pages. Device assignments take precedence
    over user assignments. A user belongs to at most one zone, and a device has at
    most one explicit zone assignment. Tagged devices never inherit a creator's
    user membership. New user-owned devices inherit their owner's zone.
-1. Optionally enter routed IPv4/IPv6 subnet prefixes and mesh allocation pools.
+1. Use the address range field for the mesh allocation pool. IPv4 and optional IPv6 prefixes can be separated by a comma. Existing routed subnets remain in the policy when a zone is edited; advanced subnet policy changes can be made in the policy editor.
 1. Select the tags of approved exit nodes this zone may use. Use a unique tag per
    exit when individual gateways must be distinguished. A shared tag represents
    a gateway group; the existing routing engine handles its router selection.
@@ -29,11 +34,11 @@ including SSH, groups, tag owners, auto-approvers, policy tests and comments,
 are preserved. Existing policy tests must pass before saving and activation.
 Source and loaded revisions protect against concurrent changes.
 
-In zone mode, absent permissions deny access, including within a zone.
+In explicitly configured zones, absent permissions deny access, including within the same zone.
 Create a connection from a zone to itself to permit communication among its
 members. Connections authorize initiation in the configured direction; reply
 traffic is allowed. Separate rules are needed for initiation in the reverse
-direction. Devices outside all zones receive no zone permissions.
+direction. User-owned devices without an explicit zone assignment automatically share a hidden personal zone with the same owner. Different users remain isolated. Unassigned tagged devices do not inherit a creator's personal zone.
 
 ## Routes and exits
 
@@ -111,3 +116,56 @@ Regression tests cover deny-by-default behavior, directed service rules,
 user/device exit intersection, exit visibility, tagged identity, registration
 and restart, concurrent allocation, dual-stack exhaustion, IP backfill, public
 IPv6 reservations, CSRF, draft activation and stale revision rejection.
+
+## Hidden personal zones and providing exits
+
+When zone mode is active, each user has an implicit personal zone containing only
+that user's otherwise unassigned, user-owned mesh devices. Those devices may
+communicate with each other. Named zone assignments take precedence. Tagged
+devices never inherit a creator's personal zone. Personal zones are derived at
+runtime and are not listed in the matrix or zone picker. They do not implicitly
+grant Internet exit access. Legacy policies without `networkZones` are unchanged.
+
+User and device details can restrict providing an exit **in the hidden personal
+zone only**. Either restriction blocks provision there; a device toggle cannot
+undo its owner's personal-zone restriction. These restrictions do not carry into
+named zones. Each named zone has its own `blockOwnExits` option, including for
+explicitly assigned tagged devices. Allowed exits for outgoing traffic remain a
+separate setting.
+
+Provider restrictions are saved as policy drafts and apply after activation.
+Activation revokes existing exit-route approvals while retaining subnet routes.
+Manual and automatic approval cannot re-enable a prohibited exit. The network
+map excludes prohibited default routes, and Internet via packet-filter rules are
+suppressed on prohibited providers. A client may still announce an exit locally;
+the server does not authorize its use as an exit in this tailnet. Removing a
+restriction does not automatically grant route approval.
+
+## Own exits in the matrix
+
+The **Eigene Exits** destination column controls use of approved exits belonging
+to the same effective named zone, or the same owner in a hidden personal zone.
+It does not authorize other users' personal exits. Existing explicitly permitted
+external exit tags remain separate.
+
+Click the cell to set the zone default: **Erben**, **Gesperrt**, or **Erlaubte
+Dienste**. Services accept `*`, `tcp:443`, `udp:53`, `icmp:*`, and port ranges.
+The default without a rule is deny. Device rules override user rules, user rules
+override policy-group rules, and group rules override the zone default. An
+explicit **Erben** removes that override. For several matching groups, any deny
+wins; otherwise protocol/port intervals are intersected, including partial
+range overlaps. Policy groups are the canonical `groups` in the HuJSON policy,
+not unverified identity-provider claims.
+
+A zone's **Nicht überschreibbare Sperre** is only valid with **Gesperrt** and
+prevents all device, user and group exceptions. Entity details show the
+resulting services and their origin. Group overrides are edited on the zones
+page. All changes remain drafts until separately activated.
+
+Providing an exit is still independent of permission to use it. A prohibited
+provider cannot become available through a use-rule exception. Approved default
+routes are distributed only for permitted pairs. Internet filters are installed
+only on the corresponding provider and retain the effective protocol/port
+limits. Legacy broad via grants cannot bypass those limits for a provider in
+the same zone. This does not force the client's selected exit, limit bandwidth,
+or provision gateway forwarding.

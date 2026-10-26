@@ -256,6 +256,7 @@ func evaluateTests(pol *Policy, users []types.User, nodes views.Slice[types.Node
 // every test and return the aggregated outcome. It does not lock anything
 // or mutate any input.
 func runPolicyTests(pol *Policy, filter []tailcfg.FilterRule, users []types.User, nodes views.Slice[types.NodeView]) PolicyTestResults {
+	filter = pol.ownExitTestFilters(filter, users, nodes)
 	results := PolicyTestResults{
 		AllPassed: true,
 		Results:   make([]PolicyTestResult, 0, len(pol.Tests)),
