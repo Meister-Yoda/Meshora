@@ -590,6 +590,11 @@ func TestZonePairDropdownModesAndEntityExitLimits(t *testing.T) {
 	}
 
 	require.Contains(t, body, `id="link-mode"`)
+	require.Contains(t, body, `<dialog aria-label="Zonenverbindung bearbeiten" class="zone-editor" id="zone-pair-editor" open>`)
+
+	_, overview := env.get(env.client, "/admin/zones")
+	require.NotContains(t, overview, `id="zone-pair-editor"`)
+
 	require.NotContains(t, body, "Exits je Benutzer und Gerät")
 	require.NotContains(t, body, "Eigene Exits: Gruppenregeln")
 	require.NotContains(t, body, `id="limit-target"`)

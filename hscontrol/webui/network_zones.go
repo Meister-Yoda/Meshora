@@ -137,6 +137,14 @@ func (h *Handler) renderZones(w http.ResponseWriter, r *http.Request, status int
 			row.Exits = strings.Join(exits, ", ")
 		}
 
+		routeZone := row.Zone
+		if zone == nil && model != nil && page.Enabled && !node.IsTagged() && node.TypedUserID() != 0 {
+			routeZone = "Benutzerzone"
+		}
+
+		for _, route := range h.routeRows(node) {
+			page.Routes = append(page.Routes, templates.AdminZoneRoute{Zone: routeZone, Route: route})
+		}
 		page.Devices = append(page.Devices, row)
 	}
 	// Keep configured tags visible when a gateway is offline, removed or no

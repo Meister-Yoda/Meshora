@@ -488,7 +488,7 @@ func TestRouteManagement(t *testing.T) {
 	env.state.PutNodeInStoreForTest(*node)
 	csrf := env.signedIn()
 	path := fmt.Sprintf("/admin/nodes/%d", node.ID)
-	response, body := env.get(env.client, "/admin/routes?lang=en")
+	response, body := env.get(env.client, path+"?lang=en")
 	require.Equal(t, http.StatusOK, response.StatusCode)
 	assert.Contains(t, body, stale.String())
 	assert.Contains(t, body, "Approval does not prove reachability")
@@ -559,8 +559,17 @@ func TestRouteManagement(t *testing.T) {
 	stored, _ = env.state.GetNodeByID(node.ID)
 	assert.Equal(t, []netip.Prefix{subnet}, stored.ApprovedRoutes().AsSlice())
 
-	_, body = env.get(env.client, "/admin/routes?lang=en")
+	_, body = env.get(env.client, path+"?lang=en")
 	assert.Contains(t, body, "Automatic approval allowed by current policy")
+
+	redirect, _ := env.get(env.client, "/admin/routes")
+	require.Equal(t, http.StatusSeeOther, redirect.StatusCode)
+	require.Equal(t, "/admin/zones#zone-routes", redirect.Header.Get("Location"))
+
+	_, zones := env.get(env.client, "/admin/zones")
+	assert.Contains(t, zones, "Bereitgestellte Netze und Exits")
+	assert.Contains(t, zones, subnet.String())
+	assert.NotContains(t, zones, `href="/admin/routes"`)
 	resp, _ = env.get(newClient(t), "/admin/routes")
 	assert.Equal(t, http.StatusSeeOther, resp.StatusCode)
 	resp, _ = env.post(env.client, "/admin/nodes/999999/routes", url.Values{"csrf_token": {csrf}, "route": {subnet.String()}, "action": {"approve"}})
@@ -602,4 +611,35 @@ func TestRouteAutoApprovalOwnership(t *testing.T) {
 
 	view, _ = env.state.GetNodeByID(node.ID)
 	assert.ElementsMatch(t, []netip.Prefix{route, v4, v6}, view.ApprovedRoutes().AsSlice())
+}
+
+func TestZoneRouteOverviewUsesDraftMembershipAndDeviceActions(t *testing.T) {
+	env := newTestEnv(t)
+	env.signedIn()
+	user := env.state.CreateUserForTest("zone-router-owner")
+	node := env.state.CreateRegisteredNodeForTest(user, "zone-router")
+	node.User = user
+	node.Hostinfo = &tailcfg.Hostinfo{RoutableIPs: []netip.Prefix{netip.MustParsePrefix("10.42.0.0/24"), netip.MustParsePrefix("10.43.0.0/24")}}
+	node.ApprovedRoutes = []netip.Prefix{netip.MustParsePrefix("10.42.0.0/24"), netip.MustParsePrefix("10.44.0.0/24")}
+	env.state.PutNodeInStoreForTest(*node)
+	source, loaded, err := env.state.PolicyEditorState()
+	require.NoError(t, err)
+	_, err = env.state.SavePolicyDraft(fmt.Sprintf(`{"networkZones":{"zones":[{"id":"routers","name":"Routerzone","users":[%d]}]}}`, user.ID), source.Revision, loaded.Revision)
+	require.NoError(t, err)
+
+	response, body := env.get(env.client, "/admin/zones")
+	require.Equal(t, http.StatusOK, response.StatusCode)
+
+	_, overview, found := strings.Cut(body, `id="zone-routes"`)
+	require.True(t, found)
+
+	for _, text := range []string{"Routerzone", "zone-router", "10.42.0.0/24", "10.43.0.0/24", "10.44.0.0/24", "Angekündigt und freigegeben", "Wartet auf Freigabe", "Freigegeben, nicht mehr angekündigt", "Beim Gerät verwalten"} {
+		require.Contains(t, overview, text)
+	}
+
+	require.Contains(t, overview, fmt.Sprintf(`href="/admin/nodes/%d"`, node.ID))
+	require.NotContains(t, overview, fmt.Sprintf(`action="/admin/nodes/%d/routes"`, node.ID), "route approvals belong on the device")
+	_, device := env.get(env.client, fmt.Sprintf("/admin/nodes/%d?lang=en", node.ID))
+	require.Contains(t, device, fmt.Sprintf(`action="/admin/nodes/%d/routes"`, node.ID))
+	require.Equal(t, loaded, env.state.PolicySnapshot())
 }

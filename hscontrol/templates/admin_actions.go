@@ -207,7 +207,7 @@ func AdminNodeDetail(info AdminPageInfo, node AdminNodeRow, extra AdminNodeExtra
 		backLink(info.Base+"/nodes", "Nodes"),
 		pageHeadNodes(elem.Text(node.GivenName), elem.Text(node.Hostname)),
 		nodeDiagnostics(node),
-		adminRouteSection(info, extra.Routes, false),
+		adminRouteSection(info, extra.Routes),
 		adminZoneAssignment(info, path, extra.Zone),
 		elem.Section(attrs.Props{attrs.Class: "card"}, detailList(
 			detail("Owner", ownerCell(node.Tags, node.Owner)),
@@ -624,10 +624,6 @@ type AdminRouteRow struct {
 	Advertised, Approved, Automatic, Exit bool
 }
 
-func AdminRoutes(info AdminPageInfo, rows []AdminRouteRow) *elem.Element {
-	return info.shell("Routes", pageHead("Routes", "Subnet routes and exit nodes"), adminRouteSection(info, rows, true))
-}
-
 func routeFlag(value bool) elem.Node {
 	if value {
 		return i18nText("Yes")
@@ -636,7 +632,7 @@ func routeFlag(value bool) elem.Node {
 	return i18nText("No")
 }
 
-func adminRouteSection(info AdminPageInfo, routes []AdminRouteRow, overview bool) elem.Node {
+func adminRouteSection(info AdminPageInfo, routes []AdminRouteRow) elem.Node {
 	rows := make([]elem.Node, 0, len(routes))
 	for _, route := range routes {
 		kind := "Subnet route"
@@ -657,15 +653,10 @@ func adminRouteSection(info AdminPageInfo, routes []AdminRouteRow, overview bool
 				verb, label = "revoke", "Revoke approval"
 			}
 
-			destination := "node"
-			if overview {
-				destination = "routes"
-			}
-
 			action = postForm(info, "/nodes/"+strconv.FormatUint(route.NodeID, 10)+"/routes", "form-inline",
 				elem.Input(attrs.Props{attrs.Type: inputTypeHidden, attrs.Name: "route", attrs.Value: html.EscapeString(route.Prefix)}),
 				elem.Input(attrs.Props{attrs.Type: inputTypeHidden, attrs.Name: "action", attrs.Value: verb}),
-				elem.Input(attrs.Props{attrs.Type: inputTypeHidden, attrs.Name: "return", attrs.Value: destination}),
+				elem.Input(attrs.Props{attrs.Type: inputTypeHidden, attrs.Name: "return", attrs.Value: "node"}),
 				submitButton(label, "btn-ghost"))
 		}
 
@@ -1001,7 +992,7 @@ func AdminPolicy(info AdminPageInfo, policy AdminPolicyInfo) *elem.Element {
 	content = append(content, cardSection("Policy and DNS",
 		"Policy reloads do not activate DNS settings saved for the next Meshora start. NextDNS capabilities can customize DNS per device and must be considered separately from the global DNS baseline.",
 		linkButton(info.Base+"/dns", "View DNS baseline", "btn-ghost"),
-		linkButton(info.Base+"/routes", "View route approvals", "btn-ghost")))
+		linkButton(info.Base+"/zones#zone-routes", "Zonen und bereitgestellte Netze", "btn-ghost")))
 	if policy.Raw != "" {
 		content = append(content, cardSection("Complete policy source",
 			"Original source, including comments, unknown fields and unsupported content. This is source evidence, not a permission evaluation.",

@@ -22,6 +22,10 @@ const (
 )
 
 type (
+	AdminZoneRoute struct {
+		Zone  string
+		Route AdminRouteRow
+	}
 	AdminZoneDevice struct{ ID, Name, Zone, Exits string }
 	AdminZoneForm   struct {
 		ID, Name, Subnets, Pool4, Pool6 string
@@ -31,6 +35,7 @@ type (
 		BlockOwnExits                   bool
 	}
 	AdminZonesInfo struct {
+		Routes                             []AdminZoneRoute
 		Model                              types.NetworkZones
 		Selected                           *types.NetworkZone
 		ZoneForm                           *AdminZoneForm
@@ -269,12 +274,13 @@ func AdminZones(info AdminPageInfo, page AdminZonesInfo) *elem.Element {
 	content = append(content, modal)
 
 	if !page.Enabled {
-		content = append(content, settings)
+		content = append(content, settings, zoneRouteOverview(info, page.Routes))
 		return info.shell("Zonen", content...)
 	}
 
+	var pairEditor elem.Node
 	if page.FilterTo == types.OwnExitsTarget {
-		content = append(content, ownExitMatrixEditor(page, form))
+		pairEditor = ownExitMatrixEditor(page, form)
 	} else {
 		rows = nil
 
@@ -333,10 +339,24 @@ func AdminZones(info AdminPageInfo, page AdminZonesInfo) *elem.Element {
 			elem.Div(attrs.Props{"data-link-services": "true"}, zoneField("Erlaubte Dienste: tcp:443, udp:53, icmp:*", "services", "link-services", services, false)),
 			elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text("Dienstfreigabe erlaubt nur die angegebenen Dienste. Nur Antwortverkehr erlaubt keine neuen Verbindungen und benötigt eine Freigabe in Gegenrichtung. Gesperrt sperrt neue Verbindungen; Antworten auf erlaubte Gegenverbindungen bleiben möglich. Die Gegenrichtung wird nie automatisch geändert.")),
 			submitButton("Verbindung speichern", "btn-primary")))
-		content = append(content, elem.Section(attrs.Props{attrs.Class: "zone-panel", attrs.ID: "zone-policy-list"}, policyContent...))
+		pairEditor = elem.Section(attrs.Props{attrs.ID: "zone-policy-list"}, policyContent...)
 	}
 
-	content = append(content, settings,
+	if page.FilterFrom != "" {
+		children := []elem.Node{elem.Div(attrs.Props{attrs.Class: "zone-policy-heading"},
+			elem.Span(nil, elem.Text("Zonenverbindung bearbeiten")),
+			elem.Button(attrs.Props{attrs.Type: "button", attrs.Class: "btn btn-secondary", "data-zone-close": "true"}, elem.Text("Schließen")))}
+		if page.Error != "" && page.ZoneForm == nil {
+			children = append(children, elem.Div(attrs.Props{attrs.Class: adminFlashErrorClass, attrs.Role: "alert", "tabindex": "-1", "data-zone-error": "true"}, elem.Text(page.Error)))
+		}
+
+		children = append(children, pairEditor)
+		content = append(content, elem.Dialog(attrs.Props{attrs.ID: "zone-pair-editor", attrs.Class: "zone-editor", "open": "true", "aria-label": "Zonenverbindung bearbeiten"}, children...))
+	} else {
+		content = append(content, pairEditor)
+	}
+
+	content = append(content, settings, zoneRouteOverview(info, page.Routes),
 		elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text("Benutzerbezogene Exit-Regeln verwaltest du unter Benutzer, gerätebezogene Regeln unter Geräte.")))
 
 	targetNames := map[string]string{}
@@ -574,4 +594,43 @@ func zoneLinkLabel(link types.ZoneLink) string {
 	}
 
 	return strings.Join(link.Services, ", ")
+}
+
+func zoneRouteOverview(info AdminPageInfo, routes []AdminZoneRoute) elem.Node {
+	rows := make([]elem.Node, 0, len(routes))
+
+	for _, entry := range routes {
+		route := entry.Route
+
+		kind := "Subnetz"
+		if route.Exit {
+			kind = "Exit"
+		}
+
+		status := "Nicht mehr angekündigt"
+
+		switch {
+		case route.Advertised && route.Approved:
+			status = "Angekündigt und freigegeben"
+		case route.Advertised:
+			status = "Wartet auf Freigabe"
+		case route.Approved:
+			status = "Freigegeben, nicht mehr angekündigt"
+		}
+
+		path := info.Base + "/nodes/" + strconv.FormatUint(route.NodeID, 10)
+		rows = append(rows, elem.Tr(nil,
+			elem.Td(nil, elem.Text(entry.Zone)), elem.Td(nil, elem.A(attrs.Props{attrs.Href: path}, elem.Text(route.Device))),
+			elem.Td(nil, elem.Code(nil, elem.Text(route.Prefix))), elem.Td(nil, elem.Text(kind)), elem.Td(nil, elem.Text(status)),
+			elem.Td(nil, linkButton(path, "Beim Gerät verwalten", "btn-secondary"))))
+	}
+
+	var table elem.Node = elem.P(nil, elem.Text("Noch keine angekündigten Netze oder gespeicherten Routenfreigaben vorhanden."))
+	if len(rows) > 0 {
+		table = dataTable("Bereitgestellte Netze", []string{"Zone des Geräts", "Gerät", "Netz", "Typ", "Freigabestatus", "Aktion"}, rows)
+	}
+
+	return elem.Section(attrs.Props{attrs.Class: "zone-panel", attrs.ID: "zone-routes"},
+		elem.H2(nil, elem.Text("Bereitgestellte Netze und Exits")),
+		elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text("Routen werden direkt beim bereitstellenden Gerät freigegeben oder zurückgezogen. Die Zonenmatrix regelt den Zugriff. Angezeigt ist die Gerätezuordnung im Entwurf; eine Routenfreigabe beim Gerät wirkt sofort. Freigabe allein bestätigt keine Erreichbarkeit.")), table)
 }

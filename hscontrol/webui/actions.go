@@ -811,23 +811,7 @@ func (h *Handler) routeRows(node types.NodeView) []templates.AdminRouteRow {
 }
 
 func (h *Handler) routeOverview(w http.ResponseWriter, r *http.Request) {
-	var rows []templates.AdminRouteRow
-	for _, node := range h.state.ListNodes().All() {
-		rows = append(rows, h.routeRows(node)...)
-	}
-
-	slices.SortFunc(rows, func(a, b templates.AdminRouteRow) int {
-		if c := cmp.Compare(a.Device, b.Device); c != 0 {
-			return c
-		}
-
-		if c := cmp.Compare(a.NodeID, b.NodeID); c != 0 {
-			return c
-		}
-
-		return cmp.Compare(a.Prefix, b.Prefix)
-	})
-	writeHTML(w, http.StatusOK, templates.AdminRoutes(h.pageInfo(r), rows).Render())
+	http.Redirect(w, r, BasePath+"/zones#zone-routes", http.StatusSeeOther)
 }
 
 func (h *Handler) setNodeRoute(w http.ResponseWriter, r *http.Request) {
@@ -840,9 +824,6 @@ func (h *Handler) setNodeRoute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	back := nodePath(node)
-	if formValue(r, "return") == "routes" {
-		back = "/routes"
-	}
 
 	prefix, err := netip.ParsePrefix(formValue(r, "route"))
 
