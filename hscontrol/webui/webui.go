@@ -203,6 +203,7 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Post("/users/{id}/zone", h.assignUserZone)
 			r.Post("/users/{id}/exit-provider", h.assignUserZone)
 			r.Post("/users/{id}/own-exits", h.assignUserZone)
+			r.Post("/users/{id}/exit-limit", h.assignUserZone)
 			r.Get("/users/{id}/delete", h.confirmDeleteUser)
 			r.Post("/users/{id}/delete", h.deleteUser)
 
@@ -224,6 +225,7 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Post("/nodes/{id}/zone", h.assignNodeZone)
 			r.Post("/nodes/{id}/exit-provider", h.assignNodeZone)
 			r.Post("/nodes/{id}/own-exits", h.assignNodeZone)
+			r.Post("/nodes/{id}/exit-limit", h.assignNodeZone)
 			r.Post("/nodes/{id}/tags", h.setNodeTags)
 			r.Get("/nodes/{id}/expire", h.confirmExpireNode)
 			r.Post("/nodes/{id}/expire", h.expireNode)

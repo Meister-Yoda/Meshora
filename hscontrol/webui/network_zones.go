@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -57,6 +58,13 @@ func (h *Handler) renderZones(w http.ResponseWriter, r *http.Request, status int
 		}
 		// A rejected stale form must retain its original concurrency tokens.
 		// Merely redisplaying attempted values must not authorize an overwrite.
+		page.SourceRevision = r.PostForm.Get("source_revision")
+		page.LoadedRevision, _ = strconv.ParseUint(r.PostForm.Get("loaded_revision"), 10, 64)
+	}
+
+	if r.Method == http.MethodPost && r.PostForm.Get("op") == "link" && message != "" {
+		page.LinkAttempt = true
+		page.LinkMode, page.LinkServices = r.PostForm.Get("link_mode"), r.PostForm.Get("services")
 		page.SourceRevision = r.PostForm.Get("source_revision")
 		page.LoadedRevision, _ = strconv.ParseUint(r.PostForm.Get("loaded_revision"), 10, 64)
 	}
@@ -318,7 +326,23 @@ func (h *Handler) mutateZones(model *types.NetworkZones, r *http.Request) error 
 
 		model.Links = slices.DeleteFunc(model.Links, func(link types.ZoneLink) bool { return link.From == from && link.To == to })
 		if form.Get("op") == "link" {
-			model.Links = append(model.Links, types.ZoneLink{From: from, To: to, Services: strings.FieldsFunc(form.Get("services"), func(c rune) bool { return c == ',' || c == ' ' || c == '\n' || c == '\r' })})
+			link := types.ZoneLink{From: from, To: to}
+
+			switch form.Get("link_mode") {
+			case "allow":
+				link.Services = []string{"*"}
+			case "return", "deny":
+				link.Mode = form.Get("link_mode")
+			case "", "services":
+				link.Services = strings.FieldsFunc(form.Get("services"), func(c rune) bool { return c == ',' || c == ' ' || c == '\n' || c == '\r' })
+				if form.Get("link_mode") == "services" && slices.Contains(link.Services, "*") {
+					return fmt.Errorf("%w: Für alle Dienste bitte Alles erlaubt auswählen", errZoneForm)
+				}
+			default:
+				return fmt.Errorf("%w: Ungültige Verbindungseinstellung", errZoneForm)
+			}
+
+			model.Links = append(model.Links, link)
 		}
 	case "limit", "delete-limit":
 		kind, raw, ok := strings.Cut(form.Get("target"), ":")
@@ -587,6 +611,33 @@ func (h *Handler) zoneAssignment(user types.UserID, node types.NodeID) *template
 	}
 
 	result.Available = true
+
+	for _, limit := range model.ExitLimits {
+		if (node != 0 && limit.Node == node) || (node == 0 && limit.User == user) {
+			result.ExitLimited = true
+			result.ExitTags = slices.Clone(limit.Exits)
+		}
+	}
+
+	tags := map[string]bool{}
+
+	for _, zone := range model.Zones {
+		for _, tag := range zone.Exits {
+			tags[tag] = true
+		}
+	}
+
+	for _, view := range h.state.ListNodes().All() {
+		if view.IsExitNode() {
+			for _, tag := range view.Tags().All() {
+				tags[tag] = true
+			}
+		}
+	}
+
+	for _, tag := range slices.Sorted(maps.Keys(tags)) {
+		result.ExitChoices = append(result.ExitChoices, templates.AdminChoice{Value: tag, Label: tag})
+	}
 	if node == 0 {
 		result.ProviderDirectBlocked = slices.Contains(model.ExitProviderUsers, user)
 		result.ProviderBlocked = result.ProviderDirectBlocked
@@ -669,7 +720,25 @@ func (h *Handler) saveZoneAssignment(w http.ResponseWriter, r *http.Request, isN
 		return
 	}
 
-	if strings.HasSuffix(r.URL.Path, "/exit-provider") {
+	if strings.HasSuffix(r.URL.Path, "/exit-limit") {
+		mode := r.PostForm.Get("exit_mode")
+		if mode != "inherit" && mode != "limit" {
+			h.redirect(w, r, path, failure("Ungültige Exit-Einschränkung."))
+			return
+		}
+
+		limit := types.ZoneExitLimit{Exits: slices.Clone(r.PostForm["exits"])}
+		if isNode {
+			limit.Node = types.NodeID(id)
+		} else {
+			limit.User = types.UserID(id)
+		}
+
+		model.ExitLimits = slices.DeleteFunc(model.ExitLimits, func(old types.ZoneExitLimit) bool { return old.Node == limit.Node && old.User == limit.User })
+		if mode == "limit" {
+			model.ExitLimits = append(model.ExitLimits, limit)
+		}
+	} else if strings.HasSuffix(r.URL.Path, "/exit-provider") {
 		value := r.PostForm.Get("blocked")
 		if value != "true" && value != "false" {
 			h.redirect(w, r, path, failure("Ungültige Einstellung für eigene Exit Nodes."))

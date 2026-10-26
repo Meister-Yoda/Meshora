@@ -572,3 +572,76 @@ func TestOwnExitMatrixAndEntityInheritance(t *testing.T) {
 	require.Empty(t, zoneModel(t, env).ExitProviderNodes)
 	require.Equal(t, loaded, env.state.PolicySnapshot(), "all rule changes remain drafts")
 }
+
+func TestZonePairDropdownModesAndEntityExitLimits(t *testing.T) {
+	env := newTestEnv(t)
+	csrf := env.signedIn()
+	user := env.state.CreateUserForTest("zone-ui-user")
+	node := env.state.CreateRegisteredNodeForTest(user, "zone-ui-device")
+	env.state.PutNodeInStoreForTest(*node)
+	source, loaded, err := env.state.PolicyEditorState()
+	require.NoError(t, err)
+	_, err = env.state.SavePolicyDraft(`{"tagOwners":{"tag:exit":[]},"networkZones":{"zones":[{"id":"a","name":"A","exits":["tag:exit"]},{"id":"b","name":"B"}],"links":[{"from":"b","to":"a","services":["tcp:443"]}]}}`, source.Revision, loaded.Revision)
+	require.NoError(t, err)
+
+	_, body := env.get(env.client, "/admin/zones?from=a&to=b")
+	for _, label := range []string{"Alles erlaubt", "Dienstfreigabe", "Nur Antwortverkehr", "Gesperrt"} {
+		require.Contains(t, body, label)
+	}
+
+	require.Contains(t, body, `id="link-mode"`)
+	require.NotContains(t, body, "Exits je Benutzer und Gerät")
+	require.NotContains(t, body, "Eigene Exits: Gruppenregeln")
+	require.NotContains(t, body, `id="limit-target"`)
+
+	for _, mode := range []string{"allow", "services", "return", "deny"} {
+		form := zonesForm(t, env, csrf, "link")
+		form.Set("from", "a")
+		form.Set("to", "b")
+		form.Set("link_mode", mode)
+		form.Set("services", "tcp:22")
+		response, _ := env.post(env.client, "/admin/zones", form)
+		require.Equal(t, http.StatusSeeOther, response.StatusCode)
+		model := zoneModel(t, env)
+		require.Len(t, model.Links, 2)
+		require.Equal(t, []string{"tcp:443"}, model.Links[0].Services, "reverse rule must remain unchanged")
+		link := model.Links[1]
+
+		switch mode {
+		case "allow":
+			require.Equal(t, []string{"*"}, link.Services)
+		case "services":
+			require.Equal(t, []string{"tcp:22"}, link.Services)
+		default:
+			require.Equal(t, mode, link.Mode)
+			require.Empty(t, link.Services)
+		}
+
+		_, body = env.get(env.client, "/admin/zones?from=a&to=b")
+		require.Contains(t, body, `selected value="`+mode+`"`)
+	}
+
+	for _, path := range []string{"/admin/users/" + user.StringID(), "/admin/nodes/" + strconv.FormatUint(node.ID.Uint64(), 10)} {
+		_, body = env.get(env.client, path)
+		require.Contains(t, body, "Verfügbare Exits einschränken")
+
+		response, _ := env.post(env.client, path+"/exit-limit", url.Values{"exit_mode": {"limit"}})
+		require.Equal(t, http.StatusForbidden, response.StatusCode)
+		form := zonesForm(t, env, csrf, "")
+		form.Set("exit_mode", "limit")
+		form.Set("exits", "tag:exit")
+		response, _ = env.post(env.client, path+"/exit-limit", form)
+		require.Equal(t, http.StatusSeeOther, response.StatusCode)
+
+		_, body = env.get(env.client, path)
+		require.Contains(t, body, `selected value="limit"`)
+		require.Contains(t, body, `selected value="tag:exit"`)
+		form = zonesForm(t, env, csrf, "")
+		form.Set("exit_mode", "inherit")
+		response, _ = env.post(env.client, path+"/exit-limit", form)
+		require.Equal(t, http.StatusSeeOther, response.StatusCode)
+		require.Empty(t, zoneModel(t, env).ExitLimits)
+	}
+
+	require.Equal(t, loaded, env.state.PolicySnapshot())
+}

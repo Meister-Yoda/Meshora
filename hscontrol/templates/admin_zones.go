@@ -13,6 +13,9 @@ import (
 )
 
 const (
+	zoneReturnState   = "return"
+	zoneBlockedState  = "blocked"
+	zoneBlockedLabel  = "Gesperrt"
 	zoneActionHeading = "Action"
 	zoneSettingsClass = "zone-settings"
 	zoneAriaLabel     = "aria-label"
@@ -42,6 +45,8 @@ type (
 		OwnAttempt                         *types.OwnExitRule
 		PolicyGroups                       []AdminChoice
 		OpenZoneEditor                     bool
+		LinkAttempt                        bool
+		LinkMode, LinkServices             string
 		MeshPrefix4, MeshPrefix6           string
 	}
 )
@@ -278,7 +283,7 @@ func AdminZones(info AdminPageInfo, page AdminZonesInfo) *elem.Element {
 				continue
 			}
 
-			rows = append(rows, elem.Tr(nil, elem.Td(nil, elem.Text(names[link.From])), elem.Td(nil, elem.Text(names[link.To])), elem.Td(nil, elem.Text(strings.Join(link.Services, ", "))),
+			rows = append(rows, elem.Tr(nil, elem.Td(nil, elem.Text(names[link.From])), elem.Td(nil, elem.Text(names[link.To])), elem.Td(nil, elem.Text(zoneLinkLabel(link))),
 				elem.Td(nil, form("delete-link", zoneHidden("from", link.From), zoneHidden("to", link.To), submitButton("Freigabe entfernen", "btn-secondary")))))
 		}
 
@@ -302,78 +307,42 @@ func AdminZones(info AdminPageInfo, page AdminZonesInfo) *elem.Element {
 				elem.A(attrs.Props{attrs.Href: info.Base + "/zones#zone-policy-list", attrs.Class: "btn btn-secondary"}, elem.Text("Alle Freigaben"))),
 			dataTable("Gerichtete Freigaben", []string{"Von", "Nach", "Dienste", "Aktion"}, rows),
 		}
+		mode := "services"
 		if page.FilterFrom != "" {
-			policyContent = append(policyContent, elem.Div(attrs.Props{attrs.Class: "zone-policy-actions"},
-				form("link", zoneHidden("from", page.FilterFrom), zoneHidden("to", page.FilterTo), zoneHidden("services", "*"), submitButton("Alles erlauben", "btn-primary")),
-				form("delete-link", zoneHidden("from", page.FilterFrom), zoneHidden("to", page.FilterTo), submitButton("Freigabe entfernen", "btn-danger"))))
+			state, _ := zoneMatrixCell(page.Model, page.FilterFrom, page.FilterTo)
+			switch state {
+			case "allow":
+				mode = "allow"
+			case zoneReturnState:
+				mode = zoneReturnState
+			case zoneBlockedState:
+				mode = "deny"
+			}
 		}
 
-		if len(rows) == 0 {
-			policyContent = append(policyContent, elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text("Keine Freigabe für diese Auswahl. Neue Verbindungen sind gesperrt; Antworten auf erlaubte Verbindungen bleiben möglich.")))
+		if page.LinkAttempt {
+			mode, services = page.LinkMode, page.LinkServices
 		}
 
+		choices := []AdminChoice{{Value: "allow", Label: "Alles erlaubt"}, {Value: "services", Label: "Dienstfreigabe"}, {Value: zoneReturnState, Label: "Nur Antwortverkehr"}, {Value: "deny", Label: zoneBlockedLabel}}
 		policyContent = append(policyContent, form("link",
 			elem.Div(attrs.Props{attrs.Class: "zone-form-grid"},
 				zoneSelect("Quelle", "from", "link-from", page.Zones, selectedFrom, false),
 				zoneSelect("Ziel", "to", "link-to", page.Zones, selectedTo, false)),
-			zoneField("Erlaubte Dienste: tcp:443, udp:53, icmp:* oder *", "services", "link-services", services, false),
-			elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text("Eine Freigabe gilt für neue Verbindungen von der Quelle zum Ziel. Speichern ändert den Entwurf; erst Aktivieren wendet ihn an.")),
-			submitButton("Dienstfreigabe speichern", "btn-primary")))
+			zoneSelect("Verbindung", "link_mode", "link-mode", choices, []string{mode}, false),
+			elem.Div(attrs.Props{"data-link-services": "true"}, zoneField("Erlaubte Dienste: tcp:443, udp:53, icmp:*", "services", "link-services", services, false)),
+			elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text("Dienstfreigabe erlaubt nur die angegebenen Dienste. Nur Antwortverkehr erlaubt keine neuen Verbindungen und benötigt eine Freigabe in Gegenrichtung. Gesperrt sperrt neue Verbindungen; Antworten auf erlaubte Gegenverbindungen bleiben möglich. Die Gegenrichtung wird nie automatisch geändert.")),
+			submitButton("Verbindung speichern", "btn-primary")))
 		content = append(content, elem.Section(attrs.Props{attrs.Class: "zone-panel", attrs.ID: "zone-policy-list"}, policyContent...))
 	}
 
-	content = append(content, settings, ownExitGroupEditor(info, page, form))
-
-	var targets []AdminChoice
+	content = append(content, settings,
+		elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text("Benutzerbezogene Exit-Regeln verwaltest du unter Benutzer, gerätebezogene Regeln unter Geräte.")))
 
 	targetNames := map[string]string{}
-
-	for _, user := range page.Users {
-		key := "user:" + user.Value
-		label := "Benutzer: " + user.Label
-		targets = append(targets, AdminChoice{Value: key, Label: label})
-		targetNames[key] = label
-	}
-
 	for _, node := range page.Nodes {
-		key := "node:" + node.Value
-		label := "Gerät: " + node.Label
-		targets = append(targets, AdminChoice{Value: key, Label: label})
-		targetNames[key] = label
+		targetNames["node:"+node.Value] = node.Label
 	}
-
-	rows = nil
-
-	for _, limit := range page.Model.ExitLimits {
-		target := "user:" + strconv.FormatUint(uint64(limit.User), 10)
-		if limit.Node != 0 {
-			target = "node:" + strconv.FormatUint(limit.Node.Uint64(), 10)
-		}
-
-		label := targetNames[target]
-		if label == "" {
-			label = target + " (nicht verfügbar)"
-		}
-
-		exits := strings.Join(limit.Exits, ", ")
-		if exits == "" {
-			exits = "Keine Exits"
-		}
-
-		rows = append(rows, elem.Tr(nil, elem.Td(nil, elem.Text(label)), elem.Td(nil, elem.Text(exits)), elem.Td(nil, form("delete-limit", zoneHidden("target", target), submitButton("Einschränkung entfernen", "btn-secondary")))))
-	}
-
-	content = append(content, elem.Details(attrs.Props{attrs.Class: zoneSettingsClass}, elem.Summary(nil, elem.Text("Exits je Benutzer und Gerät")),
-		elem.P(nil, elem.Text("Wirksam ist die Schnittmenge aus Zone, Benutzerregel und Geräteregel. Eine leere Auswahl sperrt alle Exits. Ohne Einschränkung wird die Zonenfreigabe geerbt. Ein Tag erlaubt alle Exits mit diesem Tag; für einzelne Exits eindeutige Tags verwenden.")),
-		dataTable("Exit-Einschränkungen", []string{"Gültig für", "Erlaubte Exit-Tags", "Aktion"}, rows),
-		form("limit", zoneSelect("Benutzer oder Gerät", "target", "limit-target", targets, nil, false), zoneSelect("Erlaubte Exit-Tags", "exits", "limit-exits", page.Gateways, nil, true), submitButton("Exit-Einschränkung speichern", "btn-primary"))))
-
-	rows = nil
-	for _, device := range page.Devices {
-		rows = append(rows, elem.Tr(nil, elem.Td(nil, elem.Text(device.Name)), elem.Td(nil, elem.Text(device.Zone)), elem.Td(nil, elem.Text(device.Exits))))
-	}
-
-	content = append(content, elem.Details(attrs.Props{attrs.Class: zoneSettingsClass}, elem.Summary(nil, elem.Text("Wirksame Gerätezuordnung")), dataTable("Wirksame Zuordnung im Entwurf", []string{"Gerät", "Zone", "Verfügbare Exit-Tags"}, rows)))
 
 	public := []elem.Node{elem.P(nil, elem.Text("Öffentliche IPv6-Präfixe und Adressen werden hier reserviert. Sie werden nicht automatisch auf Clients eingerichtet. Das Präfix muss zum Gateway geroutet sein; Weiterleitung, Rückroute und Client-Adresse sind separat einzurichten. Ein Wechsel des Exits übernimmt dieses Präfix nicht."))}
 	if zone.ID == "" {
@@ -422,6 +391,14 @@ func zonePairHref(info AdminPageInfo, from, to string) string {
 func zoneMatrixCell(model types.NetworkZones, from, to string) (string, string) {
 	for _, link := range model.Links {
 		if link.From == from && link.To == to {
+			if link.Mode == zoneReturnState {
+				return zoneReturnState, "Nur Antwortverkehr"
+			}
+
+			if link.Mode == "deny" {
+				return zoneBlockedState, zoneBlockedLabel
+			}
+
 			if slices.Contains(link.Services, "*") {
 				return "allow", "Alles erlaubt"
 			}
@@ -431,12 +408,12 @@ func zoneMatrixCell(model types.NetworkZones, from, to string) (string, string) 
 	}
 
 	for _, link := range model.Links {
-		if link.From == to && link.To == from {
-			return "return", "Nur Antworten"
+		if link.From == to && link.To == from && len(link.Services) > 0 {
+			return zoneReturnState, "Nur Antworten"
 		}
 	}
 
-	return "blocked", "Gesperrt"
+	return zoneBlockedState, zoneBlockedLabel
 }
 
 func zoneMatrix(info AdminPageInfo, page AdminZonesInfo) elem.Node {
@@ -526,6 +503,9 @@ type AdminZoneAssignment struct {
 	OwnRule                                types.OwnExitRule
 	OwnDecision                            types.OwnExitDecision
 	ProviderBlocked, ProviderDirectBlocked bool
+	ExitChoices                            []AdminChoice
+	ExitTags                               []string
+	ExitLimited                            bool
 	Choices                                []AdminChoice
 	SourceRevision                         string
 	LoadedRevision                         uint64
@@ -562,7 +542,7 @@ func adminZoneAssignment(info AdminPageInfo, path string, assignment *AdminZoneA
 		content = append(content, elem.P(nil, elem.Text("Entfernen löscht nur die direkte Gerätezuordnung. Bei benutzereigenen Geräten gilt danach wieder die Zone des Benutzers; getaggte Geräte erben keine Benutzerzone.")))
 	}
 
-	content = append(content, ownExitEntityEditor(info, path, assignment))
+	content = append(content, ownExitEntityEditor(info, path, assignment), entityExitLimits(info, path, assignment))
 	providerStatus := "In der aktuellen Zone ist das Bereitstellen eines eigenen Exit Nodes erlaubt (Routenfreigabe bleibt erforderlich)."
 	providerButton, providerValue := "Eigene Exits in der Benutzerzone sperren", "true"
 
@@ -577,9 +557,21 @@ func adminZoneAssignment(info AdminPageInfo, path string, assignment *AdminZoneA
 	content = append(content, elem.H3(nil, elem.Text("Eigene Exit Nodes")), elem.P(nil, elem.Text(providerStatus)),
 		postForm(info, path+"/exit-provider", "action-form",
 			zoneHidden("source_revision", assignment.SourceRevision), zoneHidden("loaded_revision", strconv.FormatUint(assignment.LoadedRevision, 10)),
-			zoneHidden("blocked", providerValue), submitButton(providerButton, "btn-secondary")),
+			zoneHidden(zoneBlockedState, providerValue), submitButton(providerButton, "btn-secondary")),
 		elem.P(nil, elem.Text("Diese Benutzer-/Gerätesperre gilt nur in der unsichtbaren Benutzerzone. In einer ausdrücklich zugeordneten Zone gilt deren Einstellung für eigene Exits. Eine Geräteeinstellung hebt die Benutzersperre innerhalb der Benutzerzone nicht auf.")))
 	content = append(content, elem.P(nil, elem.Text("Wird als Entwurf gespeichert. Erst die Aktivierung unter Zonen wendet die Änderung an. Bestehende IP-Adressen bleiben erhalten.")), linkButton(info.Base+"/zones", "Zonen und Aktivierung", "btn-secondary"))
 
 	return cardSection("Zone", "Wirksame Zone im Entwurf: "+assignment.Effective, content...)
+}
+
+func zoneLinkLabel(link types.ZoneLink) string {
+	if link.Mode == zoneReturnState {
+		return "Nur Antwortverkehr"
+	}
+
+	if link.Mode == "deny" {
+		return zoneBlockedLabel
+	}
+
+	return strings.Join(link.Services, ", ")
 }

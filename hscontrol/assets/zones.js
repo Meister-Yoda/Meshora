@@ -1,5 +1,18 @@
 (() => {
   "use strict";
+  const mode = document.getElementById("link-mode");
+  const services = document.querySelector("[data-link-services]");
+  if (mode && services) {
+    const update = () => {
+      services.hidden = mode.value !== "services";
+      for (const input of services.querySelectorAll("input")) {
+        input.disabled = services.hidden;
+        input.required = !services.hidden;
+      }
+    };
+    mode.addEventListener("change", update);
+    update();
+  }
   const dialog = document.getElementById("zone-editor");
   if (!dialog) return;
   const opener = [...document.querySelectorAll("[data-zone-opener]")].find(

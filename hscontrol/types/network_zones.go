@@ -38,6 +38,7 @@ type NetworkZone struct {
 }
 
 type ZoneLink struct {
+	Mode     string   `json:"mode,omitempty"`
 	From     string   `json:"from"`
 	To       string   `json:"to"`
 	Services []string `json:"services"`
@@ -213,11 +214,23 @@ func (n *NetworkZones) validateLinks(ids map[string]bool) error {
 
 	for _, link := range n.Links {
 		key := link.From + "\x00" + link.To
-		if !ids[link.From] || !ids[link.To] || len(link.Services) == 0 || links[key] {
+		if !ids[link.From] || !ids[link.To] || links[key] {
 			return fmt.Errorf("%w: links require existing zones, services and a unique source/destination pair", ErrNetworkZones)
 		}
 
 		links[key] = true
+
+		if link.Mode == "return" || link.Mode == "deny" {
+			if len(link.Services) != 0 {
+				return fmt.Errorf("%w: blocked or return-only links cannot allow services", ErrNetworkZones)
+			}
+
+			continue
+		}
+
+		if link.Mode != "" || len(link.Services) == 0 {
+			return fmt.Errorf("%w: a service link requires services and no explicit blocking mode", ErrNetworkZones)
+		}
 
 		for _, service := range link.Services {
 			if !zoneServiceValid(service) {

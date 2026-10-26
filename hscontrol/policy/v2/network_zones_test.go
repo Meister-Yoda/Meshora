@@ -162,3 +162,24 @@ func TestZoneProviderBlockRemovesInternetFilters(t *testing.T) {
 	require.Empty(t, after)
 	require.ElementsMatch(t, defaults, pm.ViaRoutesForPeer(client.View(), gateway.View()).Exclude)
 }
+
+func TestNetworkZoneBlockedModesDoNotGrantTraffic(t *testing.T) {
+	a := node("a", "100.64.1.1", "fd7a:115c:a1e0::1", types.User{})
+	a.ID = 1
+	b := node("b", "100.64.2.1", "fd7a:115c:a1e0::2", types.User{})
+	b.ID = 2
+
+	for _, mode := range []string{"return", "deny"} {
+		t.Run(mode, func(t *testing.T) {
+			data, err := json.Marshal(map[string]any{
+				"networkZones": types.NetworkZones{Zones: []types.NetworkZone{{ID: "a", Name: "A", Nodes: []types.NodeID{1}}, {ID: "b", Name: "B", Nodes: []types.NodeID{2}}}, Links: []types.ZoneLink{{From: "a", To: "b", Mode: mode}, {From: "b", To: "a", Services: []string{"tcp:443"}}}},
+				"tests":        []map[string]any{{"src": "100.64.1.1", "deny": []string{"100.64.2.1:443", "100.64.2.1:22"}}, {"src": "100.64.2.1", "accept": []string{"100.64.1.1:443"}, "deny": []string{"100.64.1.1:22"}}},
+			})
+			require.NoError(t, err)
+			pm, err := NewPolicyManager(data, nil, types.Nodes{a, b}.ViewSlice())
+			require.NoError(t, err)
+			_, err = pm.SetPolicy(data)
+			require.NoError(t, err)
+		})
+	}
+}

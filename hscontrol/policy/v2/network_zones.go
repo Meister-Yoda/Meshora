@@ -58,6 +58,10 @@ func (pol *Policy) materializeNetworkZones(nodes views.Slice[types.NodeView]) (*
 	}
 
 	for _, link := range model.Links {
+		if link.Mode != "" {
+			continue
+		}
+
 		src, dst := members[link.From], members[link.To]
 		if len(src) > 0 && len(dst) > 0 {
 			wire = append(wire, zoneGrant{Src: src, Dst: dst, IP: link.Services})

@@ -1,7 +1,6 @@
 package templates
 
 import (
-	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -19,7 +18,7 @@ func ownExitRuleFields(prefix string, rule types.OwnExitRule, zone bool) []elem.
 		mode = ownExitInheritMode
 	}
 
-	choices := []AdminChoice{{Value: ownExitInheritMode, Label: "Erben"}, {Value: "deny", Label: "Gesperrt"}, {Value: "allow", Label: "Erlaubte Dienste"}}
+	choices := []AdminChoice{{Value: ownExitInheritMode, Label: "Erben"}, {Value: "deny", Label: zoneBlockedLabel}, {Value: "allow", Label: "Erlaubte Dienste"}}
 
 	services := strings.Join(rule.Services, ", ")
 	if services == "" {
@@ -56,16 +55,16 @@ func ownExitRuleLabel(rule types.OwnExitRule) string {
 		return "Erben (Standard: gesperrt)"
 	}
 
-	return "Gesperrt"
+	return zoneBlockedLabel
 }
 
 func ownExitMatrixState(zone types.NetworkZone) (string, string) {
 	if zone.OwnExits == nil || zone.OwnExits.Mode == ownExitInheritMode {
-		return "blocked", "Standard: gesperrt"
+		return zoneBlockedState, "Standard: gesperrt"
 	}
 
 	if zone.OwnExits.Locked {
-		return "blocked", "Verbindlich gesperrt"
+		return zoneBlockedState, "Verbindlich gesperrt"
 	}
 
 	if zone.OwnExits.Mode == "allow" {
@@ -76,7 +75,7 @@ func ownExitMatrixState(zone types.NetworkZone) (string, string) {
 		return "services", "Dienste (" + strconv.Itoa(len(zone.OwnExits.Services)) + ")"
 	}
 
-	return "blocked", "Gesperrt"
+	return zoneBlockedState, zoneBlockedLabel
 }
 
 func ownExitMatrixEditor(page AdminZonesInfo, form func(string, ...elem.Node) elem.Node) elem.Node {
@@ -104,47 +103,6 @@ func ownExitMatrixEditor(page AdminZonesInfo, form func(string, ...elem.Node) el
 	return elem.Section(attrs.Props{attrs.Class: "zone-panel", attrs.ID: "zone-policy-list"}, elem.H2(nil, elem.Text(name+" → Eigene Exits")), form("own-exits", fields...))
 }
 
-func ownExitGroupEditor(info AdminPageInfo, page AdminZonesInfo, form func(string, ...elem.Node) elem.Node) elem.Node {
-	selectedRule := types.OwnExitRule{Mode: ownExitInheritMode}
-
-	for _, override := range page.Model.OwnExitOverrides {
-		if override.Group == page.SelectedOwnGroup && override.Group != "" {
-			selectedRule = override.Rule
-		}
-	}
-
-	if page.OwnAttempt != nil {
-		selectedRule = *page.OwnAttempt
-	}
-
-	var rows []elem.Node
-
-	for _, override := range page.Model.OwnExitOverrides {
-		if override.Group != "" {
-			rows = append(rows, elem.Tr(nil, elem.Td(nil, elem.Text(override.Group)), elem.Td(nil, elem.Text(ownExitRuleLabel(override.Rule))), elem.Td(nil, elem.A(attrs.Props{attrs.Href: info.Base + "/zones?own_group=" + url.QueryEscape(override.Group) + "#own-exit-groups"}, elem.Text("Bearbeiten")))))
-		}
-	}
-
-	children := []elem.Node{elem.Summary(nil, elem.Text("Eigene Exits: Gruppenregeln")), elem.P(nil, elem.Text("Verwendet die Gruppen der Policy. Mehrere passende Gruppen werden geschnitten; eine Sperre hat Vorrang. Benutzer und Geräte können Gruppenregeln ersetzen, sofern keine verbindliche Zonensperre gilt.")), dataTable("Gruppenregeln für eigene Exits", []string{"Gruppe", "Regel", zoneActionHeading}, rows)}
-
-	if len(page.PolicyGroups) > 0 {
-		fields := make([]elem.Node, 0, 4)
-		fields = append(fields, zoneSelect("Policy-Gruppe", "group", "own-exit-group", page.PolicyGroups, []string{page.SelectedOwnGroup}, false))
-		fields = append(fields, ownExitRuleFields("group-own-exits", selectedRule, false)...)
-		fields = append(fields, submitButton("Gruppenregel speichern", "btn-primary"))
-		children = append(children, form("own-exit-group", fields...))
-	} else {
-		children = append(children, elem.P(nil, elem.Text("Noch keine Policy-Gruppen definiert.")), linkButton(info.Base+"/policy/edit", "Policy-Gruppen bearbeiten", "btn-secondary"))
-	}
-
-	props := attrs.Props{attrs.Class: zoneSettingsClass, attrs.ID: "own-exit-groups"}
-	if page.SelectedOwnGroup != "" {
-		props["open"] = "true"
-	}
-
-	return elem.Details(props, children...)
-}
-
 func ownExitEntityEditor(info AdminPageInfo, path string, assignment *AdminZoneAssignment) elem.Node {
 	fields := make([]elem.Node, 0, 5)
 	fields = append(fields, zoneHidden("source_revision", assignment.SourceRevision), zoneHidden("loaded_revision", strconv.FormatUint(assignment.LoadedRevision, 10)))
@@ -154,4 +112,19 @@ func ownExitEntityEditor(info AdminPageInfo, path string, assignment *AdminZoneA
 	return elem.Section(nil, elem.H3(nil, elem.Text("Eigene Exits benutzen")),
 		elem.P(nil, elem.Text("Wirksam: "+ownExitRuleLabel(assignment.OwnDecision.Rule)+" · Herkunft: "+assignment.OwnDecision.Source)),
 		postForm(info, path+"/own-exits", "action-form", fields...))
+}
+
+func entityExitLimits(info AdminPageInfo, path string, assignment *AdminZoneAssignment) elem.Node {
+	mode := "inherit"
+	if assignment.ExitLimited {
+		mode = "limit"
+	}
+
+	return elem.Section(nil, elem.H3(nil, elem.Text("Verfügbare Exits einschränken")),
+		elem.P(nil, elem.Text("Erben übernimmt die Zonenfreigabe. Eine eigene Einschränkung erlaubt nur die ausgewählten Exit-Tags innerhalb der Zonenfreigabe; keine Auswahl sperrt alle Exits.")),
+		postForm(info, path+"/exit-limit", "action-form",
+			zoneHidden("source_revision", assignment.SourceRevision), zoneHidden("loaded_revision", strconv.FormatUint(assignment.LoadedRevision, 10)),
+			zoneSelect("Einstellung", "exit_mode", "entity-exit-mode", []AdminChoice{{Value: "inherit", Label: "Erben"}, {Value: "limit", Label: "Eigene Einschränkung"}}, []string{mode}, false),
+			zoneSelect("Erlaubte Exits", "exits", "entity-exit-tags", assignment.ExitChoices, assignment.ExitTags, true),
+			submitButton("Exit-Einschränkung speichern", "btn-primary")))
 }
