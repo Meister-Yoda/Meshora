@@ -289,8 +289,12 @@ func AdminZones(info AdminPageInfo, page AdminZonesInfo) *elem.Element {
 				continue
 			}
 
-			rows = append(rows, elem.Tr(nil, elem.Td(nil, elem.Text(names[link.From])), elem.Td(nil, elem.Text(names[link.To])), elem.Td(nil, elem.Text(zoneLinkLabel(link))),
-				elem.Td(nil, form("delete-link", zoneHidden("from", link.From), zoneHidden("to", link.To), submitButton("Freigabe entfernen", "btn-secondary")))))
+			var action elem.Node = linkButton(zonePairHref(info, link.From, link.To), "Bearbeiten", "btn-secondary")
+			if page.FilterFrom != "" {
+				action = form("delete-link", zoneHidden("from", link.From), zoneHidden("to", link.To), submitButton("Freigabe entfernen", "btn-secondary"))
+			}
+
+			rows = append(rows, elem.Tr(nil, elem.Td(nil, elem.Text(names[link.From])), elem.Td(nil, elem.Text(names[link.To])), elem.Td(nil, elem.Text(zoneLinkLabel(link))), elem.Td(nil, action)))
 		}
 
 		services := "tcp:443"
@@ -313,32 +317,35 @@ func AdminZones(info AdminPageInfo, page AdminZonesInfo) *elem.Element {
 				elem.A(attrs.Props{attrs.Href: info.Base + "/zones#zone-policy-list", attrs.Class: "btn btn-secondary"}, elem.Text("Alle Freigaben"))),
 			dataTable("Gerichtete Freigaben", []string{"Von", "Nach", "Dienste", "Aktion"}, rows),
 		}
-		mode := "services"
 		if page.FilterFrom != "" {
-			state, _ := zoneMatrixCell(page.Model, page.FilterFrom, page.FilterTo)
-			switch state {
-			case "allow":
-				mode = "allow"
-			case zoneReturnState:
-				mode = zoneReturnState
-			case zoneBlockedState:
-				mode = "deny"
+			mode := "services"
+
+			if page.FilterFrom != "" {
+				state, _ := zoneMatrixCell(page.Model, page.FilterFrom, page.FilterTo)
+				switch state {
+				case "allow":
+					mode = "allow"
+				case zoneReturnState:
+					mode = zoneReturnState
+				case zoneBlockedState:
+					mode = "deny"
+				}
 			}
-		}
 
-		if page.LinkAttempt {
-			mode, services = page.LinkMode, page.LinkServices
-		}
+			if page.LinkAttempt {
+				mode, services = page.LinkMode, page.LinkServices
+			}
 
-		choices := []AdminChoice{{Value: "allow", Label: "Alles erlaubt"}, {Value: "services", Label: "Dienstfreigabe"}, {Value: zoneReturnState, Label: "Nur Antwortverkehr"}, {Value: "deny", Label: zoneBlockedLabel}}
-		policyContent = append(policyContent, form("link",
-			elem.Div(attrs.Props{attrs.Class: "zone-form-grid"},
-				zoneSelect("Quelle", "from", "link-from", page.Zones, selectedFrom, false),
-				zoneSelect("Ziel", "to", "link-to", page.Zones, selectedTo, false)),
-			zoneSelect("Verbindung", "link_mode", "link-mode", choices, []string{mode}, false),
-			elem.Div(attrs.Props{"data-link-services": "true"}, zoneField("Erlaubte Dienste: tcp:443, udp:53, icmp:*", "services", "link-services", services, false)),
-			elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text("Dienstfreigabe erlaubt nur die angegebenen Dienste. Nur Antwortverkehr erlaubt keine neuen Verbindungen und benötigt eine Freigabe in Gegenrichtung. Gesperrt sperrt neue Verbindungen; Antworten auf erlaubte Gegenverbindungen bleiben möglich. Die Gegenrichtung wird nie automatisch geändert.")),
-			submitButton("Verbindung speichern", "btn-primary")))
+			choices := []AdminChoice{{Value: "allow", Label: "Alles erlaubt"}, {Value: "services", Label: "Dienstfreigabe"}, {Value: zoneReturnState, Label: "Nur Antwortverkehr"}, {Value: "deny", Label: zoneBlockedLabel}}
+			policyContent = append(policyContent, form("link",
+				elem.Div(attrs.Props{attrs.Class: "zone-form-grid"},
+					zoneSelect("Quelle", "from", "link-from", page.Zones, selectedFrom, false),
+					zoneSelect("Ziel", "to", "link-to", page.Zones, selectedTo, false)),
+				zoneSelect("Verbindung", "link_mode", "link-mode", choices, []string{mode}, false),
+				elem.Div(attrs.Props{"data-link-services": "true"}, zoneField("Erlaubte Dienste: tcp:443, udp:53, icmp:*", "services", "link-services", services, false)),
+				elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text("Dienstfreigabe erlaubt nur die angegebenen Dienste. Nur Antwortverkehr erlaubt keine neuen Verbindungen und benötigt eine Freigabe in Gegenrichtung. Gesperrt sperrt neue Verbindungen; Antworten auf erlaubte Gegenverbindungen bleiben möglich. Die Gegenrichtung wird nie automatisch geändert.")),
+				submitButton("Verbindung speichern", "btn-primary")))
+		}
 		pairEditor = elem.Section(attrs.Props{attrs.ID: "zone-policy-list"}, policyContent...)
 	}
 
