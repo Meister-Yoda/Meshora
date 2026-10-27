@@ -69,6 +69,11 @@ type session struct {
 	accountRevision    uint64
 	isAdmin            bool
 	mustChangePassword bool
+	passkey            bool
+	strongAuth         bool
+	enrollmentOnly     bool
+	validUntil         time.Time
+	authenticatedAt    time.Time
 	oidcSubject        string
 	expires            time.Time
 	adminID            uint64
@@ -126,6 +131,8 @@ type Handler struct {
 	oidcButtonText      string
 	oidcFlows           *expirable.LRU[string, adminOIDCFlow]
 	oidcFlowsMu         sync.Mutex
+	securityFlows       *expirable.LRU[string, securityFlow]
+	securityFlowsMu     sync.Mutex
 	settingsMu          sync.Mutex
 	routesMu            sync.Mutex
 
@@ -161,6 +168,7 @@ func New(st *state.State, cfg *types.Config, notify func(...change.Change)) *Han
 		adminOIDCRoles:      slices.Clone(cfg.WebAdmin.OIDCAllowedRoles),
 		adminOIDCRolesClaim: cmp.Or(cfg.WebAdmin.OIDCRolesClaim, "roles"),
 		oidcButtonText:      strings.TrimSpace(cfg.WebAdmin.OIDCButtonText),
+		securityFlows:       expirable.NewLRU[string, securityFlow](maxSessions, nil, securityTTL),
 		oidcFlows:           expirable.NewLRU[string, adminOIDCFlow](maxSessions, nil, 10*time.Minute),
 		sessions:            expirable.NewLRU[string, *session](maxSessions, nil, cfg.WebAdmin.SessionTTL),
 		failures:            expirable.NewLRU[string, int](maxFailureKeys, nil, loginFailureWindow),
@@ -170,6 +178,7 @@ func New(st *state.State, cfg *types.Config, notify func(...change.Change)) *Han
 // Close stops the dashboard caches' background TTL sweepers after HTTP shutdown.
 func (h *Handler) Close() {
 	h.oidcFlows.Close()
+	h.securityFlows.Close()
 	h.sessions.Close()
 	h.failures.Close()
 }
@@ -178,6 +187,8 @@ func (h *Handler) Close() {
 func (h *Handler) Routes(r chi.Router) {
 	r.With(adminHeaders).Get("/", h.loginPage)
 	r.With(adminHeaders).Post("/", h.login)
+	r.With(adminHeaders).Get("/login/2fa", h.secondFactorPage)
+	r.With(adminHeaders).Post("/login/2fa", h.finishSecondFactor)
 	r.With(adminHeaders).Get("/connect", h.enrollment)
 	r.With(adminHeaders).Get(BasePath+"/assets/enrollment.js", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
@@ -190,6 +201,9 @@ func (h *Handler) Routes(r chi.Router) {
 	r.Route(BasePath, func(r chi.Router) {
 		r.Use(adminHeaders)
 		r.Get(templates.AdminStylesheetPath, stylesheet)
+		r.Get("/assets/security.js", h.securityScript)
+		r.Post("/passkeys/login/begin", h.beginPasskeyLogin)
+		r.Post("/passkeys/login/finish", h.finishPasskeyLogin)
 		r.Get("/assets/zones.js", func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			_, _ = w.Write(assets.ZonesJS)
@@ -210,11 +224,20 @@ func (h *Handler) Routes(r chi.Router) {
 		r.Group(func(r chi.Router) {
 			r.Use(h.requireSession)
 			r.Get("/account", h.accountPage)
+			r.Get("/account/security", h.securityPage)
+			r.Post("/account/security/totp/begin", h.beginTOTP)
+			r.Get("/account/security/totp/qr", h.totpQR)
+			r.Post("/account/security/totp/enable", h.enableTOTP)
+			r.Post("/account/security/totp/disable", h.disableTOTP)
+			r.Post("/account/security/passkeys/begin", h.beginPasskeyRegistration)
+			r.Post("/account/security/passkeys/finish", h.finishPasskeyRegistration)
+			r.Post("/account/security/passkeys/delete", h.deletePasskey)
 			r.Post("/account/profile", h.saveAccountProfile)
 			r.Get("/account/password", h.accountPasswordPage)
 			r.Post("/account/password", h.saveAccountPassword)
 			r.Get("/account/devices/{id}", h.accountDevice)
 			r.Post("/users/{id}/admin", h.setAccountAdmin)
+			r.Post("/users/{id}/auth-policy", h.saveUserAuthPolicy)
 			r.Post("/users/{id}/password", h.resetAccountPassword)
 			r.Post("/users/{id}/profile", h.saveUserProfile)
 			r.Get("/users/{id}/merge", h.mergeAccountPage)
@@ -303,6 +326,9 @@ func (h *Handler) loginPage(w http.ResponseWriter, r *http.Request) {
 			target = h.publicPath + "/"
 		}
 
+		if sess.enrollmentOnly {
+			target = h.publicPath + "/account/security"
+		}
 		if sess.mustChangePassword {
 			target = h.publicPath + "/account/password"
 		}
@@ -323,6 +349,7 @@ func (h *Handler) loginPage(w http.ResponseWriter, r *http.Request) {
 // renderLogin issues a fresh login CSRF token (double-submit cookie) and
 // renders the login form.
 func (h *Handler) renderLogin(w http.ResponseWriter, r *http.Request, status int, username, msg string) {
+	w.Header().Set("Content-Security-Policy", adminCSP+"; script-src 'self'; connect-src 'self'")
 	h.settingsMu.Lock()
 	buttonText := h.oidcButtonText
 	h.settingsMu.Unlock()
@@ -388,25 +415,26 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		h.renderLogin(w, r, http.StatusUnauthorized, username, msgInvalidLogin)
 		return
 	}
+
+	security, err := h.state.UserSecurity(types.UserID(account.UserID))
+	if err != nil {
+		h.renderLogin(w, r, http.StatusServiceUnavailable, username, "Kontosicherheit nicht verfügbar.")
+		return
+	}
+
+	policy, err := h.state.UserAuthPolicy(types.UserID(account.UserID))
+	if err != nil {
+		h.renderLogin(w, r, http.StatusServiceUnavailable, username, "Sicherheitsrichtlinie nicht verfügbar.")
+		return
+	}
+
+	if len(security.EncryptedTOTPSecret) > 0 && !policy.TOTPBypassedAt(time.Now()) {
+		h.startSecondFactor(w, r, account, nil)
+		return
+	}
+
 	h.clearFailures(userKey)
-	token := randomToken()
-	h.sessions.Add(hashToken(token), &session{
-		userID: types.UserID(user.ID), accountRevision: account.Revision, isAdmin: account.IsAdmin, mustChangePassword: account.MustChangePassword,
-		username: cmp.Or(user.Email, account.LegacyLogin.String, user.DisplayName, user.Name), csrf: randomToken(),
-	})
-	h.setCookie(w, r, loginCSRFCookie, "", -1)
-	h.setCookie(w, r, sessionCookie, token, 0)
-
-	target := h.publicPath + "/account"
-	if account.IsAdmin {
-		target = h.publicPath + "/"
-	}
-
-	if account.MustChangePassword {
-		target = h.publicPath + "/account/password"
-	}
-
-	http.Redirect(w, r, target, http.StatusSeeOther)
+	h.issueSession(w, r, account, user, &session{})
 }
 
 func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
@@ -644,6 +672,10 @@ func (h *Handler) requireSession(next http.Handler) http.Handler {
 			return
 		}
 
+		if sess.enrollmentOnly && !enrollmentPath(r.URL.Path) {
+			http.Redirect(w, r, h.publicPath+"/account/security", http.StatusSeeOther)
+			return
+		}
 		if !sess.isAdmin && !personal && r.URL.Path != BasePath+"/logout" {
 			if r.URL.Path == BasePath+"/" {
 				http.Redirect(w, r, h.publicPath+"/account", http.StatusSeeOther)
@@ -668,7 +700,7 @@ func (h *Handler) requireSession(next http.Handler) http.Handler {
 				return
 			}
 
-			if !tokensEqual(sess.csrf, r.PostForm.Get(templates.AdminCSRFField)) {
+			if !tokensEqual(sess.csrf, cmp.Or(r.Header.Get("X-CSRF-Token"), r.PostForm.Get(templates.AdminCSRFField))) {
 				log.Warn().Err(errCSRFMismatch).Str("username", sess.username).Msg("web admin request rejected")
 				http.Error(w, "forbidden", http.StatusForbidden)
 
@@ -692,6 +724,11 @@ func (h *Handler) currentSession(r *http.Request) (*session, bool) {
 
 	sess, ok := h.sessions.Get(key)
 	if !ok {
+		return nil, false
+	}
+
+	if !sess.validUntil.IsZero() && !time.Now().Before(sess.validUntil) {
+		h.sessions.Remove(key)
 		return nil, false
 	}
 

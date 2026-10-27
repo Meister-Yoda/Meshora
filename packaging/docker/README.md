@@ -116,6 +116,58 @@ Die Datei enthält keine Coolify-spezifischen Felder. Die Einrichtung meldet
 sich bereits während des Assistenten als gesund, damit der Proxy sie
 erreichen kann.
 
+## Lokale Konten: 2FA und Passkeys
+
+Unter **Mein Konto → Sicherheit** können lokale Nutzer eine Authenticator-App
+und Passkeys einrichten. Für Änderungen werden das aktuelle lokale Passwort
+und bei aktiver 2FA ein Authenticator- oder Wiederherstellungscode verlangt.
+
+Die Authenticator-App wird per QR-Code verbunden und erst nach Bestätigung
+eines Codes aktiviert. Danach zeigt Meshora zehn Wiederherstellungscodes
+**einmalig** an. Jeden Code sicher aufbewahren; er kann genau eine Anmeldung
+oder Sicherheitsänderung bestätigen. Bereits verwendete Authenticator-Codes
+werden ebenfalls nicht erneut akzeptiert. Ein administrativer Passwort-Reset
+entfernt die eingerichteten Faktoren nicht.
+
+Passkeys benötigen eine öffentliche HTTPS-Adresse; für lokale Entwicklung
+ist `http://localhost` zulässig. Die Domain aus `server_url` bindet die Passkeys
+an diese Installation. Ein Passkey mit verpflichtender Gerätebestätigung
+(PIN oder Biometrie) kann direkt ohne Passwort und Authenticator-Code anmelden.
+OIDC-Anmeldungen verwenden die Sicherheitsregeln des OIDC-Anbieters. Eine in
+Meshora gesetzte Pflicht für 2FA oder Passkeys gilt zusätzlich auch für OIDC.
+
+Administratoren können auf der Nutzerdetailseite **2FA oder Passkey verpflichtend
+verlangen**. Ohne bestätigten Faktor erhält der Nutzer nach der Anmeldung nur
+Zugriff auf Passwort und Sicherheitseinrichtung. Bereits vorhandene Passkeys
+können dort direkt bestätigt werden. Jede Änderung der Anmeldesicherheit beendet
+alle bestehenden WebUI-Sitzungen des betroffenen Nutzers, auch OIDC-Sitzungen.
+
+Für Supportfälle gibt es getrennte Ausnahmen: die 2FA-Prüfung aussetzen und die
+Passkey-Anmeldung sperren, jeweils für 15 Minuten, 1 Stunde, 4 Stunden oder
+24 Stunden. Vorhandene Schlüssel werden beibehalten. Die 2FA-Ausnahme erlaubt
+während der Frist eine Anmeldung ohne zweiten Faktor, auch bei bestehender
+Pflicht. Solche Sitzungen enden spätestens mit der Frist. Das Verbinden einer
+neuen Authenticator-App beendet die 2FA-Ausnahme sofort. Die Pausen lassen sich
+jederzeit administrativ aufheben; die letzte Änderung und der verantwortliche
+Admin werden gespeichert und Änderungen im Serverprotokoll erfasst. Der Admin
+bestätigt die Änderung mit seiner eigenen Anmeldung.
+
+TOTP-Geheimnisse werden mit einem aus dem bestehenden Noise-Privatschlüssel
+abgeleiteten Schlüssel verschlüsselt gespeichert. Datenbank **und** die unter
+`noise.private_key_path` konfigurierte Schlüsseldatei gemeinsam sichern. Die
+normalen Daten- und Konfigurationsvolumes enthalten diese Dateien. Bei
+Sicherheitsänderungen beendet Meshora bestehende Sitzungen. Konten mit aktiven
+Faktoren können nicht als Quellkonto zusammengeführt werden; die Faktoren
+müssen vorher ausdrücklich entfernt werden.
+
+## Aktueller Build
+
+Mit `MESHORA_VERSION=RC` wird das zuletzt veröffentlichte Build für AMD64 und
+ARM64 verwendet, unabhängig davon, ob es eine stabile Version oder eine
+Vorabversion ist. Der Tag `RC` wird bei jeder Veröffentlichung aktualisiert.
+Für eine festgelegte Version den vollständigen Tag wie `v0.2.1-rc.3` verwenden.
+Vorabversionen ändern den stabilen Tag `latest` nicht.
+
 ## Daten und Updates
 
 Die Volumes `meshora-config` und `meshora-data` enthalten die

@@ -132,3 +132,28 @@ CREATE TABLE user_accounts (
  password_hash blob, must_change_password boolean NOT NULL DEFAULT false,
  revision bigint NOT NULL DEFAULT 1, last_login_at datetime
 );
+
+CREATE TABLE user_securities (
+ user_id bigint PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+ encrypted_totp_secret blob,
+ last_totp_step bigint NOT NULL DEFAULT -1,
+ recovery_hashes text NOT NULL DEFAULT '[]'
+);
+CREATE TABLE user_passkeys (
+ id text PRIMARY KEY,
+ user_id bigint NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ name text NOT NULL,
+ credential text NOT NULL,
+ created_at datetime NOT NULL
+);
+CREATE INDEX idx_user_passkeys_user_id ON user_passkeys(user_id);
+
+CREATE TABLE user_auth_policies (
+ user_id bigint PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+ require_strong_auth boolean NOT NULL DEFAULT false,
+ totp_suspended_until datetime,
+ passkeys_suspended_until datetime,
+ updated_by bigint NOT NULL DEFAULT 0,
+ updated_at datetime,
+ reason text NOT NULL DEFAULT ''
+);

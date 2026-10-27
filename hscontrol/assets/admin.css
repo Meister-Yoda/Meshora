@@ -1952,3 +1952,6 @@ summary { min-height: 36px; }
 }
 
 .personal-content { max-width: 1100px; }
+
+.totp-qr { display: block; max-width: 100%; height: auto; border-radius: 12px; }
+.recovery-codes { white-space: pre-wrap; overflow-wrap: anywhere; }

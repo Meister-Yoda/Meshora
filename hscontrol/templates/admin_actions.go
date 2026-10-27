@@ -175,6 +175,7 @@ func AdminUserDetail(info AdminPageInfo, user AdminUserRow, nodes []AdminNodeRow
 			postForm(info, path+"/admin", "action-form", elem.Label(attrs.Props{attrs.Class: "check"}, elem.Input(adminProps), elem.Span(nil, elem.Text("Admin-Zugang erlauben"))), submitButton("Admin-Zugang speichern", "btn-primary"))),
 		cardSection("Lokale Anmeldung", "Ein zufälliges Startpasswort wird nur einmal angezeigt. Der Benutzer muss es beim ersten Login ändern. OIDC bleibt mit derselben UID verknüpft.",
 			postForm(info, path+"/password", "action-form", submitButton("Zufälliges Startpasswort erzeugen", "btn-secondary"))),
+		adminUserAuthentication(info, path, user.Security),
 		cardSection("Doppelte Konten", "Vorhandene lokale und OIDC-Konten ausdrücklich mit einer gemeinsamen UID verbinden.", linkButton(info.Base+path+"/merge", "Mit einem anderen Konto zusammenführen", "btn-secondary")),
 		cardSection("Delete user", "Only possible once the user owns no devices.",
 			linkButton(info.Base+path+"/delete", "Delete user…", "btn-danger"),

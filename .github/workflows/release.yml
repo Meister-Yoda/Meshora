@@ -119,6 +119,9 @@ jobs:
           done
           docker buildx imagetools create -t "$image:$TAG" "$image:$TAG-amd64" "$image:$TAG-arm64"
           docker buildx imagetools inspect "$image:$TAG"
+          # RC always follows the most recently published build, stable or prerelease.
+          docker buildx imagetools create -t "$image:RC" "$image:$TAG"
+          docker buildx imagetools inspect "$image:RC"
           # Prereleases never move latest; rerunning older stable releases must not move it backwards.
           newest_tag="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1 --json tagName --jq '.[0].tagName')"
           if [[ "$TAG" != *-* ]] && [ "$TAG" = "$newest_tag" ]; then

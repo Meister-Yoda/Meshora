@@ -114,3 +114,43 @@ func (s *State) ResolveOIDCUser(claims *types.OIDCClaims, emailVerifiedRequired 
 
 	return user, nil
 }
+
+func (s *State) UserSecurity(id types.UserID) (*types.UserSecurity, error) {
+	return s.db.UserSecurity(id)
+}
+
+func (s *State) UserPasskeys(id types.UserID) ([]types.UserPasskey, error) {
+	return s.db.UserPasskeys(id)
+}
+
+func (s *State) EnableUserTOTP(id types.UserID, rev uint64, secret string, key []byte, step int64, hashes []string) error {
+	return s.db.EnableUserTOTP(id, rev, secret, key, step, hashes)
+}
+
+func (s *State) DisableUserTOTP(id types.UserID, rev uint64) error {
+	return s.db.DisableUserTOTP(id, rev)
+}
+
+func (s *State) ConsumeSecondFactor(id types.UserID, rev uint64, step int64, hash string) error {
+	return s.db.ConsumeSecondFactor(id, rev, step, hash)
+}
+
+func (s *State) AddUserPasskey(id types.UserID, rev uint64, record types.UserPasskey) error {
+	return s.db.AddUserPasskey(id, rev, record)
+}
+
+func (s *State) DeleteUserPasskey(id types.UserID, rev uint64, key string) error {
+	return s.db.DeleteUserPasskey(id, rev, key)
+}
+
+func (s *State) UseUserPasskey(id types.UserID, rev uint64, key, oldData, newData string) error {
+	return s.db.UseUserPasskey(id, rev, key, oldData, newData)
+}
+
+func (s *State) UserAuthPolicy(id types.UserID) (*types.UserAuthPolicy, error) {
+	return s.db.UserAuthPolicy(id)
+}
+
+func (s *State) SetUserAuthPolicy(actor, target types.UserID, revision uint64, required bool, totpAction, passkeyAction, reason string) error {
+	return s.db.SetUserAuthPolicy(actor, target, revision, required, totpAction, passkeyAction, reason)
+}

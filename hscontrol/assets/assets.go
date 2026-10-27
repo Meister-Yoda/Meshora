@@ -48,3 +48,8 @@ var EnrollmentJS []byte
 //
 //go:embed zones.js
 var ZonesJS []byte
+
+// SecurityJS implements browser-side WebAuthn ceremonies without external scripts.
+//
+//go:embed security.js
+var SecurityJS []byte

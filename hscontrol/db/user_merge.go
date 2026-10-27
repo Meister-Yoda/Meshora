@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/juanfont/headscale/hscontrol/types"
 	"gorm.io/gorm"
@@ -35,6 +36,36 @@ func (hsdb *HSDatabase) MergeUsers(sourceID, targetID types.UserID, keepTargetPa
 			return nil, err
 		}
 
+		var secured int64
+
+		err = tx.Model(&types.UserPasskey{}).Where("user_id = ?", sourceID).Count(&secured).Error
+		if err != nil {
+			return nil, err
+		}
+
+		if secured > 0 {
+			return nil, ErrSecurityMerge
+		}
+
+		var security types.UserSecurity
+
+		err = tx.First(&security, "user_id = ?", sourceID).Error
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+
+		if len(security.EncryptedTOTPSecret) > 0 {
+			return nil, ErrSecurityMerge
+		}
+
+		sourcePolicy, policyErr := userAuthPolicy(tx, sourceID)
+		if policyErr != nil {
+			return nil, policyErr
+		}
+
+		if sourcePolicy.RequireStrongAuth || sourcePolicy.TOTPBypassedAt(time.Now()) || sourcePolicy.PasskeysSuspendedAt(time.Now()) {
+			return nil, ErrSecurityMerge
+		}
 		var accounts []types.UserAccount
 
 		query := tx.Where("user_id IN ?", []types.UserID{sourceID, targetID}).Order("user_id")

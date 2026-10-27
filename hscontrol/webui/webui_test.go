@@ -514,7 +514,7 @@ func TestCloseStopsDashboardCacheSweepers(t *testing.T) {
 	baseline := count()
 	h := New(nil, &types.Config{WebAdmin: types.WebAdminConfig{SessionTTL: time.Hour}}, nil)
 	t.Cleanup(h.Close)
-	require.Equal(t, baseline+3, count())
+	require.Equal(t, baseline+4, count())
 
 	h.Close()
 	h.Close()

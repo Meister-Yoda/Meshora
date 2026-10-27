@@ -119,6 +119,11 @@ func AdminLogin(info AdminLoginInfo) *elem.Element {
 			elem.A(attrs.Props{attrs.Href: strings.TrimSuffix(info.Base, "/admin") + "/?local=1"}, i18nText("Use local admin login"))))
 	}
 
+	card = append(card,
+		elem.Form(attrs.Props{attrs.Method: "POST", attrs.Action: info.Base + "/passkeys/login/begin", attrs.Class: "stack", "data-passkey-login": "", "data-finish": info.Base + "/passkeys/login/finish"}, adminCSRFInput(info.CSRFToken), elem.Button(attrs.Props{attrs.Type: submitType, attrs.Class: "btn btn-secondary btn-block", attrs.Disabled: "true"}, elem.Text("Mit Passkey anmelden"))),
+		elem.P(attrs.Props{attrs.ID: "passkey-status", attrs.Class: "muted", attrs.Role: statusClass, "aria-live": "polite"}),
+		elem.Script(attrs.Props{attrs.Src: info.Base + "/assets/security.js", "defer": "true"}))
+
 	return adminDocument(info.Base, "Sign in · Meshora", "auth",
 		elem.Main(attrs.Props{attrs.Class: "auth-card"}, card...),
 		elem.P(attrs.Props{attrs.Class: "auth-footer"}, poweredBy()...),
@@ -232,6 +237,7 @@ func (p AdminPageInfo) shell(title string, content ...elem.Node) *elem.Element {
 
 // AdminUserRow is one row of [AdminUsers].
 type AdminUserRow struct {
+	Security           *AdminUserSecurity
 	IsAdmin            bool
 	HasPassword        bool
 	MustChangePassword bool

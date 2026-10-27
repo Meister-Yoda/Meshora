@@ -231,21 +231,29 @@ func (h *Handler) oidcCallback(w http.ResponseWriter, r *http.Request) {
 		h.renderLogin(w, r, http.StatusForbidden, "", "Your Authentik account does not satisfy the configured admin groups and roles.")
 		return
 	}
-	sessionToken := randomToken()
-	h.sessions.Add(hashToken(sessionToken), &session{userID: types.UserID(user.ID), accountRevision: account.Revision, isAdmin: account.IsAdmin, mustChangePassword: account.MustChangePassword, oidcSubject: idToken.Subject, username: user.Username(), csrf: randomToken(), expires: idToken.Expiry})
-	h.setCookie(w, r, loginCSRFCookie, "", -1)
-	h.setCookie(w, r, sessionCookie, sessionToken, 0)
 
-	target := h.publicPath + "/account"
-	if account.IsAdmin {
-		target = h.publicPath + "/"
+	policy, err := h.state.UserAuthPolicy(types.UserID(user.ID))
+	if err != nil {
+		h.oidcRejected(w, r)
+		return
 	}
 
-	if account.MustChangePassword {
-		target = h.publicPath + "/account/password"
+	authentication := &session{oidcSubject: idToken.Subject, expires: idToken.Expiry}
+
+	if policy.RequireStrongAuth && !policy.TOTPBypassedAt(time.Now()) {
+		security, securityErr := h.state.UserSecurity(types.UserID(user.ID))
+		if securityErr != nil {
+			h.oidcRejected(w, r)
+			return
+		}
+
+		if len(security.EncryptedTOTPSecret) > 0 {
+			h.startSecondFactor(w, r, account, authentication)
+			return
+		}
 	}
 
-	http.Redirect(w, r, target, http.StatusSeeOther)
+	h.issueSession(w, r, account, user, authentication)
 }
 
 func (h *Handler) oidcRejected(w http.ResponseWriter, r *http.Request) {

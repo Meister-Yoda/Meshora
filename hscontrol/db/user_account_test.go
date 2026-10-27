@@ -1,9 +1,14 @@
 package db
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"testing"
+	"time"
 
 	"github.com/juanfont/headscale/hscontrol/types"
+	"github.com/pquerna/otp/totp"
 	"github.com/stretchr/testify/require"
 )
 
@@ -97,4 +102,122 @@ func TestUnifiedAccountExplicitMerge(t *testing.T) {
 
 	_, err = database.CreateUser(types.User{Name: "new", Email: "next@example.test"})
 	require.NoError(t, err)
+}
+
+func TestAccountSecurityEncryptionAndSingleUse(t *testing.T) {
+	database, err := newSQLiteTestDB()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = database.Close() })
+
+	user, err := database.CreateUser(types.User{Name: "secured", Email: "secured@example.test"})
+	require.NoError(t, err)
+
+	id := types.UserID(user.ID)
+	account, err := database.GetUserAccount(id)
+	require.NoError(t, err)
+
+	generated, err := totp.Generate(totp.GenerateOpts{Issuer: "Meshora test", AccountName: "test@example.test"})
+	require.NoError(t, err)
+
+	secret := generated.Secret()
+	key := bytes.Repeat([]byte{0x7b}, 32)
+	recovery := sha256.Sum256([]byte("UNIQUE-RECOVERY"))
+	hash := hex.EncodeToString(recovery[:])
+	require.ErrorIs(t, database.EnableUserTOTP(id, account.Revision, secret, nil, 100, []string{hash}), ErrSecurityKey)
+	require.NoError(t, database.EnableUserTOTP(id, account.Revision, secret, key, 100, []string{hash}))
+	stored, err := database.UserSecurity(id)
+	require.NoError(t, err)
+	require.NotContains(t, string(stored.EncryptedTOTPSecret), secret)
+	plaintext, err := OpenTOTP(stored, key)
+	require.NoError(t, err)
+	require.Equal(t, secret, plaintext)
+
+	_, err = OpenTOTP(stored, bytes.Repeat([]byte{0x7c}, 32))
+	require.Error(t, err)
+
+	changed := *stored
+	changed.UserID++
+	_, err = OpenTOTP(&changed, key)
+	require.Error(t, err)
+	current, err := database.GetUserAccount(id)
+	require.NoError(t, err)
+	require.Greater(t, current.Revision, account.Revision)
+	require.ErrorIs(t, database.ConsumeSecondFactor(id, current.Revision, 100, ""), ErrSecondFactor)
+	require.NoError(t, database.ConsumeSecondFactor(id, current.Revision, 101, ""))
+	require.ErrorIs(t, database.ConsumeSecondFactor(id, current.Revision, 101, ""), ErrSecondFactor)
+	require.NoError(t, database.ConsumeSecondFactor(id, current.Revision, -1, hash))
+	require.ErrorIs(t, database.ConsumeSecondFactor(id, current.Revision, -1, hash), ErrSecondFactor)
+	_, err = database.ResetUserPassword(id)
+	require.NoError(t, err)
+	require.ErrorIs(t, database.ConsumeSecondFactor(id, current.Revision, 102, ""), ErrAccountChanged)
+	still, err := database.UserSecurity(id)
+	require.NoError(t, err)
+	require.NotEmpty(t, still.EncryptedTOTPSecret)
+
+	target, err := database.CreateUser(types.User{Name: "merge-target", Email: "other@example.test"})
+	require.NoError(t, err)
+	_, err = database.MergeUsers(id, types.UserID(target.ID), true)
+	require.ErrorIs(t, err, ErrSecurityMerge)
+}
+
+func TestUserAuthPolicyRevocationAndRecoveryWindow(t *testing.T) {
+	database, err := newSQLiteTestDB()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = database.Close() })
+
+	actor, err := database.CreateUser(types.User{Name: "support-admin", Email: "support@example.test"})
+	require.NoError(t, err)
+	target, err := database.CreateUser(types.User{Name: "support-target", Email: "target@example.test"})
+	require.NoError(t, err)
+
+	actorID, targetID := types.UserID(actor.ID), types.UserID(target.ID)
+	actorAccount, err := database.GetUserAccount(actorID)
+	require.NoError(t, err)
+	require.ErrorIs(t, database.SetUserAuthPolicy(actorID, targetID, actorAccount.Revision, true, "keep", "keep", ""), ErrAuthPolicy)
+	require.NoError(t, database.SetUserAdmin(actorID, true))
+	actorAccount, err = database.GetUserAccount(actorID)
+	require.NoError(t, err)
+	before, err := database.GetUserAccount(targetID)
+	require.NoError(t, err)
+	require.ErrorIs(t, database.SetUserAuthPolicy(actorID, targetID, actorAccount.Revision, true, "365d", "keep", ""), ErrAuthPolicy)
+	unchanged, err := database.GetUserAccount(targetID)
+	require.NoError(t, err)
+	require.Equal(t, before.Revision, unchanged.Revision)
+	require.NoError(t, database.SetUserAuthPolicy(actorID, targetID, actorAccount.Revision, true, "15m", "1h", "Telefon verloren"))
+	policy, err := database.UserAuthPolicy(targetID)
+	require.NoError(t, err)
+	require.True(t, policy.RequireStrongAuth)
+	require.True(t, policy.TOTPBypassedAt(time.Now()))
+	require.True(t, policy.PasskeysSuspendedAt(time.Now()))
+	require.False(t, policy.TOTPBypassedAt(time.Now().Add(16*time.Minute)))
+	require.EqualValues(t, actorID, policy.UpdatedBy)
+
+	after, err := database.GetUserAccount(targetID)
+	require.NoError(t, err)
+	require.Greater(t, after.Revision, before.Revision)
+	require.ErrorIs(t, database.ConsumeSecondFactor(targetID, before.Revision, 1, ""), ErrAccountChanged)
+
+	until := *policy.TOTPSuspendedUntil
+
+	require.NoError(t, database.SetUserAuthPolicy(actorID, targetID, actorAccount.Revision, true, "keep", "keep", "Pflicht beibehalten"))
+	policy, err = database.UserAuthPolicy(targetID)
+	require.NoError(t, err)
+	require.True(t, until.Equal(*policy.TOTPSuspendedUntil))
+
+	account, err := database.GetUserAccount(targetID)
+	require.NoError(t, err)
+	generated, err := totp.Generate(totp.GenerateOpts{Issuer: "Test", AccountName: target.Email})
+	require.NoError(t, err)
+
+	key := bytes.Repeat([]byte{0x7a}, 32)
+	require.NoError(t, database.EnableUserTOTP(targetID, account.Revision, generated.Secret(), key, 1, nil))
+	policy, err = database.UserAuthPolicy(targetID)
+	require.NoError(t, err)
+	require.Nil(t, policy.TOTPSuspendedUntil, "finishing recovery must resume TOTP immediately")
+	require.True(t, policy.RequireStrongAuth)
+	require.True(t, policy.PasskeysSuspendedAt(time.Now()))
+	require.NoError(t, database.SetUserAuthPolicy(actorID, targetID, actorAccount.Revision, true, "resume", "resume", "Support beendet"))
+	policy, err = database.UserAuthPolicy(targetID)
+	require.NoError(t, err)
+	require.Nil(t, policy.PasskeysSuspendedUntil)
 }

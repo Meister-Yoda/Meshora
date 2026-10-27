@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/juanfont/headscale/hscontrol/types"
+	"github.com/pquerna/otp/totp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -32,6 +33,9 @@ func TestAdminOIDCFlow(t *testing.T) {
 	}{
 		{"success", http.StatusSeeOther},
 		{"no_admin", http.StatusSeeOther},
+		{"required_enrollment", http.StatusSeeOther},
+		{"required_totp", http.StatusSeeOther},
+		{"policy_revocation", http.StatusSeeOther},
 		{"new_verified", http.StatusSeeOther},
 		{"new_unverified_required", http.StatusForbidden},
 		{"new_unverified_allowed", http.StatusSeeOther},
@@ -63,6 +67,24 @@ func TestAdminOIDCFlow(t *testing.T) {
 				require.NoError(t, env.state.SetUserAdmin(types.UserID(user.ID), true))
 			}
 
+			if tc.name == "required_enrollment" || tc.name == "required_totp" {
+				actor, actorErr := env.state.AuthenticateUserAccount(testAdmin, testPassword)
+				require.NoError(t, actorErr)
+				require.NoError(t, env.state.SetUserAuthPolicy(types.UserID(actor.UserID), types.UserID(user.ID), actor.Revision, true, "keep", "keep", "OIDC Pflicht-Test"))
+
+				if tc.name == "required_totp" {
+					securityTestKey(t, env)
+					account, loadErr := env.state.UserAccount(types.UserID(user.ID))
+					require.NoError(t, loadErr)
+
+					generated, generateErr := totp.Generate(totp.GenerateOpts{Issuer: "Test", AccountName: user.Email})
+					require.NoError(t, generateErr)
+
+					encryptionKey, keyErr := env.handler.securityKey()
+					require.NoError(t, keyErr)
+					require.NoError(t, env.state.EnableUserTOTP(types.UserID(user.ID), account.Revision, generated.Secret(), encryptionKey, -1, []string{recoveryDigest("OIDC-TEST-RECOVERY-CODE")}))
+				}
+			}
 			var issuer string
 
 			provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -239,18 +261,36 @@ func TestAdminOIDCFlow(t *testing.T) {
 			}
 			require.Equal(t, tc.status, resp.StatusCode)
 
+			if tc.name == "required_totp" {
+				require.Equal(t, "/login/2fa", resp.Header.Get("Location"))
+
+				blocked, _ := env.get(env.client, "/admin/")
+				require.Equal(t, "/", blocked.Header.Get("Location"))
+
+				_, challengePage := env.get(env.client, "/login/2fa")
+				resp, _ = env.post(env.client, "/login/2fa", url.Values{"csrf_token": {csrfFrom(t, challengePage)}, "code": {"OIDC-TEST-RECOVERY-CODE"}})
+				require.Equal(t, http.StatusSeeOther, resp.StatusCode)
+			}
 			if tc.status == http.StatusSeeOther {
 				target := "/admin/"
 				if tc.name == "no_admin" || strings.HasPrefix(tc.name, "new_") {
 					target = "/admin/account"
 				}
 
+				if tc.name == "required_enrollment" {
+					target = "/admin/account/security"
+				}
 				assert.Equal(t, target, resp.Header.Get("Location"))
 				resp, page = env.get(env.client, target)
 				assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 				if tc.name == "no_admin" || strings.HasPrefix(tc.name, "new_") {
 					assert.Contains(t, page, "Mein Konto")
+				} else if tc.name == "required_enrollment" {
+					assert.Contains(t, page, "Sichere Anmeldung erforderlich")
+
+					blocked, _ := env.get(env.client, "/admin/users")
+					assert.Equal(t, "/admin/account/security", blocked.Header.Get("Location"))
 				} else {
 					assert.Contains(t, page, "Overview")
 				}
@@ -270,6 +310,21 @@ func TestAdminOIDCFlow(t *testing.T) {
 				resp, _ = env.post(env.client, "/admin/logout", url.Values{})
 				assert.Equal(t, http.StatusForbidden, resp.StatusCode)
 
+				if tc.name == "required_totp" {
+					assert.True(t, sess.strongAuth)
+				}
+
+				if tc.name == "required_enrollment" {
+					assert.True(t, sess.enrollmentOnly)
+				}
+
+				if tc.name == "policy_revocation" {
+					actor, actorErr := env.state.AuthenticateUserAccount(testAdmin, testPassword)
+					require.NoError(t, actorErr)
+					require.NoError(t, env.state.SetUserAuthPolicy(types.UserID(actor.UserID), types.UserID(user.ID), actor.Revision, true, "keep", "keep", "OIDC Sitzungsentzug"))
+					_, alive := env.handler.currentSession(req)
+					assert.False(t, alive, "enforcement must revoke existing OIDC sessions too")
+				}
 				sess.expires = time.Now().Add(-time.Second)
 				_, ok = env.handler.currentSession(req)
 				assert.False(t, ok)

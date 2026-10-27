@@ -28,6 +28,7 @@ func UserAccountPage(info AdminPageInfo, user AdminUserRow, nodes []AdminNodeRow
 		cardSection("Benutzeridentität", "Deine UID bleibt auch bei Änderungen an E-Mail oder Anmeldung erhalten.", detailList(detail("UID", elem.Text(strconv.FormatUint(uint64(user.ID), 10))), detail("Email", elem.Text(user.Email)))),
 		cardSection("Meine Geräte", "Nur deine benutzereigenen Geräte werden angezeigt.", dataTable("Meine Geräte", []string{"Gerät", "Adressen", accountStatusLabel}, rows)),
 		cardSection("Profil", "", postForm(info, "/account/profile", "action-form", textField("Display name", "display_name", user.DisplayName, false), submitButton("Profil speichern", "btn-primary"))),
+		cardSection("Sicherheit", "Authenticator-App, Wiederherstellungscodes und Passkeys verwalten.", linkButton(info.Base+"/account/security", "Sicherheitseinstellungen", "btn-secondary")),
 		cardSection("Passwort", "Ein lokales Passwort und OIDC gehören zu derselben UID.", linkButton(info.Base+"/account/password", "Passwort ändern", "btn-secondary")),
 	}
 	if admin {

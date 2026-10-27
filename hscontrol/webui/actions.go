@@ -173,6 +173,11 @@ func (h *Handler) userDetail(w http.ResponseWriter, r *http.Request) {
 		row.MustChangePassword = account.MustChangePassword
 	}
 
+	row.Security, err = h.adminUserSecurity(r, types.UserID(id))
+	if err != nil {
+		serverError(w, "user authentication policy", err)
+		return
+	}
 	writeHTML(w, http.StatusOK, templates.AdminUserDetail(h.pageInfo(r), row, nodes, h.zoneAssignment(types.UserID(id), 0)).Render())
 }
 
