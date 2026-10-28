@@ -62,3 +62,16 @@
  document.getElementById("email-confirm-submit").disabled = false;
  document.getElementById("email-confirm-status").textContent = document.documentElement.lang === "de" ? "Du kannst deine neue E-Mail-Adresse jetzt bestätigen." : "You can now confirm your new email address.";
 })();
+
+;(() => {
+ const transport = document.getElementById("mail-transport");
+ if (!transport) return;
+ const panels = document.querySelectorAll("[data-mail-transport]");
+ const update = () => {
+  for (const panel of panels) {
+   panel.hidden = panel.dataset.mailTransport !== transport.value;
+  }
+ };
+ transport.addEventListener("change", update);
+ update();
+})();

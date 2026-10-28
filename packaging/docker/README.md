@@ -1,10 +1,15 @@
 # Meshora starten und im Browser einrichten
 
-## Meshora v0.2.1-rc.5 (28. Oktober 2026)
+## Meshora v0.2.1-rc.6 (28. Oktober 2026)
 
 Release Candidate des aktuellen main-Stands. WireGuard-Gateway-Code ist
 nicht enthalten; der Prototyp bleibt auf dem separaten lokalen Branch.
 
+- Mail-Einstellungen zeigen nur die gewählte Versandart. Optionale JMAP-IDs
+  und technische Details sind einklappbar; Eingaben bleiben beim Wechsel erhalten.
+- OIDC-Login mit lokalem Testanbieter erneut geprüft, einschließlich PKCE,
+  Replay-Schutz, Tokenprüfung, Rollen/Gruppen und Zwei-Faktor-Vorgaben.
+  Redirect-URLs unverändert; echte Authentik-Abnahme steht noch aus.
 - Persönliches Menü mit Profil, Geräten, E-Mail-Adresse, Sicherheit und Passwort.
   Admins finden die Kontoseiten im bestehenden Hauptmenü.
 - Lokale Nutzer können eine Anmeldeadresse ergänzen oder ändern. Ein
@@ -21,8 +26,8 @@ nicht enthalten; der Prototyp bleibt auf dem separaten lokalen Branch.
 Vor dem Update Konfiguration und Datenbank sichern. Zum expliziten RC-Test:
 
 ```sh
-MESHORA_VERSION=v0.2.1-rc.5 docker compose pull
-MESHORA_VERSION=v0.2.1-rc.5 docker compose up -d
+MESHORA_VERSION=v0.2.1-rc.6 docker compose pull
+MESHORA_VERSION=v0.2.1-rc.6 docker compose up -d
 ```
 
 Der RC verschiebt latest nicht. Die neue Datenbankmigration

@@ -52,22 +52,37 @@ func MailSettingsPage(info AdminPageInfo, cfg MailSettings, proof *AdminUserSecu
 		fields := []elem.Node{
 			zoneSelect("Versandart", "transport", "mail-transport", []AdminChoice{{Value: "smtp", Label: "SMTP"}, {Value: "jmap", Label: "JMAP"}}, []string{cfg.Transport}, false),
 			textField("Absenderadresse", "from", cfg.From, true),
-			elem.H3(nil, elem.Text("JMAP")),
-			elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text("Nur bei Versandart JMAP erforderlich. Session- und API-Adresse müssen HTTPS und denselben Host einschließlich Port verwenden. Ein beschreibbarer Entwürfe-Ordner und eine passende Absenderidentität werden benötigt.")),
-			textField("JMAP-Session-URL", "jmap_session_url", cfg.JMAPSessionURL, false),
-			textField("JMAP-Konto-ID (optional)", "jmap_account_id", cfg.JMAPAccountID, false),
-			textField("JMAP-Identitäts-ID (optional)", "jmap_identity_id", cfg.JMAPIdentityID, false),
-			textField("JMAP-Benutzername (optional)", "jmap_username", cfg.JMAPUsername, false),
-			elem.Div(attrs.Props{attrs.Class: "field"}, elem.Label(attrs.Props{attrs.For: "jmap-token"}, elem.Text("JMAP-Token oder Passwort")), elem.Input(attrs.Props{attrs.ID: "jmap-token", attrs.Name: "jmap_token", attrs.Type: accountPasswordField, attrs.Autocomplete: "new-password", "aria-describedby": "jmap-token-hint"}), elem.P(attrs.Props{attrs.ID: "jmap-token-hint", attrs.Class: "muted"}, elem.Text(jmapHint))),
-			elem.H3(nil, elem.Text("SMTP")),
-			elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text("Nur bei Versandart SMTP erforderlich.")),
-			textField("SMTP-Host", "host", cfg.Host, false),
-			textField("SMTP-Port", "port", strconv.Itoa(cfg.Port), false),
-			zoneSelect("Verschlüsselung", "tls_mode", "smtp-tls-mode", []AdminChoice{{Value: "starttls", Label: "STARTTLS (meist Port 587)"}, {Value: "tls", Label: "TLS (meist Port 465)"}}, []string{cfg.TLSMode}, false),
-			textField("SMTP-Benutzername", "username", cfg.Username, false),
-			elem.Div(attrs.Props{attrs.Class: "field"}, elem.Label(attrs.Props{attrs.For: "smtp-password"}, elem.Text("SMTP-Passwort")), elem.Input(attrs.Props{attrs.ID: "smtp-password", attrs.Name: accountPasswordField, attrs.Type: accountPasswordField, attrs.Autocomplete: "new-password", "aria-describedby": "smtp-password-hint"}), elem.P(attrs.Props{attrs.ID: "smtp-password-hint", attrs.Class: "muted"}, i18nText(hint))),
+			elem.Div(attrs.Props{"data-mail-transport": "smtp", "role": "group", "aria-labelledby": "smtp-heading"},
+				elem.H3(attrs.Props{attrs.ID: "smtp-heading"}, elem.Text("SMTP-Verbindung")),
+				textField("Server", "host", cfg.Host, false),
+				zoneSelect("Verschlüsselung", "tls_mode", "smtp-tls-mode", []AdminChoice{{Value: "starttls", Label: "STARTTLS (meist Port 587)"}, {Value: "tls", Label: "TLS (meist Port 465)"}}, []string{cfg.TLSMode}, false),
+				textField("Port", "port", strconv.Itoa(cfg.Port), false),
+				textField("Benutzername", "username", cfg.Username, false),
+				elem.Div(attrs.Props{attrs.Class: "field"},
+					elem.Label(attrs.Props{attrs.For: "smtp-password"}, elem.Text("SMTP-Passwort")),
+					elem.Input(attrs.Props{attrs.ID: "smtp-password", attrs.Name: accountPasswordField, attrs.Type: accountPasswordField, attrs.Autocomplete: "new-password", "aria-describedby": "smtp-password-hint"}),
+					elem.P(attrs.Props{attrs.ID: "smtp-password-hint", attrs.Class: "muted"}, i18nText(hint))),
+			),
+			elem.Div(attrs.Props{"data-mail-transport": "jmap", "role": "group", "aria-labelledby": "jmap-heading"},
+				elem.H3(attrs.Props{attrs.ID: "jmap-heading"}, elem.Text("JMAP-Verbindung")),
+				textField("Session-URL", "jmap_session_url", cfg.JMAPSessionURL, false),
+				elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text("Zum Beispiel https://mail.example.org/.well-known/jmap")),
+				elem.Div(attrs.Props{attrs.Class: "field"},
+					elem.Label(attrs.Props{attrs.For: "jmap-token"}, elem.Text("JMAP-Token oder Passwort")),
+					elem.Input(attrs.Props{attrs.ID: "jmap-token", attrs.Name: "jmap_token", attrs.Type: accountPasswordField, attrs.Autocomplete: "new-password", "aria-describedby": "jmap-token-hint"}),
+					elem.P(attrs.Props{attrs.ID: "jmap-token-hint", attrs.Class: "muted"}, elem.Text(jmapHint))),
+				textField("Benutzername (nur für HTTP Basic)", "jmap_username", cfg.JMAPUsername, false),
+				elem.Details(nil,
+					elem.Summary(nil, elem.Text("Erweiterte Einstellungen")),
+					elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text("Leer lassen, um das primäre Versandkonto und die passende Absenderidentität automatisch zu verwenden.")),
+					textField("Konto-ID", "jmap_account_id", cfg.JMAPAccountID, false),
+					textField("Identitäts-ID", "jmap_identity_id", cfg.JMAPIdentityID, false),
+					elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text("Session- und API-Adresse müssen HTTPS und denselben Host einschließlich Port verwenden. Der Server benötigt einen beschreibbaren Entwürfe-Ordner und eine passende Absenderidentität."))),
+			),
 		}
+
 		if proof.NeedPassword {
+			fields = append(fields, elem.H3(nil, elem.Text("Änderung bestätigen")))
 			fields = append(fields, securityProof(proof.NeedCode, "smtp-settings")...)
 		}
 
@@ -80,5 +95,6 @@ func MailSettingsPage(info AdminPageInfo, cfg MailSettings, proof *AdminUserSecu
 	}
 
 	return info.shell("Settings", pageHead("Mailversand", "Bestätigungslinks für E-Mail-Adressen versenden."),
-		cardSection("Mailversand", hint, form))
+		cardSection("Mailversand", hint, form),
+		elem.Script(attrs.Props{attrs.Src: info.RootPath("/assets/security.js"), "defer": "true"}))
 }

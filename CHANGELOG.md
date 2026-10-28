@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## Meshora v0.2.1-rc.6 (2026-10-28)
+
+- Simplify mail settings to display the selected transport and collapse advanced JMAP options; preserve values when switching transports.
+- Revalidate OIDC login, account linking, token checks, browser binding, replay protection and second-factor enforcement with local provider race tests. OIDC callback URLs remain unchanged; live Authentik validation remains outstanding.
+
 ## Meshora v0.2.1-rc.5 (2026-10-28)
 
 - Split personal account pages into profile, devices, email, security and password sections. Integrate personal navigation into the existing administrator menu and reuse the responsive menu for regular users.

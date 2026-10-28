@@ -271,3 +271,21 @@ Prüfsummen und Compose-Pakete sind öffentlich. GHCR-Tags
 Offen bleiben echter Mailanbieter-Versand, ARM64-Laufzeitabnahme und die
 bereits dokumentierte vollständige Lint-Baseline. Datenbank und Konfiguration
 vor dem Upgrade sichern; RC.5 ergänzt die Migration für E-Mail-Bestätigungen.
+
+## 8. Übersichtlicher Mailversand
+
+**Status:** Lokal umgesetzt und geprüft · Veröffentlichung offen.
+
+Mailformular auf gewählte Versandart konzentrieren. SMTP-/JMAP-Felder
+werden passend zur Auswahl angezeigt; Werte der anderen Versandart bleiben
+beim Speichern erhalten. Optionale JMAP-IDs und Protokollvoraussetzungen
+stehen unter „Erweiterte Einstellungen“. Ohne JavaScript bleiben beide
+Bereiche bedienbar. Passwortbestätigung ist vom Mailzugang getrennt.
+
+Validierung: Chromium auf Desktop und Mobilgerät; Umschalten der Versandart,
+eingeklappte Optionen und Werterhalt geprüft. Mail-Einstellungstests bestanden,
+Lint der Template-Änderung 0 Befunde, git diff --check bestanden.
+Für v0.2.1-rc.6 freigegeben; Veröffentlichung läuft.
+OIDC-Prüfung: Lokale Race-Tests für WebUI- und Geräte-Anmeldung bestanden.
+PKCE, Browserbindung, Replay-Schutz, Tokenprüfung, Rollen/Gruppen und
+Zwei-Faktor-Vorgaben geprüft; echte Authentik-Abnahme steht aus.
