@@ -212,11 +212,11 @@ Nutzeradressen angeschrieben.
 **Folgepunkt:** Sobald eine Benutzergruppenverwaltung eingeführt wird,
 E-Mail-Freigaben auch auf Gruppenebene ergänzen und Vorrangregeln festlegen.
 Keine neue Gruppenverwaltung im Rahmen dieses Arbeitspakets.
-**Veröffentlichung:** Für v0.2.1-rc.5 freigegeben; Veröffentlichung läuft.
+**Veröffentlichung:** Veröffentlicht als v0.2.1-rc.5, Commit 565b3219.
 
 ## 6. Persönliche Seiten mit gemeinsamem Menü
 
-**Status:** In Arbeit · lokal umgesetzt, Veröffentlichung offen · **Stand:** 28. Oktober 2026.
+**Status:** Veröffentlicht als v0.2.1-rc.5 · **Stand:** 28. Oktober 2026.
 
 Die lange Kontoseite ist auf Profil, eigene Geräte, E-Mail-Adresse,
 Sicherheit und Passwort verteilt. Normale Nutzer erhalten ausschließlich
@@ -232,11 +232,11 @@ Admin-/Nutzerrollen, URL-Präfixe und eingeschränkte Ersteinrichtung.
 Chromium-Prüfung für Desktop, Mobilgeräte und Dunkelansicht sowie
 E-Mail-Bestätigung ist bestanden. Lint der Änderungen meldet 0 Befunde;
 git diff --check und Tastaturzugriff auf alle Admin-Einträge sind bestanden.
-Für v0.2.1-rc.5 freigegeben; Veröffentlichung läuft.
+Veröffentlicht als v0.2.1-rc.5, Commit 565b3219.
 
 ## 7. JMAP als Alternative zum SMTP-Mailversand
 
-**Status:** Lokal umgesetzt und geprüft · Veröffentlichung offen · **Stand:** 28. Oktober 2026.
+**Status:** Veröffentlicht als v0.2.1-rc.5 · **Stand:** 28. Oktober 2026.
 
 Vereinbart: JMAP zusätzlich zu SMTP für Bestätigungslinks. Admins wählen die
 Versandart unter Mailversand. Getrennte Zugangsdaten, HTTPS-Zertifikatsprüfung,
@@ -251,4 +251,23 @@ fremde API-Hosts, Weiterleitungen, ungültiges Zertifikat, Abbruch und
 Antwortgrößenlimit bestanden. Vollständige Race-Tests für webui/templates/types,
 Gesamtbuild und Chromium-Prüfung auf Desktop/Mobil bestanden. Gespeicherte
 SMTP-/JMAP-Geheimnisse bleiben beim Wechsel erhalten und werden nicht ausgegeben.
-Kein realer JMAP-Anbieter konfiguriert. Für v0.2.1-rc.5 freigegeben; Veröffentlichung läuft.
+Kein realer JMAP-Anbieter konfiguriert. Veröffentlicht als v0.2.1-rc.5, Commit 565b3219.
+
+
+## RC.5-Veröffentlichung (28. Oktober 2026)
+
+v0.2.1-rc.5 auf main, Commit `565b3219`, ohne WireGuard-Gateway.
+[Release](https://github.com/Meister-Yoda/Meshora/releases/tag/v0.2.1-rc.5)
+und [Release-Workflow](https://github.com/Meister-Yoda/Meshora/actions/runs/40741999810).
+
+GitHub-Release-Prüfungen (Race-Tests und Gesamtbuild), AMD64-/ARM64-Builds
+sowie AMD64-Start-/Health-/Setup-Test bestanden. Release-Downloads,
+Prüfsummen und Compose-Pakete sind öffentlich. GHCR-Tags
+`v0.2.1-rc.5` und `RC` enthalten beide Architekturen und denselben Digest:
+`sha256:ef220d989375a28ad1c658a75556e90b72d787da79c06343414b31518418cdce`.
+`latest` bleibt unverändert auf dem stabilen v0.2.0-Digest
+`sha256:f9ccb8f2b14fb691d517724f9669a059bdd2a6b4a33fa906ec65a53948bf37c0`.
+
+Offen bleiben echter Mailanbieter-Versand, ARM64-Laufzeitabnahme und die
+bereits dokumentierte vollständige Lint-Baseline. Datenbank und Konfiguration
+vor dem Upgrade sichern; RC.5 ergänzt die Migration für E-Mail-Bestätigungen.
