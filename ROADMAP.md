@@ -285,7 +285,22 @@ Bereiche bedienbar. Passwortbestätigung ist vom Mailzugang getrennt.
 Validierung: Chromium auf Desktop und Mobilgerät; Umschalten der Versandart,
 eingeklappte Optionen und Werterhalt geprüft. Mail-Einstellungstests bestanden,
 Lint der Template-Änderung 0 Befunde, git diff --check bestanden.
-Für v0.2.1-rc.6 freigegeben; Veröffentlichung läuft.
+Veröffentlicht als v0.2.1-rc.6, Commit 31daceef.
 OIDC-Prüfung: Lokale Race-Tests für WebUI- und Geräte-Anmeldung bestanden.
 PKCE, Browserbindung, Replay-Schutz, Tokenprüfung, Rollen/Gruppen und
 Zwei-Faktor-Vorgaben geprüft; echte Authentik-Abnahme steht aus.
+
+
+## RC.6-Veröffentlichung (28. Oktober 2026)
+
+[Release v0.2.1-rc.6](https://github.com/Meister-Yoda/Meshora/releases/tag/v0.2.1-rc.6),
+Commit `31daceef`, ohne WireGuard-Gateway.
+[Release-Workflow](https://github.com/Meister-Yoda/Meshora/actions/runs/40745655901)
+erfolgreich: Release-Race-Tests, Gesamtbuild, AMD64-/ARM64-Container,
+AMD64-Start-/Health-/Setup-Test und öffentliche Downloads inklusive
+Prüfsummen und Compose-Pakete.
+GHCR `v0.2.1-rc.6` und `RC`:
+`sha256:d22cbce6d1bf08fbdea40d70860e772d366e4c7868b0fccc188308c62717d76a`.
+`latest` unverändert:
+`sha256:f9ccb8f2b14fb691d517724f9669a059bdd2a6b4a33fa906ec65a53948bf37c0`.
+Echte Authentik-/Mailanbieter-Abnahme und ARM64-Laufzeit bleiben offen.
