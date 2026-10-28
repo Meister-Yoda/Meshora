@@ -51,3 +51,14 @@
   });
  }
 })();
+
+;(() => {
+ const field = document.getElementById("email-confirm-token");
+ if (!field) return;
+ const token = new URLSearchParams(window.location.hash.slice(1)).get("token");
+ window.history.replaceState(null, "", window.location.pathname + window.location.search);
+ if (!token || !/^[A-Za-z0-9_-]{32,128}$/.test(token)) return;
+ field.value = token;
+ document.getElementById("email-confirm-submit").disabled = false;
+ document.getElementById("email-confirm-status").textContent = document.documentElement.lang === "de" ? "Du kannst deine neue E-Mail-Adresse jetzt bestätigen." : "You can now confirm your new email address.";
+})();

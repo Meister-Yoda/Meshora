@@ -29,6 +29,9 @@ func securityCodeField(label, suffix string) elem.Node {
 }
 
 func UserSecurityPage(info AdminPageInfo, hasPassword, totpEnabled, passkeysAvailable bool, keys []types.UserPasskey, policy *types.UserAuthPolicy, enrollmentOnly bool) *elem.Element {
+	if enrollmentOnly {
+		info.AccountRestricted = true
+	}
 	content := []elem.Node{backLink(info.RootPath("/account"), "Mein Konto"), pageHead("Sicherheit", "Schütze deine lokale Anmeldung mit einer Authenticator-App oder Passkeys.")}
 	if enrollmentOnly {
 		content = content[1:]
@@ -178,7 +181,24 @@ func adminUserAuthentication(info AdminPageInfo, path string, security *AdminUse
 
 	fields = append(fields, submitButton("Anmeldesicherheit speichern", "btn-primary"))
 
+	emailProps := attrs.Props{attrs.Type: authPolicyCheckboxType, attrs.Name: "allow_email_change"}
+	if !security.Policy.EmailChangeBlocked {
+		emailProps[attrs.Checked] = "true"
+	}
+
+	emailFields := []elem.Node{elem.Label(attrs.Props{attrs.Class: "check"}, elem.Input(emailProps), elem.Span(nil, elem.Text("E-Mail selbst hinzufügen oder ändern erlauben")))}
+	if security.NeedPassword {
+		emailFields = append(emailFields, securityProof(security.NeedCode, "email-policy")...)
+	}
+
+	if security.NeedOIDCLogin {
+		emailFields = append(emailFields, elem.P(nil, elem.Text("Bitte zuerst erneut ueber OIDC anmelden.")))
+	}
+
+	emailFields = append(emailFields, submitButton("E-Mail-Freigabe speichern", "btn-secondary"))
+	emailForm := postForm(info, path+"/email-policy", "action-form", emailFields...)
+
 	return cardSection("Anmeldesicherheit", "Jede Änderung beendet sofort alle WebUI-Sitzungen dieses Nutzers. Ohne eingerichteten Faktor erlaubt die Pflicht zunächst nur die Einrichtung. Eine 2FA-Ausnahme erlaubt bis zu ihrem Ablauf eine Anmeldung ohne zweiten Faktor; gespeicherte Schlüssel werden nicht gelöscht.",
 		detailList(detail("Eingerichtet", elem.Text(status+" · "+strconv.Itoa(security.PasskeyCount)+passkeyLabel)), detail("2FA-Ausnahme", elem.Text(adminPauseStatus(security.Policy.TOTPSuspendedUntil))), detail("Passkey-Anmeldung", elem.Text(adminPauseStatus(security.Policy.PasskeysSuspendedUntil)))),
-		postForm(info, path+"/auth-policy", "action-form", fields...))
+		postForm(info, path+"/auth-policy", "action-form", fields...), emailForm)
 }

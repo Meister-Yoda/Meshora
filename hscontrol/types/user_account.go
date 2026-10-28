@@ -37,6 +37,7 @@ type UserPasskey struct {
 
 // UserAuthPolicy keeps mandatory authentication and support exceptions separate from credentials.
 type UserAuthPolicy struct {
+	EmailChangeBlocked     bool
 	UserID                 uint64 `gorm:"primaryKey;autoIncrement:false"`
 	RequireStrongAuth      bool
 	TOTPSuspendedUntil     *time.Time
@@ -52,4 +53,15 @@ func (p UserAuthPolicy) TOTPBypassedAt(now time.Time) bool {
 
 func (p UserAuthPolicy) PasskeysSuspendedAt(now time.Time) bool {
 	return p.PasskeysSuspendedUntil != nil && now.Before(*p.PasskeysSuspendedUntil)
+}
+
+// UserEmailChange stores only the digest of a short-lived, single-use proof.
+// The requested address is not an identity until the proof is consumed.
+type UserEmailChange struct {
+	UserID          uint64 `gorm:"primaryKey;autoIncrement:false"`
+	Email           string
+	TokenHash       string `json:"-"`
+	AccountRevision uint64
+	RequestedAt     time.Time
+	ExpiresAt       time.Time
 }

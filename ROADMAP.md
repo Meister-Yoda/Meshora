@@ -181,3 +181,74 @@ latest blieb auf sha256:f9ccb8f2b14fb691d517724f9669a059bdd2a6b4a33fa906ec65a539
 Separater Nix-Flake-Lint meldet 39 Stil-/Komplexitaetsbefunde (auch beim
 vorherigen RC fehlgeschlagen); nicht als vollstaendig gruene CI bewerten.
 Weitere Server-Tests laufen zum Zeitpunkt dieser Aufzeichnung noch.
+
+## 5. Eigene E-Mail-Anmeldeadressen mit Bestätigung
+
+**Status:** In Arbeit · **Priorität:** Hoch · **Stand:** 28. Oktober 2026.
+
+Normalen Nutzern das Hinzufügen und Ändern ihrer Anmeldeadresse ermöglichen.
+Admins können dies je Benutzer unter Anmeldesicherheit sperren. SMTP-
+Einstellungen sind unter Einstellungen → Mailversand vorgesehen; TLS und
+Zertifikatsprüfung sind verbindlich. Zugangsdaten werden nicht erneut angezeigt.
+
+**Umsetzung:** Neue append-only Migration 202610281800-user-email-changes.
+Neue Adressen bleiben bis zum einmaligen, 20 Minuten gültigen Nachweis
+separat. Nur der Token-Digest wird gespeichert. UID und Geräte bleiben
+erhalten; Bestätigung beendet bestehende Sitzungen. Sperren und
+Kontorevisionsänderungen verhindern auch das Verwenden bereits versandter
+Links. Fremde Tokens, Konflikte, Ablauf und parallele Bestätigungen werden
+serverseitig behandelt. OIDC-Adressen bleiben beim Anbieter verwaltet.
+
+**Validierung:** Lokale Datenbank-/HTTP-Tests, echter SMTP-Verkehr über
+STARTTLS und direktes TLS, Ablehnung nicht vertrauenswürdiger Zertifikate,
+echte PostgreSQL-Bestätigung sowie Chromium-Prüfung für Desktop/Mobil und
+Dunkelansicht. Vollständige Tests der Pakete db, webui, templates, types
+und state, gezielte Race-Tests, Gesamtbuild und Lint der Änderungen
+(0 Befunde) bestanden. Upgrade einer bestehenden Sicherheitsrichtlinie
+und parallele Bestätigungen sind ebenfalls geprüft.
+Ein realer ausgehender Mailserver ist nicht konfiguriert; keine echten
+Nutzeradressen angeschrieben.
+
+**Folgepunkt:** Sobald eine Benutzergruppenverwaltung eingeführt wird,
+E-Mail-Freigaben auch auf Gruppenebene ergänzen und Vorrangregeln festlegen.
+Keine neue Gruppenverwaltung im Rahmen dieses Arbeitspakets.
+**Veröffentlichung:** Für v0.2.1-rc.5 freigegeben; Veröffentlichung läuft.
+
+## 6. Persönliche Seiten mit gemeinsamem Menü
+
+**Status:** In Arbeit · lokal umgesetzt, Veröffentlichung offen · **Stand:** 28. Oktober 2026.
+
+Die lange Kontoseite ist auf Profil, eigene Geräte, E-Mail-Adresse,
+Sicherheit und Passwort verteilt. Normale Nutzer erhalten ausschließlich
+ihr Kontomenü. Admins erhalten dieselben persönlichen Einträge als Gruppe
+„Mein Konto“ im vorhandenen Menü neben Netzwerk und Verwaltung.
+Die bestehende mobile Navigation und die vorhandenen Menü-Styles werden
+wiederverwendet. Verpflichtende Passwort-/Faktoreinrichtung bleibt ohne
+Bereichsmenü; Zugriffs- und Eigentumsprüfungen bleiben serverseitig erhalten.
+
+**Validierung:** Vollständige Race-Tests für webui/templates und Gesamtbuild
+bestanden. Gezielte Tests prüfen getrennte Seiten, aktive Einträge,
+Admin-/Nutzerrollen, URL-Präfixe und eingeschränkte Ersteinrichtung.
+Chromium-Prüfung für Desktop, Mobilgeräte und Dunkelansicht sowie
+E-Mail-Bestätigung ist bestanden. Lint der Änderungen meldet 0 Befunde;
+git diff --check und Tastaturzugriff auf alle Admin-Einträge sind bestanden.
+Für v0.2.1-rc.5 freigegeben; Veröffentlichung läuft.
+
+## 7. JMAP als Alternative zum SMTP-Mailversand
+
+**Status:** Lokal umgesetzt und geprüft · Veröffentlichung offen · **Stand:** 28. Oktober 2026.
+
+Vereinbart: JMAP zusätzlich zu SMTP für Bestätigungslinks. Admins wählen die
+Versandart unter Mailversand. Getrennte Zugangsdaten, HTTPS-Zertifikatsprüfung,
+keine Weiterleitungen und keine Weitergabe an fremde API-Hosts. Versandkonto,
+passende Absenderidentität und beschreibbarer Entwürfe-Ordner werden geprüft.
+API-Token per Bearer oder Benutzername/Token per HTTP Basic; Geheimnisdateien
+werden unterstützt. Keine zusätzliche Datenbankmigration oder Abhängigkeit.
+
+**Validierung:** Lokale TLS-Protokolltests für Versand, Basic/Bearer,
+fehlende Rechte/Funktionen, abweichenden Absender, Create-/Submission-Fehler,
+fremde API-Hosts, Weiterleitungen, ungültiges Zertifikat, Abbruch und
+Antwortgrößenlimit bestanden. Vollständige Race-Tests für webui/templates/types,
+Gesamtbuild und Chromium-Prüfung auf Desktop/Mobil bestanden. Gespeicherte
+SMTP-/JMAP-Geheimnisse bleiben beim Wechsel erhalten und werden nicht ausgegeben.
+Kein realer JMAP-Anbieter konfiguriert. Für v0.2.1-rc.5 freigegeben; Veröffentlichung läuft.

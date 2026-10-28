@@ -55,7 +55,7 @@ func TestUnifiedUserFirstLoginAndPrivilegeIsolation(t *testing.T) {
 	login, _ = env.login(client, user.Email, "new personal password")
 	require.Equal(t, "/account", login.Header.Get("Location"))
 
-	_, page = env.get(client, "/account")
+	_, page = env.get(client, "/account/devices")
 	require.Contains(t, page, "my-device")
 	require.NotContains(t, page, "foreign-device")
 	require.NotContains(t, page, `href="/admin/users"`)
@@ -96,4 +96,44 @@ func TestUnifiedMergePreservesDeviceOwnership(t *testing.T) {
 	require.Equal(t, node.ID, transferred.ID())
 	_, err = env.state.GetUserByID(types.UserID(source.ID))
 	require.Error(t, err)
+}
+
+func TestPersonalMenuSeparatesPagesAndKeepsAdminNavigation(t *testing.T) {
+	env := newTestEnv(t)
+	enableTestEmail(env)
+	client, id, _ := emailUser(t, env)
+	user, err := env.state.GetUserByID(id)
+	require.NoError(t, err)
+
+	own := env.state.CreateRegisteredNodeForTest(user, "personal-menu-device")
+	env.state.PutNodeInStoreForTest(*own)
+	_, profile := env.get(client, "/account")
+	require.Contains(t, profile, `action="/account/profile"`)
+	require.NotContains(t, profile, `id="account-email"`)
+	require.NotContains(t, profile, "personal-menu-device")
+	require.NotContains(t, profile, `href="/admin/users"`)
+
+	for _, path := range []string{"/account/devices", "/account/email", "/account/security", "/account/password"} {
+		require.Contains(t, profile, `href="`+path+`"`)
+	}
+
+	_, devices := env.get(client, "/account/devices")
+	require.Contains(t, devices, "personal-menu-device")
+	require.NotContains(t, devices, `action="/account/profile"`)
+	require.Regexp(t, `<a[^>]*aria-current="page"[^>]*href="/account/devices"`, devices)
+
+	_, email := env.get(client, "/account/email")
+	require.Contains(t, email, `id="account-email"`)
+	require.NotContains(t, email, "personal-menu-device")
+	require.Regexp(t, `<a[^>]*aria-current="page"[^>]*href="/account/email"`, email)
+	env.signedIn()
+
+	for _, path := range []string{"/account", "/account/email", "/admin/"} {
+		response, page := env.get(env.client, path)
+		require.Equal(t, http.StatusOK, response.StatusCode)
+		require.Contains(t, page, `href="/admin/zones"`)
+		require.Contains(t, page, `href="/admin/users"`)
+		require.Contains(t, page, `href="/account/devices"`)
+		require.Contains(t, page, `href="/account/email"`)
+	}
 }

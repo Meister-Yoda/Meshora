@@ -7,6 +7,7 @@ import (
 
 	"github.com/juanfont/headscale/hscontrol/assets"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMeterWidthClass(t *testing.T) {
@@ -283,4 +284,19 @@ func TestAccountMenuGroupsLanguageAndSignOut(t *testing.T) {
 	assert.Contains(t, page, `value="csrf-test"`)
 	assert.NotContains(t, page, `class="language-switcher"`)
 	assert.Contains(t, AdminLogin(AdminLoginInfo{Base: "/admin"}).Render(), `class="language-switcher"`)
+}
+
+func TestPersonalMenuPreservesURLPrefixAndRestrictedFlows(t *testing.T) {
+	info := AdminPageInfo{Base: "/mesh/admin", Username: "user", CSRFToken: "test", AccountSection: AccountEmail}
+	body := UserEmailPage(info, AdminUserRow{}, UserEmailState{Allowed: true, Available: true, NeedPassword: true}).Render()
+	require.Contains(t, body, `href="/mesh/account/devices"`)
+	require.Contains(t, body, `href="/mesh/account/email"`)
+	require.NotContains(t, body, `href="/mesh/admin/users"`)
+	require.Regexp(t, `<a[^>]*aria-current="page"[^>]*href="/mesh/account/email"`, body)
+
+	info.AccountRestricted = true
+	restricted := UserPasswordPage(info, true, false).Render()
+	require.NotContains(t, restricted, `class="sidebar"`)
+	require.NotContains(t, restricted, `class="mobile-navigation"`)
+	require.Contains(t, restricted, `action="/mesh/account/password"`)
 }

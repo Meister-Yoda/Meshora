@@ -299,6 +299,7 @@ WHERE tags IS NOT NULL AND tags != '[]' AND tags != '' AND tags != 'null'
 				Rollback: func(db *gorm.DB) error { return nil },
 			},
 			{ID: "202610270200-user-auth-policy", Migrate: ensureUserAuthPolicy, Rollback: func(db *gorm.DB) error { return nil }},
+			{ID: "202610281800-user-email-changes", Migrate: ensureUserEmailChanges, Rollback: func(db *gorm.DB) error { return nil }},
 		},
 	)
 
@@ -371,7 +372,12 @@ WHERE tags IS NOT NULL AND tags != '[]' AND tags != '' AND tags != 'null'
 			return err
 		}
 
-		return ensureUserAuthPolicy(tx)
+		err = ensureUserAuthPolicy(tx)
+		if err != nil {
+			return err
+		}
+
+		return ensureUserEmailChanges(tx)
 	})
 
 	err = runMigrations(cfg.Database, dbConn, migrations)

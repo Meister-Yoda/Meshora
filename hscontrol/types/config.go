@@ -152,6 +152,7 @@ type Config struct {
 
 	OIDC OIDCConfig
 
+	Mail     MailConfig
 	WebAdmin WebAdminConfig
 
 	LogTail    LogTailConfig
@@ -309,6 +310,24 @@ type OIDCConfig struct {
 
 // WebAdminConfig configures the built-in admin dashboard served under
 // /admin, where local admin accounts (not tailnet users) log in.
+// MailConfig configures verified TLS delivery of account confirmation links.
+type MailConfig struct {
+	Transport      string
+	JMAPSessionURL string
+	JMAPAccountID  string
+	JMAPIdentityID string
+	JMAPUsername   string
+	JMAPToken      string `json:"-"`
+	JMAPTokenPath  string
+	Host           string
+	Port           int
+	Username       string
+	Password       string `json:"-"`
+	PasswordPath   string
+	From           string
+	TLSMode        string
+}
+
 type WebAdminConfig struct {
 	OIDCAllowedGroups []string
 	OIDCAllowedRoles  []string
@@ -554,6 +573,9 @@ func LoadConfig(path string, isFile bool) error {
 	viper.SetDefault("oidc.pkce.method", "S256")
 	viper.SetDefault("oidc.email_verified_required", true)
 
+	viper.SetDefault("mail.transport", "smtp")
+	viper.SetDefault("mail.port", 587)
+	viper.SetDefault("mail.tls_mode", "starttls")
 	viper.SetDefault("web_admin.enabled", false)
 	viper.SetDefault("web_admin.session_ttl", "12h")
 
@@ -1485,6 +1507,8 @@ func LoadServerConfig() (*Config, error) {
 	}
 
 	return &Config{
+		Mail: MailConfig{Transport: viper.GetString("mail.transport"), JMAPSessionURL: viper.GetString("mail.jmap_session_url"), JMAPAccountID: viper.GetString("mail.jmap_account_id"), JMAPIdentityID: viper.GetString("mail.jmap_identity_id"), JMAPUsername: viper.GetString("mail.jmap_username"), JMAPToken: viper.GetString("mail.jmap_token"), JMAPTokenPath: viper.GetString("mail.jmap_token_path"), Host: viper.GetString("mail.host"), Port: viper.GetInt("mail.port"), Username: viper.GetString("mail.username"), Password: viper.GetString("mail.password"), PasswordPath: viper.GetString("mail.password_path"), From: viper.GetString("mail.from"), TLSMode: viper.GetString("mail.tls_mode")},
+
 		ConfigFilePath:      viper.ConfigFileUsed(),
 		ServerURL:           serverURL,
 		TailscaleSSHEnabled: viper.GetBool("tailscale_ssh_enabled"),

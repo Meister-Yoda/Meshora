@@ -1,31 +1,39 @@
 # Meshora starten und im Browser einrichten
 
-## Meshora v0.2.1-rc.4 (28. Oktober 2026)
+## Meshora v0.2.1-rc.5 (28. Oktober 2026)
 
 Release Candidate des aktuellen main-Stands. WireGuard-Gateway-Code ist
 nicht enthalten; der Prototyp bleibt auf dem separaten lokalen Branch.
 
-- Anmeldung, OIDC, Passkeys und bestehende Zwei-Faktor-Anforderungen weiter
-  abgesichert; Root-/Account-Routen und Weiterleitungen bereinigt.
-- **Verhaltensaenderung:** Tailscale SSH ist standardmaessig abgeschaltet.
-  Eine ausdrueckliche Server-Option tailscale_ssh_enabled ist zum Aktivieren
-  erforderlich. Gewoehnliches OpenSSH bleibt von den Netzwerkregeln abhaengig.
-- Primaere Routen pro Node indiziert; doppelte Zonenanalyse entfernt.
-- Regulare und Debug-Basisimages auf die bereinigten Multiarch-Digests
-  gepinnt; Zielarchitektur fuer ARM64-Builds korrigiert.
-- Docker-Testwerkzeuge auf die aktuellen Moby-APIs angepasst.
+- Persönliches Menü mit Profil, Geräten, E-Mail-Adresse, Sicherheit und Passwort.
+  Admins finden die Kontoseiten im bestehenden Hauptmenü.
+- Lokale Nutzer können eine Anmeldeadresse ergänzen oder ändern. Ein
+  einmaliger Bestätigungslink wird an die neue Adresse versendet; bis zur
+  Bestätigung bleibt die bisherige Anmeldung gültig.
+- Admins können E-Mail-Änderungen je Benutzer sperren. Gruppenrechte folgen,
+  sobald eine Benutzergruppenverwaltung vorhanden ist.
+- Mailversand wahlweise über SMTP (STARTTLS/TLS) oder JMAP (HTTPS), mit
+  getrennten Zugangsdaten und Unterstützung für Geheimnisdateien.
+- OIDC-verwaltete Adressen bleiben beim Identitätsanbieter. UID und Geräte
+  bleiben erhalten; Bestätigung und Freigabeänderungen beenden Sitzungen.
+- Enthält die Absicherungen aus RC.4; Tailscale SSH bleibt standardmäßig aus.
 
 Vor dem Update Konfiguration und Datenbank sichern. Zum expliziten RC-Test:
 
 ```sh
-MESHORA_VERSION=v0.2.1-rc.4 docker compose pull
-MESHORA_VERSION=v0.2.1-rc.4 docker compose up -d
+MESHORA_VERSION=v0.2.1-rc.5 docker compose pull
+MESHORA_VERSION=v0.2.1-rc.5 docker compose up -d
 ```
 
-Der RC verschiebt latest nicht. Tailscale-Client-Sicherheitsupdates weiterhin
-separat installieren. Lokale Kern-/Race-Tests, Lint, Multiarch-Builds und
-AMD64-Start sind geprueft; ARM64-Start und die vollstaendige Zonen-Abnahme
-mit realem Clientverkehr bleiben offen. Die folgenden Abschnitte beschreiben
+Der RC verschiebt latest nicht. Die neue Datenbankmigration
+`202610281800-user-email-changes` wird beim Start angewandt. Vor einem
+Downgrade ist die Sicherung wiederherzustellen.
+
+Lokale Paket-/Race-Tests, SQLite-/PostgreSQL-Bestätigung, SMTP-/JMAP-Protokolltests,
+Browserprüfung und Gesamtbuild sind bestanden; Lint der Änderungen meldet
+0 Befunde. Die vollständige bestehende Lint-Baseline enthält weiterhin
+bekannte Befunde. Echter Mailversand bei einem produktiven Anbieter und
+ARM64-Laufzeitabnahme stehen noch aus. Die folgenden Abschnitte beschreiben
 die bestehende stabile v0.2.0-Version.
 
 
@@ -137,7 +145,10 @@ tailscale up --login-server=https://mesh.example.com
 ## Seiten und URLs
 
 - `/` und `/login/*`: Anmeldung, OIDC-Start und Bestätigung vorhandener Faktoren
-- `/account`, `/account/devices/*`, `/account/security`, `/account/password`: eigenes Konto
+- `/account`: eigenes Profil und unveränderliche UID
+- `/account/devices` und `/account/devices/*`: eigene Geräte
+- `/account/email`: Anmeldeadresse hinzufügen oder ändern
+- `/account/security` und `/account/password`: Anmeldesicherheit und Passwort
 - `/admin/*`: Verwaltung der Instanz, nur mit Admin-Zugang
 - `/assets/*`: gemeinsame Stylesheets und Browser-Skripte
 - `/logout`: Abmeldung per geschütztem Formular
@@ -294,3 +305,45 @@ docker buildx build --platform linux/amd64,linux/arm64 --load \
 Upstream-Referenz:
 [Headscale 0.29.6](https://github.com/juanfont/headscale/blob/v0.29.6/.goreleaser.yml)
 und [Sicherheitshinweise](https://github.com/juanfont/headscale/blob/v0.29.6/CHANGELOG.md).
+
+## Eigene Anmeldeadresse ergänzen oder ändern
+
+Diese Funktion ist ab v0.2.1-rc.5 verfügbar.
+
+Admins richten unter **Einstellungen → Mailversand** die Versandart
+**SMTP oder JMAP**, Absender und Zugangsdaten ein. SMTP unterstützt STARTTLS
+und direktes TLS mit Zertifikatsprüfung. Für JMAP werden die HTTPS-Session-URL
+(z. B. `https://mail.example.org/.well-known/jmap`) und ein API-Token
+eingetragen. Ohne Benutzername wird Bearer, mit Benutzername HTTP Basic
+verwendet. Konto- und Identitäts-ID sind optional; automatisch werden das
+primäre Versandkonto und die passende Absenderidentität verwendet.
+
+Der JMAP-Server muss Mail- und Submission-Funktionen, eine zum Absender
+passende Identität und einen beschreibbaren Entwürfe-Ordner anbieten.
+Session-URL und gemeldete API-URL müssen denselben Host einschließlich Port
+verwenden. Weiterleitungen werden abgelehnt. Temporäre Versandentwürfe
+werden entfernt; bei Verbindungsabbrüchen ist die Bereinigung nur bestmöglich.
+SMTP-Passwort und JMAP-Token bleiben beim Wechsel der Versandart getrennt
+erhalten und werden nicht im Formular angezeigt. Als Dateigeheimnisse stehen
+`mail.password_path` und `mail.jmap_token_path` zur Verfügung.
+
+Unter **Benutzer → Benutzer auswählen → Anmeldesicherheit** lässt sich
+**E-Mail selbst hinzufügen oder ändern erlauben** je Benutzer abschalten.
+Das Sperren oder Ändern dieser Freigabe verwirft ausstehende Links und
+beendet bestehende Sitzungen dieses Nutzers.
+
+Nutzer tragen unter **Mein Konto → E-Mail-Adresse** ihre neue Adresse ein
+und bestätigen die Aktion mit ihrem Passwort und gegebenenfalls ihrem
+zweiten Faktor. Eine kürzlich bestätigte starke Anmeldung kann diese
+erneute Eingabe ersetzen. Der per E-Mail versandte Link ist 20 Minuten
+gültig und muss im angemeldeten Konto ausdrücklich bestätigt werden.
+Falls nötig: zuerst anmelden, danach den Link erneut öffnen.
+
+Bis zur Bestätigung bleibt die bisherige Anmeldung gültig. Danach enden
+alle bisherigen Sitzungen; die UID und Gerätezuordnung bleiben erhalten.
+Vom OIDC-Anbieter verwaltete Adressen werden weiterhin dort geändert.
+
+Das persönliche Menü bündelt Profil, eigene Geräte, E-Mail, Sicherheit und
+Passwort. Admins finden diese Einträge im bestehenden Hauptmenü unter
+**Mein Konto**; normale Nutzer sehen ausschließlich ihr Kontomenü.
+Auf kleinen Bildschirmen ist das Menü unter **Navigation** aufklappbar.

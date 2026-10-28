@@ -505,3 +505,31 @@ auto_update:
 #   #
 #   # node_store_batch_size: 100
 #   # node_store_batch_timeout: 500ms
+
+# Optional delivery of account-email confirmation links. Without mail delivery, users
+# cannot request self-service email changes. Only verified TLS is supported.
+# Administrators can also configure delivery under Settings > Email delivery.
+mail:
+  # smtp (default) or jmap. Credentials are separate for each transport.
+  transport: smtp
+  host: ""
+  port: 587
+  from: ""
+  username: ""
+  # Prefer a mounted secret file. A password saved through the WebUI is kept in
+  # this configuration file with owner-only permissions and is never displayed.
+  password_path: ""
+  # starttls (usually 587) or tls (usually 465). Plaintext is not supported.
+  tls_mode: starttls
+
+  # JMAP requires HTTPS, mail+submission capabilities, a writable drafts mailbox,
+  # and an Identity matching 'from'. Discovered apiUrl must have the same host
+  # and port as this session URL. No redirects or cross-host credentials.
+  jmap_session_url: ""
+  # Optional: otherwise use the primary submission account / matching Identity.
+  jmap_account_id: ""
+  jmap_identity_id: ""
+  # Empty username: Bearer token. With username: HTTP Basic token/password.
+  jmap_username: ""
+  # Use jmap_token OR jmap_token_path; never configure both.
+  jmap_token_path: ""

@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## Meshora v0.2.1-rc.5 (2026-10-28)
+
+- Split personal account pages into profile, devices, email, security and password sections. Integrate personal navigation into the existing administrator menu and reuse the responsive menu for regular users.
+
+- Add verified self-service email addresses for local accounts with per-user administrator control.
+- Add HTTPS-only JMAP delivery as an alternative to SMTP, with separate credentials, sender identity validation and same-origin API discovery.
+- Add TLS-only SMTP settings and single-use, expiring confirmation links; keep the old login until confirmed and revoke sessions on confirmation or permission changes.
+- Add the append-only user-email-changes database migration. Back up the database before upgrading.
+- Preserve OIDC-managed addresses, account UIDs and device ownership. Group-based email permissions depend on a future user-group administration feature.
+
 ## Meshora v0.2.1-rc.4 (2026-10-28)
 
 ### Security

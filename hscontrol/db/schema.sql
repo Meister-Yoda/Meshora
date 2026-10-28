@@ -149,6 +149,7 @@ CREATE TABLE user_passkeys (
 CREATE INDEX idx_user_passkeys_user_id ON user_passkeys(user_id);
 
 CREATE TABLE user_auth_policies (
+ email_change_blocked boolean NOT NULL DEFAULT false,
  user_id bigint PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
  require_strong_auth boolean NOT NULL DEFAULT false,
  totp_suspended_until datetime,
@@ -156,4 +157,13 @@ CREATE TABLE user_auth_policies (
  updated_by bigint NOT NULL DEFAULT 0,
  updated_at datetime,
  reason text NOT NULL DEFAULT ''
+);
+
+CREATE TABLE user_email_changes (
+ user_id bigint PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+ email text NOT NULL,
+ token_hash text NOT NULL,
+ account_revision bigint NOT NULL,
+ requested_at datetime NOT NULL,
+ expires_at datetime NOT NULL
 );

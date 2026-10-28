@@ -14,29 +14,25 @@ import (
 )
 
 func (h *Handler) accountPage(w http.ResponseWriter, r *http.Request) {
-	sess := sessionFrom(r)
-
-	user, err := h.state.GetUserByID(sess.userID)
+	user, err := h.state.GetUserByID(sessionFrom(r).userID)
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
 
-	account, err := h.state.UserAccount(sess.userID)
-	if err != nil {
-		http.Error(w, "Konto nicht verfügbar", http.StatusInternalServerError)
-		return
-	}
+	writeHTML(w, http.StatusOK, templates.UserAccountPage(h.pageInfo(r), userRow(user.View(), 0)).Render())
+}
 
+func (h *Handler) accountDevices(w http.ResponseWriter, r *http.Request) {
 	var nodes []templates.AdminNodeRow
 
-	for _, node := range h.state.ListNodesByUser(sess.userID).All() {
+	for _, node := range h.state.ListNodesByUser(sessionFrom(r).userID).All() {
 		if !node.IsTagged() {
 			nodes = append(nodes, nodeRow(node))
 		}
 	}
 
-	writeHTML(w, 200, templates.UserAccountPage(h.pageInfo(r), userRow(user.View(), len(nodes)), nodes, account.IsAdmin).Render())
+	writeHTML(w, http.StatusOK, templates.UserDevicesPage(h.pageInfo(r), nodes).Render())
 }
 
 func (h *Handler) accountPasswordPage(w http.ResponseWriter, r *http.Request) {

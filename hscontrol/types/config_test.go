@@ -1131,3 +1131,35 @@ func TestTailscaleSSHDisabledByDefault(t *testing.T) {
 		})
 	}
 }
+
+func TestMailSMTPConfiguration(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	require.NoError(t, LoadConfig("testdata/base-domain-not-in-server-url.yaml", true))
+	viper.Set("mail.jmap_session_url", "https://mail.example.test/.well-known/jmap")
+	viper.Set("mail.jmap_token", "jmap-secret-not-in-json")
+	viper.Set("mail.host", "smtp.example.test")
+	viper.Set("mail.from", "meshora@example.test")
+	viper.Set("mail.username", "mailer")
+	viper.Set("mail.password", t.Name())
+
+	cfg, err := LoadServerConfig()
+	require.NoError(t, err)
+	require.Equal(t, "smtp.example.test", cfg.Mail.Host)
+	require.Equal(t, 587, cfg.Mail.Port)
+	require.Equal(t, "starttls", cfg.Mail.TLSMode)
+	require.Equal(t, t.Name(), cfg.Mail.Password)
+	encoded, err := json.Marshal(cfg)
+	require.NoError(t, err)
+	require.NotContains(t, string(encoded), t.Name())
+	require.NotContains(t, string(encoded), "jmap-secret-not-in-json")
+	require.Equal(t, "smtp", cfg.Mail.Transport)
+	require.Equal(t, "https://mail.example.test/.well-known/jmap", cfg.Mail.JMAPSessionURL)
+	viper.Set("mail.password", "")
+	viper.Set("mail.password_path", "/run/secrets/meshora_smtp")
+
+	cfg, err = LoadServerConfig()
+	require.NoError(t, err)
+	require.Empty(t, cfg.Mail.Password)
+	require.Equal(t, "/run/secrets/meshora_smtp", cfg.Mail.PasswordPath)
+}

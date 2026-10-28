@@ -63,7 +63,7 @@ func (hsdb *HSDatabase) MergeUsers(sourceID, targetID types.UserID, keepTargetPa
 			return nil, policyErr
 		}
 
-		if sourcePolicy.RequireStrongAuth || sourcePolicy.TOTPBypassedAt(time.Now()) || sourcePolicy.PasskeysSuspendedAt(time.Now()) {
+		if sourcePolicy.EmailChangeBlocked || sourcePolicy.RequireStrongAuth || sourcePolicy.TOTPBypassedAt(time.Now()) || sourcePolicy.PasskeysSuspendedAt(time.Now()) {
 			return nil, ErrSecurityMerge
 		}
 		var accounts []types.UserAccount

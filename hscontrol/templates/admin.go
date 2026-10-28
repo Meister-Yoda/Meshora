@@ -215,10 +215,13 @@ type AdminChoice struct {
 
 // AdminPageInfo is the data every signed-in page needs.
 type AdminPageInfo struct {
-	Base      string
-	Username  string
-	CSRFToken string
-	Flash     *AdminFlash
+	IsAdmin           bool
+	AccountSection    string
+	AccountRestricted bool
+	Base              string
+	Username          string
+	CSRFToken         string
+	Flash             *AdminFlash
 	// Now is the reference time for relative times; zero means time.Now.
 	Now time.Time
 }
@@ -681,20 +684,49 @@ func relativeTime(t, now time.Time) string {
 
 // adminShell wraps a signed-in page in the top bar and footer.
 func adminShell(base, username, csrf, title string, flash *AdminFlash, content ...elem.Node) *elem.Element {
-	topbar := adminTopbar(base, username, csrf, true)
+	return workspacePage(AdminPageInfo{Base: base, Username: username, CSRFToken: csrf, Flash: flash}, title, title, true, content...)
+}
 
-	return adminDocument(base, title+" · Meshora", "app",
+// workspacePage gives personal and administrative pages the same responsive navigation.
+func workspacePage(info AdminPageInfo, title, current string, admin bool, content ...elem.Node) *elem.Element {
+	navigation := func() elem.Node {
+		if admin {
+			return mainNavigation(info.Base, current)
+		}
+
+		return elem.Nav(attrs.Props{attrs.Class: "side-nav", "aria-label": "My account / Mein Konto"}, accountNavigationItems(info.Base, current)...)
+	}
+
+	return adminDocument(info.Base, title+" · Meshora", "app",
 		elem.A(attrs.Props{attrs.Href: "#main-content", attrs.Class: "skip-link"}, i18nText("Skip to content")),
-		topbar,
+		adminTopbar(info.Base, info.Username, info.CSRFToken, admin),
 		elem.Div(attrs.Props{attrs.Class: "workspace"},
-			elem.Aside(attrs.Props{attrs.Class: "sidebar"}, mainNavigation(base, title)),
+			elem.Aside(attrs.Props{attrs.Class: "sidebar"}, navigation()),
 			elem.Div(attrs.Props{attrs.Class: "workspace-main"},
 				elem.Details(attrs.Props{attrs.Class: "mobile-navigation"},
 					elem.Summary(nil, i18nText("Navigation"), elem.Span(attrs.Props{"aria-hidden": "true"}, elem.Text("☰"))),
-					mainNavigation(base, title)),
-				elem.Main(attrs.Props{attrs.Class: "content", attrs.ID: "main-content", "tabindex": "-1"}, append([]elem.Node{flashBanner(flash)}, content...)...),
-				elem.Footer(attrs.Props{attrs.Class: "app-footer"}, poweredBy()...))),
-	)
+					navigation()),
+				elem.Main(attrs.Props{attrs.Class: "content", attrs.ID: "main-content", "tabindex": "-1"}, append([]elem.Node{flashBanner(info.Flash)}, content...)...),
+				elem.Footer(attrs.Props{attrs.Class: "app-footer"}, poweredBy()...))))
+}
+
+const (
+	AccountProfile  = "account-profile"
+	AccountDevices  = "account-devices"
+	AccountEmail    = "account-email"
+	AccountSecurity = "account-security"
+	AccountPassword = "account-password"
+)
+
+func accountNavigationItems(base, current string) []elem.Node {
+	return []elem.Node{
+		elem.P(attrs.Props{attrs.Class: "sidebar-label"}, i18nText("Mein Konto")),
+		navLink(publicUIPath(base, "/account"), "Profil", current == AccountProfile),
+		navLink(publicUIPath(base, "/account/devices"), "Meine Geräte", current == AccountDevices),
+		navLink(publicUIPath(base, "/account/email"), "E-Mail-Adresse", current == AccountEmail),
+		navLink(publicUIPath(base, "/account/security"), "Sicherheit", current == AccountSecurity),
+		navLink(publicUIPath(base, "/account/password"), "Passwort", current == AccountPassword),
+	}
 }
 
 func mainNavigation(base, current string) elem.Node {
@@ -708,14 +740,19 @@ func mainNavigation(base, current string) elem.Node {
 		navLink(base+"/zones", "Zonen", current == "Zonen"),
 		navLink(base+"/dns", "DNS", current == "DNS"),
 		navLink(base+"/policy", "Policy", current == "Policy"),
+	}
+	items = append(items, accountNavigationItems(base, current)...)
+
+	items = append(items,
 		elem.P(attrs.Props{attrs.Class: "sidebar-label"}, i18nText("Administration")),
 		navLink(base+"/keys", "Keys", current == "Keys"),
 		navLink(base+"/settings", "Settings", current == "Settings"),
-	}
+	)
 	if current == "Settings" {
 		items = append(items, elem.Div(attrs.Props{attrs.Class: "settings-subnav"},
 			elem.A(attrs.Props{attrs.Href: base + "/settings/provider"}, i18nText("Identity provider")),
 			elem.A(attrs.Props{attrs.Href: base + "/settings/access"}, i18nText("Access rules")),
+			elem.A(attrs.Props{attrs.Href: base + "/settings/mail"}, i18nText("Mailversand")),
 			elem.A(attrs.Props{attrs.Href: base + "/settings/appearance"}, i18nText("Appearance"))))
 	}
 
@@ -775,15 +812,20 @@ func navLink(href, label string, current bool) *elem.Element {
 	}
 
 	paths := map[string]string{
-		"Zonen":    "M4 4h6v6H4z M14 14h6v6h-6z M7 10v7h7 M10 7h7v7",
-		"DNS":      "M3 5h18v5H3z M3 14h18v5H3z M7 7.5h.01 M7 16.5h.01 M16 7.5h2 M16 16.5h2",
-		"Policy":   "M12 3l8 3v5c0 5-4 8-8 10-4-2-8-5-8-10V6z M8 12l3 3 5-6",
-		"Overview": "M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z",
-		"Users":    "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8 M20 21v-2a4 4 0 0 0-3-3.87 M16 3.13a4 4 0 0 1 0 7.75",
-		"Nodes":    "M3 4h18v12H3z M8 21h8 M12 16v5",
-		"Pending":  "M12 8v4l3 2 M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0",
-		"Keys":     "M15 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10 M10 12H2 M5 12v4 M8 12v3",
-		"Settings": "M4 6h16 M4 12h16 M4 18h16 M8 3v6 M16 9v6 M10 15v6",
+		"Zonen":          "M4 4h6v6H4z M14 14h6v6h-6z M7 10v7h7 M10 7h7v7",
+		"DNS":            "M3 5h18v5H3z M3 14h18v5H3z M7 7.5h.01 M7 16.5h.01 M16 7.5h2 M16 16.5h2",
+		"Policy":         "M12 3l8 3v5c0 5-4 8-8 10-4-2-8-5-8-10V6z M8 12l3 3 5-6",
+		"Overview":       "M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z",
+		"Users":          "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8 M20 21v-2a4 4 0 0 0-3-3.87 M16 3.13a4 4 0 0 1 0 7.75",
+		"Nodes":          "M3 4h18v12H3z M8 21h8 M12 16v5",
+		"Pending":        "M12 8v4l3 2 M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0",
+		"Keys":           "M15 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10 M10 12H2 M5 12v4 M8 12v3",
+		"Settings":       "M4 6h16 M4 12h16 M4 18h16 M8 3v6 M16 9v6 M10 15v6",
+		"Profil":         "M20 21v-2a7 7 0 0 0-14 0v2 M13 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8",
+		"Meine Geräte":   "M3 4h18v12H3z M8 21h8 M12 16v5",
+		"E-Mail-Adresse": "M3 5h18v14H3z M3 6l9 7 9-7",
+		"Sicherheit":     "M12 3l8 3v5c0 5-4 8-8 10-4-2-8-5-8-10V6z M8 12l3 3 5-6",
+		"Passwort":       "M15 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10 M10 12H2 M5 12v4 M8 12v3",
 	}
 	icon := `<svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="` + paths[label] + `"/></svg>`
 
@@ -913,7 +955,6 @@ func adminTopbar(base, username, csrf string, admin bool) elem.Node {
 
 	if admin {
 		home = base + "/"
-
 	}
 
 	initial := ""

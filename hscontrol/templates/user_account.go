@@ -16,12 +16,34 @@ func accountPostForm(info AdminPageInfo, path string, children ...elem.Node) ele
 }
 
 func personalPage(info AdminPageInfo, title string, content ...elem.Node) *elem.Element {
-	return adminDocument(info.Base, title+" · Meshora", "app", adminTopbar(info.Base, info.Username, info.CSRFToken, false),
+	if !info.AccountRestricted {
+		current := info.AccountSection
+		if current == "" {
+			current = AccountProfile
+		}
+
+		return workspacePage(info, title, current, info.IsAdmin, content...)
+	}
+	// Mandatory password/factor setup remains a focused flow without navigation.
+	return adminDocument(info.Base, title+" · Meshora", "app", adminTopbar(info.Base, info.Username, info.CSRFToken, info.IsAdmin),
 		elem.Main(attrs.Props{attrs.Class: "content personal-content", attrs.ID: "main-content"}, append([]elem.Node{flashBanner(info.Flash)}, content...)...),
 		elem.Footer(attrs.Props{attrs.Class: "app-footer personal-content"}, poweredBy()...))
 }
 
-func UserAccountPage(info AdminPageInfo, user AdminUserRow, nodes []AdminNodeRow, admin bool) *elem.Element {
+func UserAccountPage(info AdminPageInfo, user AdminUserRow) *elem.Element {
+	emailDisplay := elem.Node(elem.Text(user.Email))
+	if user.Email == "" {
+		emailDisplay = i18nText("Noch keine E-Mail-Adresse")
+	}
+
+	return personalPage(info, "Mein Konto",
+		pageHead("Profil", "Deine Benutzeridentität und dein Anzeigename."),
+		cardSection("Benutzeridentität", "Deine UID bleibt auch bei Änderungen an E-Mail oder Anmeldung erhalten.",
+			detailList(detail("UID", elem.Text(strconv.FormatUint(uint64(user.ID), 10))), detail("Email", emailDisplay))),
+		cardSection("Profil", "", accountPostForm(info, "/account/profile", textField("Display name", "display_name", user.DisplayName, false), submitButton("Profil speichern", "btn-primary"))))
+}
+
+func UserDevicesPage(info AdminPageInfo, nodes []AdminNodeRow) *elem.Element {
 	rows := make([]elem.Node, 0, len(nodes))
 	for _, node := range nodes {
 		rows = append(rows, elem.Tr(nil,
@@ -29,22 +51,14 @@ func UserAccountPage(info AdminPageInfo, user AdminUserRow, nodes []AdminNodeRow
 			elem.Td(nil, addressCell(node.IPv4, node.IPv6)), elem.Td(nil, statusCell(node.Online))))
 	}
 
-	content := []elem.Node{
-		pageHead("Mein Konto", "Deine Geräte und Kontoeinstellungen."),
-		cardSection("Benutzeridentität", "Deine UID bleibt auch bei Änderungen an E-Mail oder Anmeldung erhalten.", detailList(detail("UID", elem.Text(strconv.FormatUint(uint64(user.ID), 10))), detail("Email", elem.Text(user.Email)))),
-		cardSection("Meine Geräte", "Nur deine benutzereigenen Geräte werden angezeigt.", dataTable("Meine Geräte", []string{"Gerät", "Adressen", accountStatusLabel}, rows)),
-		cardSection("Profil", "", accountPostForm(info, "/account/profile", textField("Display name", "display_name", user.DisplayName, false), submitButton("Profil speichern", "btn-primary"))),
-		cardSection("Sicherheit", "Authenticator-App, Wiederherstellungscodes und Passkeys verwalten.", linkButton(info.RootPath("/account/security"), "Sicherheitseinstellungen", "btn-secondary")),
-		cardSection("Passwort", "Ein lokales Passwort und OIDC gehören zu derselben UID.", linkButton(info.RootPath("/account/password"), "Passwort ändern", "btn-secondary")),
-	}
-	if admin {
-		content = append(content, linkButton(info.Base+"/", "Zur Administration", "btn-secondary"))
-	}
-
-	return personalPage(info, "Mein Konto", content...)
+	return personalPage(info, "Meine Geräte", pageHead("Meine Geräte", "Nur deine benutzereigenen Geräte werden angezeigt."),
+		cardSection("Geräte", "", dataTable("Meine Geräte", []string{"Gerät", "Adressen", accountStatusLabel}, rows)))
 }
 
 func UserPasswordPage(info AdminPageInfo, required, oidc bool) *elem.Element {
+	if required {
+		info.AccountRestricted = true
+	}
 	hint := "Ändere dein lokales Passwort. Danach meldest du dich mit dem neuen Passwort erneut an."
 	if required {
 		hint = "Du verwendest ein Startpasswort. Lege ein eigenes Passwort fest, bevor du fortfährst."
@@ -70,7 +84,7 @@ func passwordInput(label, name, autocomplete string) elem.Node {
 }
 
 func UserDevicePage(info AdminPageInfo, node AdminNodeRow) *elem.Element {
-	return personalPage(info, "Mein Gerät", backLink(info.RootPath("/account"), "Mein Konto"), pageHead(node.GivenName, node.Hostname), cardSection("Gerät", "", detailList(detail("Adressen", addressCell(node.IPv4, node.IPv6)), detail(accountStatusLabel, statusCell(node.Online)), detail("Last seen", relCell(node.LastSeen, info.now())))))
+	return personalPage(info, "Mein Gerät", backLink(info.RootPath("/account/devices"), "Meine Geräte"), pageHead(node.GivenName, node.Hostname), cardSection("Gerät", "", detailList(detail("Adressen", addressCell(node.IPv4, node.IPv6)), detail(accountStatusLabel, statusCell(node.Online)), detail("Last seen", relCell(node.LastSeen, info.now())))))
 }
 
 func UserMergePage(info AdminPageInfo, sourceID, sourceName string, choices []AdminChoice) *elem.Element {

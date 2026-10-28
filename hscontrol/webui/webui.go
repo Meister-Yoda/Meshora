@@ -111,6 +111,8 @@ func (s *session) takeFlash() *templates.AdminFlash {
 
 // Handler serves the dashboard.
 type Handler struct {
+	mailConfig    types.MailConfig
+	emailSender   func(context.Context, types.MailConfig, string, string) error
 	state         *state.State
 	runtimeConfig *types.Config
 	// change distributes state changes to connected nodes, like
@@ -155,6 +157,8 @@ func New(st *state.State, cfg *types.Config, notify func(...change.Change)) *Han
 	}
 
 	return &Handler{
+		mailConfig:          cfg.Mail,
+		emailSender:         sendAccountMail,
 		state:               st,
 		runtimeConfig:       cfg,
 		change:              notify,
@@ -230,6 +234,8 @@ func (h *Handler) Routes(r chi.Router) {
 		r.Group(func(r chi.Router) {
 			r.Use(h.requireSession)
 			r.Get("/account", h.accountPage)
+			r.Get("/account/devices", h.accountDevices)
+			r.Get("/account/email", h.accountEmailPage)
 			r.Get("/account/security", h.securityPage)
 			r.Post("/account/security/totp/begin", h.beginTOTP)
 			r.Get("/account/security/totp/qr", h.totpQR)
@@ -239,6 +245,9 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Post("/account/security/passkeys/finish", h.finishPasskeyRegistration)
 			r.Post("/account/security/passkeys/delete", h.deletePasskey)
 			r.Post("/account/profile", h.saveAccountProfile)
+			r.Post("/account/email", h.requestAccountEmail)
+			r.Get("/account/email/confirm", h.accountEmailConfirmation)
+			r.Post("/account/email/confirm", h.confirmAccountEmail)
 			r.Get("/account/password", h.accountPasswordPage)
 			r.Post("/account/password", h.saveAccountPassword)
 			r.Get("/account/devices/{id}", h.accountDevice)
@@ -249,6 +258,7 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Use(h.requireAdmin)
 			r.Post("/users/{id}/admin", h.setAccountAdmin)
 			r.Post("/users/{id}/auth-policy", h.saveUserAuthPolicy)
+			r.Post("/users/{id}/email-policy", h.saveUserEmailPolicy)
 			r.Post("/users/{id}/password", h.resetAccountPassword)
 			r.Post("/users/{id}/profile", h.saveUserProfile)
 			r.Get("/users/{id}/merge", h.mergeAccountPage)
@@ -305,6 +315,8 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Get("/settings/{section}", h.settingsPage)
 			r.Post("/settings/oidc", h.saveOIDCSettings)
 			r.Post("/settings/oidc-button", h.saveOIDCButtonText)
+			r.Get("/settings/mail", h.mailSettingsPage)
+			r.Post("/settings/mail", h.saveMailSettings)
 		})
 	})
 }
@@ -506,11 +518,32 @@ func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) pageInfo(r *http.Request) templates.AdminPageInfo {
 	sess := sessionFrom(r)
 
+	section := templates.AccountProfile
+
+	path := strings.TrimPrefix(r.URL.Path, h.rootPath("/account"))
+	if path == r.URL.Path {
+		path = strings.TrimPrefix(r.URL.Path, "/account")
+	}
+
+	switch {
+	case strings.HasPrefix(path, "/devices"):
+		section = templates.AccountDevices
+	case strings.HasPrefix(path, "/email"):
+		section = templates.AccountEmail
+	case strings.HasPrefix(path, "/security"):
+		section = templates.AccountSecurity
+	case strings.HasPrefix(path, "/password"):
+		section = templates.AccountPassword
+	}
+
 	return templates.AdminPageInfo{
-		Base:      h.publicPath,
-		Username:  sess.username,
-		CSRFToken: sess.csrf,
-		Flash:     sess.takeFlash(),
+		IsAdmin:           sess.isAdmin,
+		AccountSection:    section,
+		AccountRestricted: sess.mustChangePassword || sess.enrollmentOnly,
+		Base:              h.publicPath,
+		Username:          sess.username,
+		CSRFToken:         sess.csrf,
+		Flash:             sess.takeFlash(),
 	}
 }
 
