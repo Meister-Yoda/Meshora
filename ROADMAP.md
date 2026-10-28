@@ -133,7 +133,7 @@ vorgetäuschte Tailscale-Identität; Tailscale-SSH wird dadurch nicht wieder akt
 
 ## 4. Gemessene Optimierungen auf main
 
-**Stand: 28. Oktober 2026.** Fuer v0.2.1-rc.4 vorbereitet; Veroeffentlichung und Release-CI werden geprueft. Fremde Arbeitskopie-Aenderungen bleiben erhalten.
+**Stand: 28. Oktober 2026.** In Commit 3b69cf17 auf main veroeffentlicht; Release v0.2.1-rc.4 und Registry-CI erfolgreich. Fremde Arbeitskopie-Aenderungen bleiben erhalten.
 
 - **Routenabfrage:** Sortierter Index pro Node im unveraenderlichen Snapshot;
   Wiederverwendung bei unveraenderten Routen und Kopie bei Rueckgabe.
@@ -171,4 +171,13 @@ messen; ARM64-Start auf geeigneter Umgebung nachholen. Kein Push oder Release.
 
 28. Oktober 2026: Veroeffentlichung des aktuellen main-Stands autorisiert.
 Gateway-Code bleibt im separaten lokalen Branch WireGuard-Gateway.
-Release-CI und GHCR-Verifikation folgen dem Tag-Push; latest bleibt unveraendert.
+Release- und Registry-CI erfolgreich:
+https://github.com/Meister-Yoda/Meshora/actions/runs/40724827474
+GitHub-Vorabversion mit Architekturarchiven, Pruefsummen und Compose-Bundles:
+https://github.com/Meister-Yoda/Meshora/releases/tag/v0.2.1-rc.4
+GHCR v0.2.1-rc.4 und RC sind identisch, jeweils AMD64 und ARM64:
+sha256:f992c89009e8de62d7790aa8d65757a0a91a39b9d6e92834d1475ff8cd01a620.
+latest blieb auf sha256:f9ccb8f2b14fb691d517724f9669a059bdd2a6b4a33fa906ec65a53948bf37c0.
+Separater Nix-Flake-Lint meldet 39 Stil-/Komplexitaetsbefunde (auch beim
+vorherigen RC fehlgeschlagen); nicht als vollstaendig gruene CI bewerten.
+Weitere Server-Tests laufen zum Zeitpunkt dieser Aufzeichnung noch.
