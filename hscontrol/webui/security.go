@@ -390,13 +390,14 @@ func (h *Handler) startSecondFactor(w http.ResponseWriter, r *http.Request, acco
 }
 
 func (h *Handler) secondFactorPage(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Security-Policy", adminCSP+"; script-src 'self'; connect-src 'self'")
 	flow, ok := h.loginSecurityFlow(r, "totp-login")
 	if !ok {
 		http.Redirect(w, r, h.loginPath()+"?local=1", http.StatusSeeOther)
 		return
 	}
 
-	writeHTML(w, 200, templates.UserSecondFactor(h.publicPath, h.loginPath(), flow.CSRF, "").Render())
+	writeHTML(w, 200, h.secondFactorView(flow, ""))
 }
 
 func (h *Handler) loginSecurityFlow(r *http.Request, kind string) (securityFlow, bool) {
@@ -411,6 +412,7 @@ func (h *Handler) loginSecurityFlow(r *http.Request, kind string) (securityFlow,
 }
 
 func (h *Handler) finishSecondFactor(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Security-Policy", adminCSP+"; script-src 'self'; connect-src 'self'")
 	h.securityFlowsMu.Lock()
 	defer h.securityFlowsMu.Unlock()
 
@@ -436,7 +438,7 @@ func (h *Handler) finishSecondFactor(w http.ResponseWriter, r *http.Request) {
 
 	err := h.verifySecondFactor(flow.UserID, flow.Revision, r.PostForm.Get("code"))
 	if err != nil {
-		writeHTML(w, 401, templates.UserSecondFactor(h.publicPath, h.loginPath(), flow.CSRF, "Code ungültig oder bereits verwendet.").Render())
+		writeHTML(w, 401, h.secondFactorView(flow, "Code ungültig oder bereits verwendet."))
 		return
 	}
 
@@ -608,4 +610,19 @@ func (h *Handler) applyAuthPolicy(authentication *session) error {
 		authentication.validUntil = *policy.TOTPSuspendedUntil
 	}
 	return nil
+}
+
+// The challenge is not a session and grants no access to account routes.
+func (h *Handler) secondFactorView(flow securityFlow, message string) string {
+	security, securityErr := h.state.UserSecurity(flow.UserID)
+	keys, keysErr := h.state.UserPasskeys(flow.UserID)
+	policy, policyErr := h.state.UserAuthPolicy(flow.UserID)
+
+	totp, passkey := false, false
+	if securityErr == nil && keysErr == nil && policyErr == nil {
+		totp = len(security.EncryptedTOTPSecret) > 0 && !policy.TOTPBypassedAt(time.Now())
+		passkey = flow.OIDCSubject != "" && len(keys) > 0 && !policy.PasskeysSuspendedAt(time.Now())
+	}
+
+	return templates.UserSecondFactor(h.publicPath, h.loginPath(), flow.CSRF, message, totp, passkey).Render()
 }

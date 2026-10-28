@@ -193,12 +193,18 @@ func (h *Handler) passkeyLoginCSRF(r *http.Request) bool {
 		return false
 	}
 
+	if flow, ok := h.loginSecurityFlow(r, "totp-login"); ok && flow.OIDCSubject != "" && tokensEqual(flow.CSRF, token) {
+		return true
+	}
+
 	cookie, err := r.Cookie(loginCSRFCookie)
 
 	return err == nil && cookie.Value != "" && tokensEqual(cookie.Value, token)
 }
 
 func (h *Handler) beginPasskeyLogin(w http.ResponseWriter, r *http.Request) {
+	h.securityFlowsMu.Lock()
+	defer h.securityFlowsMu.Unlock()
 	if !h.passkeyLoginCSRF(r) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
@@ -224,6 +230,15 @@ func (h *Handler) beginPasskeyLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if flow, ok := h.loginSecurityFlow(r, "totp-login"); ok && flow.OIDCSubject != "" {
+		flow.Session = *data
+		cookie, _ := r.Cookie(securityCookie)
+		h.securityFlows.Add(hashToken(cookie.Value), flow)
+		securityJSON(w, options)
+
+		return
+	}
+
 	token := randomToken()
 	h.securityFlows.Add(hashToken(token), securityFlow{Kind: "passkey-login", Session: *data})
 	h.setCookie(w, r, securityCookie, token, int(securityTTL.Seconds()))
@@ -242,6 +257,10 @@ func (h *Handler) finishPasskeyLogin(w http.ResponseWriter, r *http.Request) {
 	defer h.securityFlowsMu.Unlock()
 
 	flow, ok := h.loginSecurityFlow(r, "passkey-login")
+	if !ok {
+		flow, ok = h.loginSecurityFlow(r, "totp-login")
+		ok = ok && flow.OIDCSubject != "" && flow.Session.Challenge != "" && time.Now().Before(flow.OIDCExpiry)
+	}
 	if !ok {
 		http.Error(w, errSecurityFlow.Error(), http.StatusForbidden)
 		return
@@ -282,7 +301,8 @@ func (h *Handler) finishPasskeyLogin(w http.ResponseWriter, r *http.Request) {
 		}
 
 		account, loadErr = h.state.UserAccount(types.UserID(candidate.User.ID))
-		if loadErr != nil || len(account.PasswordHash) == 0 {
+		if loadErr != nil || (flow.OIDCSubject == "" && len(account.PasswordHash) == 0) ||
+			(flow.OIDCSubject != "" && (types.UserID(account.UserID) != flow.UserID || account.Revision != flow.Revision)) {
 			return nil, errPasskey
 		}
 
@@ -326,7 +346,7 @@ func (h *Handler) finishPasskeyLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.clearFailures("passkey:" + clientIP(r))
-	h.issueSession(w, r, account, candidate.User, &session{passkey: true, strongAuth: true})
+	h.issueSession(w, r, account, candidate.User, &session{passkey: true, strongAuth: true, oidcSubject: flow.OIDCSubject, expires: flow.OIDCExpiry})
 }
 
 // securityScript serves the WebAuthn enhancement without third-party scripts.

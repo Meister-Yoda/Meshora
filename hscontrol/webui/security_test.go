@@ -1,6 +1,13 @@
 package webui
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"html"
 	"io"
@@ -13,6 +20,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fxamacker/cbor/v2"
+	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/juanfont/headscale/hscontrol/types"
 	"github.com/pquerna/otp/totp"
 	"github.com/stretchr/testify/require"
@@ -377,6 +386,162 @@ func TestExistingPasskeyBlocksPasswordOnlyAccountAccess(t *testing.T) {
 			require.NoError(t, request.ParseForm())
 			request = request.WithContext(withSession(request.Context(), weak))
 			require.ErrorIs(t, env.handler.proveSecurityChange(request), errExistingFactorRequired)
+		})
+	}
+}
+
+func TestOIDCPasskeyConfirmation(t *testing.T) {
+	for _, scenario := range []string{"success", "other-account", "revision", "expired", "signature", "csrf", "suspended"} {
+		t.Run(scenario, func(t *testing.T) {
+			env := newTestEnv(t)
+			env.handler.serverURL = "http://localhost:8080"
+			env.handler.activeOIDC = types.OIDCConfig{Issuer: "https://issuer.example.test", ClientID: "meshora"}
+			user, _, err := env.state.CreateUser(types.User{Name: "oidc-passkey", Email: "oidc-passkey@example.test"})
+			require.NoError(t, err)
+
+			uid := types.UserID(user.ID)
+			account, err := env.state.UserAccount(uid)
+			require.NoError(t, err)
+			require.Empty(t, account.PasswordHash)
+
+			boundID := uid
+
+			if scenario == "other-account" {
+				other, _, createErr := env.state.CreateUser(types.User{Name: "other-oidc", Email: "other-oidc@example.test"})
+				require.NoError(t, createErr)
+
+				boundID = types.UserID(other.ID)
+			}
+
+			private, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+			require.NoError(t, err)
+			public, err := cbor.Marshal(map[int]any{1: 2, 3: -7, -1: 1, -2: private.X.FillBytes(make([]byte, 32)), -3: private.Y.FillBytes(make([]byte, 32))})
+			require.NoError(t, err)
+
+			id := []byte("oidc-test-passkey")
+			credential := webauthn.Credential{ID: id, PublicKey: public, AttestationType: "none"}
+			encoded, err := json.Marshal(credential)
+			require.NoError(t, err)
+			require.NoError(t, env.state.AddUserPasskey(uid, account.Revision, types.UserPasskey{ID: base64.RawURLEncoding.EncodeToString(id), Name: "Test", CredentialJSON: string(encoded)}))
+
+			boundAccount, err := env.state.UserAccount(boundID)
+			require.NoError(t, err)
+
+			expiry := time.Now().Add(time.Hour)
+			if scenario == "expired" {
+				expiry = time.Now().Add(-time.Minute)
+			}
+
+			recorder := httptest.NewRecorder()
+			env.handler.startSecondFactor(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, env.server.URL+"/admin/oidc/callback", nil), boundAccount, &session{oidcSubject: "bound-subject", expires: expiry})
+
+			client := newClient(t)
+			target, err := url.Parse(env.server.URL)
+			require.NoError(t, err)
+			client.Jar.SetCookies(target, recorder.Result().Cookies())
+			pageResponse, page := env.get(client, "/login/2fa")
+			require.Equal(t, http.StatusOK, pageResponse.StatusCode)
+
+			challengeRequest := httptest.NewRequestWithContext(t.Context(), http.MethodGet, env.server.URL+"/login/2fa", nil)
+			for _, cookie := range client.Jar.Cookies(target) {
+				challengeRequest.AddCookie(cookie)
+			}
+
+			flow, flowOK := env.handler.loginSecurityFlow(challengeRequest, "totp-login")
+			require.True(t, flowOK)
+
+			csrf := flow.CSRF
+
+			if scenario == "success" {
+				require.Contains(t, page, "Mit Passkey bestätigen")
+			}
+
+			request := func(path string, body string, token string) (int, []byte) {
+				req, requestErr := http.NewRequestWithContext(t.Context(), http.MethodPost, env.server.URL+path, strings.NewReader(body))
+				require.NoError(t, requestErr)
+				req.Header.Set("X-CSRF-Token", token)
+				req.Header.Set("Origin", env.handler.serverURL)
+				req.Header.Set("Content-Type", "application/json")
+				req.Header.Set("Accept", "application/json")
+				res, doErr := client.Do(req)
+				require.NoError(t, doErr)
+
+				data, readErr := io.ReadAll(res.Body)
+				require.NoError(t, readErr)
+				require.NoError(t, res.Body.Close())
+
+				return res.StatusCode, data
+			}
+			response, options := request("/login/passkeys/begin", "", csrf)
+			require.Equal(t, http.StatusOK, response)
+
+			var challenge struct{ PublicKey struct{ Challenge string } }
+			require.NoError(t, json.Unmarshal(options, &challenge))
+			require.NotEmpty(t, challenge.PublicKey.Challenge)
+			data, err := json.Marshal(map[string]any{"type": "webauthn.get", "challenge": challenge.PublicKey.Challenge, "origin": env.handler.serverURL})
+			require.NoError(t, err)
+
+			rp, _ := url.Parse(env.handler.serverURL)
+			rpHash := sha256.Sum256([]byte(rp.Hostname()))
+			authData := append(rpHash[:], byte(5))
+			authData = binary.BigEndian.AppendUint32(authData, 1)
+			clientHash := sha256.Sum256(data)
+			signed := sha256.Sum256(append(append([]byte{}, authData...), clientHash[:]...))
+			signature, err := ecdsa.SignASN1(rand.Reader, private, signed[:])
+			require.NoError(t, err)
+
+			if scenario == "signature" {
+				signature[0] ^= 1
+			}
+
+			assertion, err := json.Marshal(map[string]any{
+				"id": base64.RawURLEncoding.EncodeToString(id), "rawId": base64.RawURLEncoding.EncodeToString(id), "type": "public-key",
+				"response": map[string]string{"authenticatorData": base64.RawURLEncoding.EncodeToString(authData), "clientDataJSON": base64.RawURLEncoding.EncodeToString(data), "signature": base64.RawURLEncoding.EncodeToString(signature), "userHandle": base64.RawURLEncoding.EncodeToString(binary.BigEndian.AppendUint64(nil, uint64(uid)))},
+			})
+			require.NoError(t, err)
+
+			if scenario == "revision" {
+				require.NoError(t, env.state.SetUserAdmin(boundID, true))
+			}
+
+			if scenario == "csrf" {
+				csrf = "forged"
+			}
+
+			if scenario == "suspended" {
+				actor, authErr := env.state.AuthenticateUserAccount(testAdmin, testPassword)
+				require.NoError(t, authErr)
+				require.NoError(t, env.state.SetUserAuthPolicy(types.UserID(actor.UserID), uid, actor.Revision, false, "keep", "15m", "test suspension"))
+			}
+
+			response, result := request("/login/passkeys/finish", string(assertion), csrf)
+			if scenario == "success" {
+				require.Equal(t, http.StatusOK, response, string(result))
+				require.Contains(t, string(result), "/account")
+
+				req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, env.server.URL+"/account", nil)
+				for _, cookie := range client.Jar.Cookies(target) {
+					req.AddCookie(cookie)
+				}
+
+				sess, ok := env.handler.currentSession(req)
+				require.True(t, ok)
+				require.Equal(t, uid, sess.userID)
+				require.Equal(t, "bound-subject", sess.oidcSubject)
+				require.True(t, sess.strongAuth)
+				require.True(t, sess.passkey)
+				require.WithinDuration(t, expiry, sess.expires, time.Second)
+			} else {
+				require.True(t, response == http.StatusForbidden || response == http.StatusUnauthorized, string(result))
+
+				blocked, _ := env.get(client, "/account")
+				require.Equal(t, http.StatusSeeOther, blocked.StatusCode)
+			}
+
+			if scenario != "csrf" {
+				response, _ = request("/login/passkeys/finish", string(assertion), csrf)
+				require.Equal(t, http.StatusForbidden, response)
+			}
 		})
 	}
 }

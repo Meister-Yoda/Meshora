@@ -10,6 +10,7 @@ import (
 )
 
 func (h *Handler) mailSettingsPage(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Security-Policy", adminCSP+"; script-src 'self'")
 	h.settingsMu.Lock()
 	cfg := h.mailConfig
 	_, document, _, err := readOIDCSettings(h.configPath)

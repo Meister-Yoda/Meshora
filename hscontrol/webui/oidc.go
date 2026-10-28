@@ -247,7 +247,13 @@ func (h *Handler) oidcCallback(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if len(security.EncryptedTOTPSecret) > 0 {
+		keys, keysErr := h.state.UserPasskeys(types.UserID(user.ID))
+		if keysErr != nil {
+			h.oidcRejected(w, r)
+			return
+		}
+
+		if len(security.EncryptedTOTPSecret) > 0 || len(keys) > 0 {
 			h.startSecondFactor(w, r, account, authentication)
 			return
 		}

@@ -149,7 +149,8 @@ func TestMailSettingsAreAdminOnlyAndDoNotExportPassword(t *testing.T) {
 	response, _ := env.post(env.client, "/admin/settings/mail", url.Values{"csrf_token": {csrf}, "host": {"smtp.example.test"}, "port": {"465"}, "tls_mode": {"tls"}, "from": {"meshora@example.test"}, "username": {"mailer"}, "password": {"private-mail-password"}, "current_password": {testPassword}})
 	require.Equal(t, http.StatusSeeOther, response.StatusCode)
 
-	_, page := env.get(env.client, "/admin/settings/mail")
+	mailResponse, page := env.get(env.client, "/admin/settings/mail")
+	require.Equal(t, adminCSP+"; script-src 'self'", mailResponse.Header.Get("Content-Security-Policy"))
 	require.Contains(t, page, "smtp.example.test")
 	require.NotContains(t, page, "private-mail-password")
 	client, _, _ := emailUser(t, env)

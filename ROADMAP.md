@@ -304,3 +304,42 @@ GHCR `v0.2.1-rc.6` und `RC`:
 `latest` unverändert:
 `sha256:f9ccb8f2b14fb691d517724f9669a059bdd2a6b4a33fa906ec65a53948bf37c0`.
 Echte Authentik-/Mailanbieter-Abnahme und ARM64-Laufzeit bleiben offen.
+
+## 9. OIDC mit bestehendem Passkey ohne Login-Rückfall
+
+**Status:** Lokal umgesetzt und geprüft · unveröffentlicht.
+
+OIDC-Konten mit vorhandenen Passkeys erhalten direkt die gebundene
+Faktorbestätigung. Passkey und Authenticator werden passend zur Einrichtung
+angeboten. Die Bestätigung muss dieselbe UID und Kontorevision betreffen;
+OIDC-Ablaufzeit und Identität bleiben erhalten. Keine Kontositzung vor der
+erfolgreichen Faktorprüfung, kein pauschales Vertrauen in externe MFA-Claims.
+
+
+Validierung: Vollständige Race-Tests für webui/templates bestanden,
+Gesamtbuild und Lint der Änderungen (0 Befunde) bestanden. Echte signierte
+WebAuthn-Antworten prüfen den Erfolg ohne lokales Passwort sowie Ablehnung
+falscher UID, geänderter Revision, abgelaufener OIDC-Anmeldung, falscher
+Signatur, falschem CSRF und pausierten Passkeys; Replay wird abgewiesen.
+Chromium prüft die mobile Faktoransicht, aktiven Passkey-Button und
+Authenticator-Alternative. Bestehende OIDC-/TOTP-Abläufe bleiben getestet.
+Für erneute RC.6-Veröffentlichung freigegeben; echte Authentik-Abnahme offen.
+
+## 10. Mailformular: produktive Skriptrichtlinie und Abstände
+
+**Status:** Lokal korrigiert und geprüft · unveröffentlicht.
+
+RC.6 hatte die Seitenschaltung durch die Standard-CSP blockiert. Die
+Mailseite erlaubt nun ausschließlich eigene Skripte. Die Browserprüfung
+übernimmt die restriktive CSP; HTTP-Regression prüft den echten Header.
+Verschachtelte Formularbereiche erhalten die vorhandenen Feldabstände.
+Die frühere reine HTML-Vorschau hatte diesen Headerfehler nicht erfasst.
+
+Validierung: HTTP-Header-Regression und Mail-Einstellungstests bestanden.
+Chromium mit restriktiver CSP prüft aktive Versandart, Umschalten, Werterhalt
+und mobile Darstellung. Lint der Änderungen: 0 Befunde; diff --check bestanden.
+Erneute Veröffentlichung des bestehenden RC.6 auf Nutzerwunsch läuft.
+
+RC.6-Update: Bestehenden Tag und Artefakte auf ausdrücklichen Nutzerwunsch
+ersetzen; kein RC.7. Vorheriger Tag-Objektstand:
+`72010a4fea77f5d630f51ab9e326179de4edfc2f`.

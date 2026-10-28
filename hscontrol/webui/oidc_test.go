@@ -36,7 +36,7 @@ func TestAdminOIDCFlow(t *testing.T) {
 		{"required_enrollment", http.StatusSeeOther},
 		{"required_totp", http.StatusSeeOther},
 		{"existing_totp", http.StatusSeeOther},
-		{"existing_passkey", http.StatusUnauthorized},
+		{"existing_passkey", http.StatusSeeOther},
 		{"policy_revocation", http.StatusSeeOther},
 		{"new_verified", http.StatusSeeOther},
 		{"new_unverified_required", http.StatusForbidden},
@@ -281,6 +281,19 @@ func TestAdminOIDCFlow(t *testing.T) {
 				assert.Contains(t, callbackPage, "bestätigte E-Mail")
 			}
 			require.Equal(t, tc.status, resp.StatusCode)
+
+			if tc.name == "existing_passkey" {
+				require.Equal(t, "/login/2fa", resp.Header.Get("Location"))
+
+				_, challengePage := env.get(env.client, "/login/2fa")
+				require.Contains(t, challengePage, "Mit Passkey bestätigen")
+				require.NotContains(t, challengePage, `name="code"`)
+
+				blocked, _ := env.get(env.client, "/admin/")
+				require.Equal(t, "/", blocked.Header.Get("Location"))
+
+				return
+			}
 
 			if tc.name == "required_totp" || tc.name == "existing_totp" {
 				require.Equal(t, "/login/2fa", resp.Header.Get("Location"))

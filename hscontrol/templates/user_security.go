@@ -113,14 +113,30 @@ func UserRecoveryCodes(base, login string, codes []string) *elem.Element {
 	return adminDocument(base, "Wiederherstellungscodes · Meshora", "auth", elem.Main(attrs.Props{attrs.Class: "auth-card"}, brand(), elem.H1(nil, elem.Text("2FA ist aktiviert")), elem.P(nil, elem.Text("Speichere diese Wiederherstellungscodes jetzt an einem sicheren Ort. Jeder Code kann einmal statt eines Authenticator-Codes verwendet werden. Die Codes werden nur jetzt angezeigt.")), elem.Pre(attrs.Props{attrs.Class: "codeblock recovery-codes", attrs.ID: "recovery-codes"}, elem.Code(nil, elem.Text(strings.Join(codes, "\n")))), elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text("Bestehende Sitzungen wurden beendet. Melde dich mit Passwort und einem neuen Authenticator-Code an.")), linkButton(login+"?local=1", "Codes gespeichert – zur Anmeldung", "btn-primary")))
 }
 
-func UserSecondFactor(base, login, csrf, message string) *elem.Element {
-	fields := []elem.Node{brand(), elem.H1(nil, elem.Text("Anmeldung bestätigen")), elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text("Gib einen aktuellen Code deiner Authenticator-App oder einen Wiederherstellungscode ein."))}
+func UserSecondFactor(base, login, csrf, message string, totp, passkey bool) *elem.Element {
+	fields := []elem.Node{brand(), elem.H1(nil, elem.Text("Anmeldung bestätigen")), elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text("Bestätige die Anmeldung mit einem für dieses Konto eingerichteten Faktor."))}
 	if message != "" {
 		fields = append(fields, elem.Div(attrs.Props{attrs.Class: "alert", attrs.Role: "alert"}, elem.Text(message)))
 	}
 
-	fields = append(fields, elem.Form(attrs.Props{attrs.Method: "POST", attrs.Action: login + "login/2fa", attrs.Class: "stack"}, adminCSRFInput(csrf), securityCodeField("Anmeldecode", "login"), submitButton("Bestätigen", "btn-primary")), linkButton(login+"?local=1", "Zurück zur Anmeldung", "btn-secondary"))
+	if passkey {
+		fields = append(fields,
+			elem.Form(attrs.Props{attrs.Method: "POST", attrs.Action: login + "login/passkeys/begin", attrs.Class: "stack", "data-passkey-login": "", "data-finish": login + "login/passkeys/finish"},
+				adminCSRFInput(csrf), elem.Button(attrs.Props{attrs.Type: submitType, attrs.Class: "btn btn-primary btn-block", attrs.Disabled: "true"}, elem.Text("Mit Passkey bestätigen"))),
+			elem.P(attrs.Props{attrs.ID: "passkey-status", attrs.Class: "muted", attrs.Role: "status", "aria-live": "polite"}),
+			elem.Script(attrs.Props{attrs.Src: publicUIPath(base, "/assets/security.js"), "defer": "true"}))
+	}
 
+	if totp {
+		fields = append(fields, elem.Form(attrs.Props{attrs.Method: "POST", attrs.Action: login + "login/2fa", attrs.Class: "stack"},
+			adminCSRFInput(csrf), securityCodeField("Authenticator- oder Wiederherstellungscode", "login"), submitButton("Bestätigen", "btn-primary")))
+	}
+
+	if !totp && !passkey {
+		fields = append(fields, elem.P(attrs.Props{attrs.Role: "alert"}, elem.Text("Kein eingerichteter Faktor ist verfügbar. Bitte den Administrator kontaktieren.")))
+	}
+
+	fields = append(fields, linkButton(login+"?local=1", "Zurück zur Anmeldung", "btn-secondary"))
 	return adminDocument(base, "Anmeldung bestätigen · Meshora", "auth", elem.Main(attrs.Props{attrs.Class: "auth-card"}, fields...))
 }
 

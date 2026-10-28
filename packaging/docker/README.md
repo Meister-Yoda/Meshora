@@ -2,6 +2,14 @@
 
 ## Meshora v0.2.1-rc.6 (28. Oktober 2026)
 
+**RC.6 aktualisiert:** Der bestehende Tag und die Artefakte wurden mit den
+folgenden Korrekturen neu erstellt. Vorhandene RC.6-Installationen müssen
+das Image erneut herunterladen und den Container neu erstellen.
+
+- OIDC mit vorhandenem Passkey führt direkt zur gebundenen Faktorbestätigung.
+- Mailseite: Umschaltung unter der produktiven Sicherheitsrichtlinie repariert
+  und Feldabstände korrigiert.
+
 Release Candidate des aktuellen main-Stands. WireGuard-Gateway-Code ist
 nicht enthalten; der Prototyp bleibt auf dem separaten lokalen Branch.
 

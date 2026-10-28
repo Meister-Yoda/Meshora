@@ -2,6 +2,11 @@
 
 ## Meshora v0.2.1-rc.6 (2026-10-28)
 
+RC.6 republished at the user's request with the fixes below; tag and artifacts replace the initial RC.6 build.
+
+- Continue OIDC login with account-bound Passkey confirmation instead of falling back to the password form. Preserve OIDC expiry and enforce account revision, signature validation and single-use challenges.
+- Allow the mail page's own script under its CSP so the selected transport actually switches in production; restore spacing inside transport sections.
+
 - Simplify mail settings to display the selected transport and collapse advanced JMAP options; preserve values when switching transports.
 - Revalidate OIDC login, account linking, token checks, browser binding, replay protection and second-factor enforcement with local provider race tests. OIDC callback URLs remain unchanged; live Authentik validation remains outstanding.
 
