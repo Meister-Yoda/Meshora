@@ -45,9 +45,8 @@ Konfiguration und aktiviert den Server automatisch. Bestehende Installationen
 behalten ihre Daten und überspringen die Einrichtung.
 
 Das Release-Image lautet `ghcr.io/meister-yoda/meshora:v0.2.0`, für Linux
-AMD64 und ARM64. Volumes, Reverse Proxies und Updates beschreibt die
-[Docker-Anleitung](packaging/docker/README.md). Ein Reverse Proxy muss den
-**Container-Port 8080** ansprechen.
+AMD64 und ARM64. Volumes und Updates beschreibt die
+[Docker-Anleitung](packaging/docker/README.md).
 
 ## Dashboard
 

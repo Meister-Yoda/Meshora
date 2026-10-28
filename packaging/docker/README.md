@@ -134,17 +134,6 @@ Tailscale-Clients mit der eigenen Server-URL verbinden:
 tailscale up --login-server=https://mesh.example.com
 ```
 
-## Coolify und andere Reverse Proxies
-
-Die normale Compose-Datei einfügen. Die eigene Domain auf den Dienst
-`meshora` und dessen internen Port 8080 routen. Die Domain und DNS-Zuordnung
-müssen vor dem Browserzugriff eingerichtet sein. Anschließend die
-Ersteinrichtung über diese Domain öffnen und dieselbe URL in Meshora eingeben.
-
-Die Datei enthält keine Coolify-spezifischen Felder. Die Einrichtung meldet
-sich bereits während des Assistenten als gesund, damit der Proxy sie
-erreichen kann.
-
 ## Seiten und URLs
 
 - `/` und `/login/*`: Anmeldung, OIDC-Start und Bestätigung vorhandener Faktoren

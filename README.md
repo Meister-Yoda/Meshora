@@ -41,8 +41,8 @@ least 12 characters. OIDC is optional and can also be configured later under
 server automatically. Existing installations keep their data and skip setup.
 
 The release image is `ghcr.io/meister-yoda/meshora:v0.2.0`, for Linux
-AMD64 and ARM64. See the [Docker guide](packaging/docker/README.md) for volumes,
-reverse proxies and updates. Route a reverse proxy to **container port 8080**.
+AMD64 and ARM64. See the [Docker guide](packaging/docker/README.md) for volumes
+and updates.
 
 ## Dashboard
 
