@@ -1,8 +1,7 @@
-// Package webui serves the Meshora web admin dashboard under /admin.
+// Package webui serves public authentication, personal accounts, and administration.
 //
-// Admins log in with local accounts ([types.WebAdmin]), which are separate
-// from tailnet users. Sessions live in memory only, so a restart logs every
-// admin out. All state-changing requests are POSTs that carry a per-session
+// Local and OIDC authentication share immutable user identities. Sessions live
+// in memory only, so a restart logs users out. All state-changing requests are POSTs that carry a per-session
 // CSRF token, and the session cookie is SameSite=Strict.
 package webui
 
@@ -183,44 +182,51 @@ func (h *Handler) Close() {
 	h.failures.Close()
 }
 
-// Routes mounts the login at the root and the dashboard under [BasePath].
+// Routes separates public login, personal account pages and administrator-only pages.
 func (h *Handler) Routes(r chi.Router) {
-	r.With(adminHeaders).Get("/", h.loginPage)
-	r.With(adminHeaders).Post("/", h.login)
-	r.With(adminHeaders).Get("/login/2fa", h.secondFactorPage)
-	r.With(adminHeaders).Post("/login/2fa", h.finishSecondFactor)
-	r.With(adminHeaders).Get("/connect", h.enrollment)
-	r.With(adminHeaders).Get(BasePath+"/assets/enrollment.js", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-		_, _ = w.Write(assets.EnrollmentJS)
-	})
-	r.Get("/setup", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, h.loginPath(), http.StatusSeeOther)
-	})
-
-	r.Route(BasePath, func(r chi.Router) {
+	r.Group(func(r chi.Router) {
 		r.Use(adminHeaders)
+		r.Get("/", h.loginPage)
+		r.Post("/", h.login)
+		r.Get("/login/2fa", h.secondFactorPage)
+		r.Post("/login/2fa", h.finishSecondFactor)
+		r.Post("/login/oidc", h.oidcLogin)
+		r.Post("/login/passkeys/begin", h.beginPasskeyLogin)
+		r.Post("/login/passkeys/finish", h.finishPasskeyLogin)
+		// Keep the registered provider redirect URI and its narrowly scoped flow cookie.
+		r.Get("/admin/oidc/callback", h.oidcCallback)
+		r.Get("/connect", h.enrollment)
 		r.Get(templates.AdminStylesheetPath, stylesheet)
 		r.Get("/assets/security.js", h.securityScript)
-		r.Post("/passkeys/login/begin", h.beginPasskeyLogin)
-		r.Post("/passkeys/login/finish", h.finishPasskeyLogin)
+		r.Get("/assets/enrollment.js", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+			_, _ = w.Write(assets.EnrollmentJS)
+		})
 		r.Get("/assets/zones.js", func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			_, _ = w.Write(assets.ZonesJS)
 		})
-		r.Get("/login", func(w http.ResponseWriter, r *http.Request) {
-			target := h.loginPath()
-			if r.URL.RawQuery != "" {
-				target += "?" + r.URL.RawQuery
-			}
+		r.Get("/setup", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, h.loginPath(), http.StatusSeeOther) })
 
-			//nolint:gosec // G710: target starts with the configured local root; request data is appended only after ? as a query.
-			http.Redirect(w, r, target, http.StatusSeeOther)
-		})
-		r.Post("/login", h.login)
-		r.Post("/login/oidc", h.oidcLogin)
-		r.Get("/oidc/callback", h.oidcCallback)
+		//nolint:gosec // G101: public URL aliases, not credentials.
+		aliases := map[string]string{
+			"/admin/login":                 "/",
+			"/admin/login/oidc":            "/login/oidc",
+			"/admin/passkeys/login/begin":  "/login/passkeys/begin",
+			"/admin/passkeys/login/finish": "/login/passkeys/finish",
+			"/admin/logout":                "/logout",
+			"/admin/account":               "/account",
+		}
+		for oldPath, newPath := range aliases {
+			r.Handle(oldPath, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { h.redirectLegacy(w, r, newPath) }))
+		}
 
+		r.Handle("/admin/account/*", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			h.redirectLegacy(w, r, strings.TrimPrefix(r.URL.Path, BasePath))
+		}))
+		r.Handle("/admin/assets/*", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			h.redirectLegacy(w, r, strings.TrimPrefix(r.URL.Path, BasePath))
+		}))
 		r.Group(func(r chi.Router) {
 			r.Use(h.requireSession)
 			r.Get("/account", h.accountPage)
@@ -236,6 +242,11 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Get("/account/password", h.accountPasswordPage)
 			r.Post("/account/password", h.saveAccountPassword)
 			r.Get("/account/devices/{id}", h.accountDevice)
+			r.Post("/logout", h.logout)
+		})
+		r.Route(BasePath, func(r chi.Router) {
+			r.Use(h.requireSession)
+			r.Use(h.requireAdmin)
 			r.Post("/users/{id}/admin", h.setAccountAdmin)
 			r.Post("/users/{id}/auth-policy", h.saveUserAuthPolicy)
 			r.Post("/users/{id}/password", h.resetAccountPassword)
@@ -294,10 +305,22 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Get("/settings/{section}", h.settingsPage)
 			r.Post("/settings/oidc", h.saveOIDCSettings)
 			r.Post("/settings/oidc-button", h.saveOIDCButtonText)
-
-			r.Post("/logout", h.logout)
 		})
 	})
+}
+
+func (h *Handler) redirectLegacy(w http.ResponseWriter, r *http.Request, path string) {
+	target := h.rootPath(path)
+	if r.URL.RawQuery != "" {
+		target += "?" + r.URL.RawQuery
+	}
+
+	status := http.StatusTemporaryRedirect
+	if r.Method == http.MethodGet || r.Method == http.MethodHead {
+		status = http.StatusSeeOther
+	}
+	//nolint:gosec // G710: only local canonical paths are used; request data is restricted to path suffixes and query values.
+	http.Redirect(w, r, target, status)
 }
 
 func adminHeaders(next http.Handler) http.Handler {
@@ -321,16 +344,16 @@ func stylesheet(w http.ResponseWriter, _ *http.Request) {
 
 func (h *Handler) loginPage(w http.ResponseWriter, r *http.Request) {
 	if sess, ok := h.currentSession(r); ok {
-		target := h.publicPath + "/account"
+		target := h.rootPath("/account")
 		if sess.isAdmin {
 			target = h.publicPath + "/"
 		}
 
 		if sess.enrollmentOnly {
-			target = h.publicPath + "/account/security"
+			target = h.rootPath("/account/security")
 		}
 		if sess.mustChangePassword {
-			target = h.publicPath + "/account/password"
+			target = h.rootPath("/account/password")
 		}
 
 		http.Redirect(w, r, target, http.StatusSeeOther)
@@ -666,25 +689,16 @@ func (h *Handler) requireSession(next http.Handler) http.Handler {
 			return
 		}
 
-		personal := r.URL.Path == BasePath+"/account" || strings.HasPrefix(r.URL.Path, BasePath+"/account/")
-		if sess.mustChangePassword && r.URL.Path != BasePath+"/account/password" && r.URL.Path != BasePath+"/logout" {
-			http.Redirect(w, r, h.publicPath+"/account/password", http.StatusSeeOther)
+		if sess.mustChangePassword && r.URL.Path != "/account/password" && r.URL.Path != "/logout" {
+			http.Redirect(w, r, h.rootPath("/account/password"), http.StatusSeeOther)
 			return
 		}
 
 		if sess.enrollmentOnly && !enrollmentPath(r.URL.Path) {
-			http.Redirect(w, r, h.publicPath+"/account/security", http.StatusSeeOther)
+			http.Redirect(w, r, h.rootPath("/account/security"), http.StatusSeeOther)
 			return
 		}
-		if !sess.isAdmin && !personal && r.URL.Path != BasePath+"/logout" {
-			if r.URL.Path == BasePath+"/" {
-				http.Redirect(w, r, h.publicPath+"/account", http.StatusSeeOther)
-			} else {
-				http.Error(w, "Admin-Zugang erforderlich", http.StatusForbidden)
-			}
 
-			return
-		}
 		if r.Method == http.MethodPost {
 			limit := int64(maxFormBytes)
 			if strings.HasPrefix(r.URL.Path, BasePath+"/policy/") {
@@ -709,6 +723,23 @@ func (h *Handler) requireSession(next http.Handler) http.Handler {
 		}
 
 		next.ServeHTTP(w, r.WithContext(withSession(r.Context(), sess)))
+	})
+}
+
+// requireAdmin is applied exclusively to the administration route group.
+func (h *Handler) requireAdmin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !sessionFrom(r).isAdmin {
+			if strings.TrimSuffix(r.URL.Path, "/") == BasePath {
+				http.Redirect(w, r, h.rootPath("/account"), http.StatusSeeOther)
+			} else {
+				http.Error(w, "Admin-Zugang erforderlich", http.StatusForbidden)
+			}
+
+			return
+		}
+
+		next.ServeHTTP(w, r)
 	})
 }
 
@@ -738,6 +769,11 @@ func (h *Handler) currentSession(r *http.Request) (*session, bool) {
 		return nil, false
 	}
 
+	err = h.requireVerifiedFactor(sess)
+	if err != nil {
+		h.sessions.Remove(key)
+		return nil, false
+	}
 	_, err = h.state.GetUserByID(sess.userID)
 	if err != nil {
 		h.sessions.Remove(key)
@@ -777,9 +813,14 @@ func (h *Handler) clearFailures(key string) {
 	h.failures.Remove(key)
 }
 
+// rootPath keeps canonical public URLs inside the configured reverse-proxy prefix.
+func (h *Handler) rootPath(path string) string {
+	return strings.TrimSuffix(h.publicPath, BasePath) + path
+}
+
 // loginPath is the public application root, including any reverse-proxy prefix.
 func (h *Handler) loginPath() string {
-	return strings.TrimSuffix(h.publicPath, BasePath) + "/"
+	return h.rootPath("/")
 }
 
 // setCookie sets an HttpOnly, SameSite=Strict cookie scoped to the application. maxAge 0 makes a session cookie, negative deletes it.

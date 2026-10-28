@@ -240,7 +240,7 @@ func (h *Handler) oidcCallback(w http.ResponseWriter, r *http.Request) {
 
 	authentication := &session{oidcSubject: idToken.Subject, expires: idToken.Expiry}
 
-	if policy.RequireStrongAuth && !policy.TOTPBypassedAt(time.Now()) {
+	if !policy.TOTPBypassedAt(time.Now()) {
 		security, securityErr := h.state.UserSecurity(types.UserID(user.ID))
 		if securityErr != nil {
 			h.oidcRejected(w, r)

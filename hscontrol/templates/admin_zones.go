@@ -118,7 +118,7 @@ func zonePanel(title string, children ...elem.Node) elem.Node {
 }
 
 func AdminZones(info AdminPageInfo, page AdminZonesInfo) *elem.Element {
-	content := []elem.Node{elem.Script(attrs.Props{attrs.Src: info.Base + "/assets/zones.js", "defer": "true"}), pageHead("Zonen", "Netzbereiche, Verbindungen und Exit-Berechtigungen gemeinsam verwalten.")}
+	content := []elem.Node{elem.Script(attrs.Props{attrs.Src: info.RootPath("/assets/zones.js"), "defer": "true"}), pageHead("Zonen", "Netzbereiche, Verbindungen und Exit-Berechtigungen gemeinsam verwalten.")}
 	if page.Error != "" && page.ZoneForm == nil {
 		content = append(content, elem.Div(attrs.Props{attrs.Class: adminFlashErrorClass, attrs.Role: "alert"}, elem.Text(page.Error)))
 	}

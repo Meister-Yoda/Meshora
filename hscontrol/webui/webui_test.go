@@ -190,13 +190,13 @@ func TestDashboardRequiresLogin(t *testing.T) {
 func TestStylesheetIsPublic(t *testing.T) {
 	env := newTestEnv(t)
 
-	resp, body := env.get(env.client, "/admin/assets/admin.css")
+	resp, body := env.get(env.client, "/assets/admin.css")
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Equal(t, "text/css; charset=utf-8", resp.Header.Get("Content-Type"))
 	assert.Contains(t, body, ".auth-card")
 
 	_, login := env.get(env.client, "/")
-	assert.Contains(t, login, `href="/admin/assets/admin.css?v=`)
+	assert.Contains(t, login, `href="/assets/admin.css?v=`)
 	assert.NotContains(t, login, "style=", "the CSP forbids inline styles")
 }
 
@@ -229,10 +229,10 @@ func TestLoginAndLogout(t *testing.T) {
 	assert.Equal(t, "no-store", resp.Header.Get("Cache-Control"))
 
 	// Logout without the session's CSRF token is refused.
-	resp, _ = env.post(env.client, "/admin/logout", url.Values{})
+	resp, _ = env.post(env.client, "/logout", url.Values{})
 	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
 
-	resp, _ = env.post(env.client, "/admin/logout", url.Values{"csrf_token": {csrfFrom(t, body)}})
+	resp, _ = env.post(env.client, "/logout", url.Values{"csrf_token": {csrfFrom(t, body)}})
 	assert.Equal(t, http.StatusSeeOther, resp.StatusCode)
 
 	resp, _ = env.get(env.client, "/admin/")
@@ -596,7 +596,7 @@ func TestPublicEnrollment(t *testing.T) {
 
 	resp, _ := env.get(env.client, "/connect?platform=invalid")
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
-	resp, script := env.get(env.client, "/admin/assets/enrollment.js")
+	resp, script := env.get(env.client, "/assets/enrollment.js")
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Contains(t, script, "navigator.clipboard.writeText")
 	assert.Contains(t, resp.Header.Get("Content-Type"), "text/javascript")
@@ -643,4 +643,105 @@ func TestRootLoginAndLegacyRedirect(t *testing.T) {
 			require.Equal(t, "/mesh/", cookie.Path)
 		}
 	}
+}
+
+func TestRouteNamespacesAndCompatibility(t *testing.T) {
+	env := newTestEnv(t)
+	for _, path := range []string{"/assets/admin.css", "/assets/security.js", "/assets/zones.js", "/assets/enrollment.js"} {
+		response, _ := env.get(newClient(t), path)
+		require.Equal(t, http.StatusOK, response.StatusCode, path)
+	}
+
+	for oldPath, newPath := range map[string]string{"/admin/account?lang=de": "/account?lang=de", "/admin/account/security": "/account/security", "/admin/assets/security.js": "/assets/security.js"} {
+		response, _ := env.get(env.client, oldPath)
+		require.Equal(t, http.StatusSeeOther, response.StatusCode)
+		require.Equal(t, newPath, response.Header.Get("Location"))
+	}
+
+	csrf := env.signedIn()
+	response, page := env.get(env.client, "/account")
+	require.Equal(t, http.StatusOK, response.StatusCode)
+	require.Contains(t, page, `action="/account/profile"`)
+	require.Contains(t, page, `action="/logout"`)
+	require.NotContains(t, page, "/admin/account")
+
+	actor, err := env.state.AuthenticateUserAccount(testAdmin, testPassword)
+	require.NoError(t, err)
+	before, err := env.state.GetUserByID(types.UserID(actor.UserID))
+	require.NoError(t, err)
+
+	form := url.Values{"csrf_token": {csrf}, "display_name": {"Compatible profile update"}}
+	response, _ = env.post(env.client, "/admin/account/profile", form)
+	require.Equal(t, http.StatusTemporaryRedirect, response.StatusCode)
+	require.Equal(t, "/account/profile", response.Header.Get("Location"))
+
+	unchanged, err := env.state.GetUserByID(types.UserID(actor.UserID))
+	require.NoError(t, err)
+	require.Equal(t, before.DisplayName, unchanged.DisplayName)
+
+	response, _ = env.post(env.client, response.Header.Get("Location"), form)
+	require.Equal(t, "/account", response.Header.Get("Location"))
+
+	updated, err := env.state.GetUserByID(types.UserID(actor.UserID))
+	require.NoError(t, err)
+	require.Equal(t, "Compatible profile update", updated.DisplayName)
+	response, _ = env.post(newClient(t), "/admin/passkeys/login/begin", nil)
+	require.Equal(t, http.StatusTemporaryRedirect, response.StatusCode)
+	require.Equal(t, "/login/passkeys/begin", response.Header.Get("Location"))
+	response, _ = env.post(newClient(t), response.Header.Get("Location"), nil)
+	require.Equal(t, http.StatusForbidden, response.StatusCode)
+
+	env.handler.activeOIDC = types.OIDCConfig{Issuer: "https://auth.example.test", ClientID: "test"}
+	response, _ = env.get(env.client, "/admin/oidc/callback?state=forged&code=forged")
+	require.Equal(t, http.StatusBadRequest, response.StatusCode, "the registered OIDC callback stays public and verifies its flow")
+}
+
+func TestAccountRoutesWithProxyPrefix(t *testing.T) {
+	env := newTestEnv(t)
+	env.handler.publicPath = "/mesh/admin"
+	proxy := httptest.NewServer(http.StripPrefix("/mesh", env.server.Config.Handler))
+	t.Cleanup(proxy.Close)
+	client := newClient(t)
+	request := func(method, path string, form url.Values) (int, http.Header, string) {
+		var body io.Reader
+		if form != nil {
+			body = strings.NewReader(form.Encode())
+		}
+
+		req, err := http.NewRequestWithContext(t.Context(), method, proxy.URL+path, body)
+		require.NoError(t, err)
+
+		if form != nil {
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		}
+
+		response, err := client.Do(req)
+		require.NoError(t, err)
+
+		defer response.Body.Close()
+
+		data, err := io.ReadAll(response.Body)
+		require.NoError(t, err)
+
+		return response.StatusCode, response.Header, string(data)
+	}
+	status, _, page := request(http.MethodGet, "/mesh/?local=1", nil)
+	require.Equal(t, http.StatusOK, status)
+	require.Contains(t, page, `href="/mesh/assets/admin.css?v=`)
+	require.Contains(t, page, `action="/mesh/login/passkeys/begin"`)
+	status, headers, _ := request(http.MethodPost, "/mesh/", url.Values{"csrf_token": {csrfFrom(t, page)}, "username": {testAdmin}, "password": {testPassword}})
+	require.Equal(t, http.StatusSeeOther, status)
+	require.Equal(t, "/mesh/admin/", headers.Get("Location"))
+
+	status, _, page = request(http.MethodGet, "/mesh/account", nil)
+	require.Equal(t, http.StatusOK, status)
+	require.Contains(t, page, `action="/mesh/account/profile"`)
+	require.Contains(t, page, `action="/mesh/logout"`)
+
+	status, headers, _ = request(http.MethodGet, "/mesh/admin/account/security?lang=de", nil)
+	require.Equal(t, http.StatusSeeOther, status)
+	require.Equal(t, "/mesh/account/security?lang=de", headers.Get("Location"))
+
+	status, _, _ = request(http.MethodGet, "/mesh/assets/admin.css", nil)
+	require.Equal(t, http.StatusOK, status)
 }

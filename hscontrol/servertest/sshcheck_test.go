@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"tailscale.com/tailcfg"
+	"tailscale.com/tailcfg/nodecap"
 	"tailscale.com/types/netmap"
 )
 
@@ -244,4 +245,49 @@ func TestSSHCheckFollowsReturnedHoldURL(t *testing.T) {
 	followUp := pollSSHActionURL(t, h.Client(1),
 		expandHoldURL(initial.HoldAndDelegate, srcID, dstID, "root"))
 	assert.True(t, followUp.Accept, "authenticated root login must be accepted, got %+v", followUp)
+}
+
+// The disabled feature must override stored grants and already approved checks
+// on the actual Noise wire, while ordinary network access keeps working.
+func TestTailscaleSSHDisabledOverridesStoredRules(t *testing.T) {
+	h := servertest.NewHarness(t, 2,
+		servertest.WithServerOptions(servertest.WithTailscaleSSHEnabled(false)))
+	srcID := types.NodeID(h.Client(0).Netmap().SelfNode.ID()) //nolint:gosec
+	dstID := types.NodeID(h.Client(1).Netmap().SelfNode.ID()) //nolint:gosec
+
+	for _, action := range []string{"accept", "check"} {
+		t.Run(action, func(t *testing.T) {
+			marker := "test-ssh-disabled-" + action
+			h.ChangePolicy(t, fmt.Appendf(nil, `{
+    "grants": [{"src": ["*"], "dst": ["*"], "ip": ["*"]}],
+    "ssh": [{"action": %q, "src": ["harness-default@"],
+     "dst": ["autogroup:self"], "users": ["root", "autogroup:nonroot"]}],
+    "nodeAttrs": [{"target": ["*"], "attr": [%q]}]
+   }`, action, marker))
+			h.Client(1).WaitForCondition(t, "new policy without SSH grants", 10*time.Second,
+				func(nm *netmap.NetworkMap) bool {
+					return nm.SelfNode.CapMap().Contains(nodecap.Cap(marker)) &&
+						nm.SSHPolicy != nil && len(nm.SSHPolicy.Rules) == 0
+				})
+			_, found := h.Server.State().SSHCheckParams(srcID, dstID, sshCheckLocalUser)
+			require.False(t, found)
+
+			authID := types.MustAuthID()
+			pending := types.NewSSHCheckAuthRequest(srcID, dstID)
+			pending.FinishAuth(types.AuthVerdict{})
+			h.Server.State().SetAuthCacheEntry(authID, pending)
+
+			for _, followup := range []string{"", authID.String()} {
+				got := pollSSHAction(t, h.Server.URL, h.Client(1), srcID, dstID, followup)
+				assert.True(t, got.Reject)
+				assert.False(t, got.Accept)
+				assert.Empty(t, got.HoldAndDelegate)
+				assert.False(t, got.AllowAgentForwarding)
+				assert.False(t, got.AllowLocalPortForwarding)
+				assert.False(t, got.AllowRemotePortForwarding)
+			}
+
+			h.Client(0).WaitForPeers(t, 1, 10*time.Second)
+		})
+	}
 }

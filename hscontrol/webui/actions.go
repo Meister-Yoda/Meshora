@@ -60,6 +60,14 @@ func (h *Handler) redirect(w http.ResponseWriter, r *http.Request, path string, 
 	http.Redirect(w, r, h.publicPath+path, http.StatusSeeOther)
 }
 
+func (h *Handler) redirectPublic(w http.ResponseWriter, r *http.Request, path string, f *templates.AdminFlash) {
+	if f != nil {
+		sessionFrom(r).setFlash(f)
+	}
+
+	http.Redirect(w, r, h.rootPath(path), http.StatusSeeOther)
+}
+
 func success(format string, args ...any) *templates.AdminFlash {
 	return &templates.AdminFlash{Message: fmt.Sprintf(format, args...)}
 }

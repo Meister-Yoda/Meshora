@@ -12,9 +12,9 @@ import (
 
 	"github.com/creachadair/command"
 	"github.com/creachadair/flax"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/mount"
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/mount"
+	"github.com/moby/moby/client"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -129,7 +129,7 @@ func TestCompiledTestContainer(t *testing.T) {
 		_, _ = w.Write([]byte(`{"Id":"test-runner","Warnings":[]}`))
 	}))
 	t.Cleanup(server.Close)
-	cli, err := client.NewClientWithOpts(client.WithHost(server.URL), client.WithVersion("1.44"))
+	cli, err := client.New(client.WithHost(server.URL), client.WithAPIVersion("1.44"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, cli.Close()) })
 
@@ -211,7 +211,7 @@ func TestStreamAndWaitDrainsFinalOutput(t *testing.T) {
 		}
 	}))
 	t.Cleanup(server.Close)
-	cli, err := client.NewClientWithOpts(client.WithHost(server.URL), client.WithVersion("1.44"))
+	cli, err := client.New(client.WithHost(server.URL), client.WithAPIVersion("1.44"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, cli.Close()) })
 
@@ -246,4 +246,52 @@ func TestStreamAndWaitDrainsFinalOutput(t *testing.T) {
 	data, err := os.ReadFile(output.Name())
 	require.NoError(t, err)
 	assert.Equal(t, "--- PASS: TestExample (0.01s)\nPASS\n", string(data))
+}
+
+// Cleanup must preserve run isolation when the SDK serializes list filters and
+// removal options. No Docker daemon is involved in this API contract check.
+func TestCleanupByRunIDWithMobySDK(t *testing.T) {
+	const runID = "20261027-sdk-regression"
+
+	removed := make(chan string, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/containers/json"):
+			var filters map[string]map[string]bool
+			assert.NoError(t, json.Unmarshal([]byte(r.URL.Query().Get("filters")), &filters))
+			assert.Equal(t, map[string]map[string]bool{"label": {"hi.run-id=" + runID: true}}, filters)
+			assert.Equal(t, "1", r.URL.Query().Get("all"))
+
+			_, _ = w.Write([]byte(`[{"Id":"own-container","Names":["/hs-own"],"State":"exited"}]`))
+		case r.Method == http.MethodDelete && strings.HasSuffix(r.URL.Path, "/containers/own-container"):
+			assert.Equal(t, "1", r.URL.Query().Get("force"))
+
+			removed <- "own-container"
+
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected Docker API request: %s %s", r.Method, r.URL)
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	// Exercise the documented environment fallback without invoking a host's
+	// Docker context or inheriting TLS credentials from its daemon.
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("DOCKER_HOST", server.URL)
+	t.Setenv("DOCKER_API_VERSION", "1.44")
+	t.Setenv("DOCKER_TLS_VERIFY", "")
+	t.Setenv("DOCKER_CERT_PATH", "")
+	require.NoError(t, killTestContainersByRunID(t.Context(), runID))
+
+	select {
+	case id := <-removed:
+		assert.Equal(t, "own-container", id)
+	default:
+		t.Fatal("cleanup did not remove the container from the requested run")
+	}
+
+	assert.Empty(t, removed)
 }

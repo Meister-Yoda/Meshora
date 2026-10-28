@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"runtime"
 	"slices"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1514,7 +1515,11 @@ func TestPrimaryRoutesForNodeSorted(t *testing.T) {
 	store := NewNodeStore(types.Nodes{&node}, allowAllPeersFunc, TestBatchSize, TestBatchTimeout)
 
 	for range 20 {
-		require.Equal(t, prefixes, store.PrimaryRoutesForNode(1))
+		result := store.PrimaryRoutesForNode(1)
+		require.Equal(t, prefixes, result)
+		result[0] = netip.Prefix{}
+
+		require.Equal(t, prefixes, store.PrimaryRoutesForNode(1), "callers must not mutate the shared route index")
 	}
 }
 
@@ -2659,4 +2664,47 @@ func TestNodeStoreNodeKeyIndexMatchesNodes(t *testing.T) {
 	}
 
 	require.Empty(t, nodeKeyIndexMismatch(store.data.Load()))
+}
+
+func BenchmarkPrimaryRouteLookup(b *testing.B) {
+	for _, count := range []int{8, 512} {
+		b.Run(strconv.Itoa(count), func(b *testing.B) {
+			nodes := make(map[types.NodeID]types.Node)
+
+			for i := range count {
+				id := types.NodeID(i + 1)
+				n := createTestNode(id, 1, "user", "router")
+				prefix := netip.PrefixFrom(netip.AddrFrom4([4]byte{10, byte(i >> 8), byte(i), 0}), 24)
+				n.Hostinfo = &tailcfg.Hostinfo{RoutableIPs: []netip.Prefix{prefix}}
+				n.ApprovedRoutes = []netip.Prefix{prefix}
+				n.IsOnline = new(true)
+				nodes[id] = n
+			}
+
+			snapshot := snapshotFromNodes(nodes, func([]types.NodeView) map[types.NodeID][]types.NodeID { return nil }, nil, false, false)
+			store := &NodeStore{}
+			store.data.Store(&snapshot)
+			b.Run("lookup", func(b *testing.B) {
+				b.ReportAllocs()
+
+				for b.Loop() {
+					_ = store.PrimaryRoutesForNode(1)
+				}
+			})
+			b.Run("snapshot-reuse", func(b *testing.B) {
+				b.ReportAllocs()
+
+				for b.Loop() {
+					_ = snapshotFromNodes(nodes, func([]types.NodeView) map[types.NodeID][]types.NodeID { return nil }, &snapshot, true, true)
+				}
+			})
+			b.Run("snapshot-rebuild-routes", func(b *testing.B) {
+				b.ReportAllocs()
+
+				for b.Loop() {
+					_ = snapshotFromNodes(nodes, func([]types.NodeView) map[types.NodeID][]types.NodeID { return nil }, &snapshot, true, false)
+				}
+			})
+		})
+	}
 }

@@ -1,5 +1,34 @@
 # Meshora starten und im Browser einrichten
 
+## Meshora v0.2.1-rc.4 (28. Oktober 2026)
+
+Release Candidate des aktuellen main-Stands. WireGuard-Gateway-Code ist
+nicht enthalten; der Prototyp bleibt auf dem separaten lokalen Branch.
+
+- Anmeldung, OIDC, Passkeys und bestehende Zwei-Faktor-Anforderungen weiter
+  abgesichert; Root-/Account-Routen und Weiterleitungen bereinigt.
+- **Verhaltensaenderung:** Tailscale SSH ist standardmaessig abgeschaltet.
+  Eine ausdrueckliche Server-Option tailscale_ssh_enabled ist zum Aktivieren
+  erforderlich. Gewoehnliches OpenSSH bleibt von den Netzwerkregeln abhaengig.
+- Primaere Routen pro Node indiziert; doppelte Zonenanalyse entfernt.
+- Regulare und Debug-Basisimages auf die bereinigten Multiarch-Digests
+  gepinnt; Zielarchitektur fuer ARM64-Builds korrigiert.
+- Docker-Testwerkzeuge auf die aktuellen Moby-APIs angepasst.
+
+Vor dem Update Konfiguration und Datenbank sichern. Zum expliziten RC-Test:
+
+```sh
+MESHORA_VERSION=v0.2.1-rc.4 docker compose pull
+MESHORA_VERSION=v0.2.1-rc.4 docker compose up -d
+```
+
+Der RC verschiebt latest nicht. Tailscale-Client-Sicherheitsupdates weiterhin
+separat installieren. Lokale Kern-/Race-Tests, Lint, Multiarch-Builds und
+AMD64-Start sind geprueft; ARM64-Start und die vollstaendige Zonen-Abnahme
+mit realem Clientverkehr bleiben offen. Die folgenden Abschnitte beschreiben
+die bestehende stabile v0.2.0-Version.
+
+
 ## Neu in v0.2.0
 
 - Überarbeitete responsive Oberfläche mit Hell-/Dunkelansicht und dezenter Glasoptik für Navigation und Dialoge.
@@ -116,6 +145,21 @@ Die Datei enthält keine Coolify-spezifischen Felder. Die Einrichtung meldet
 sich bereits während des Assistenten als gesund, damit der Proxy sie
 erreichen kann.
 
+## Seiten und URLs
+
+- `/` und `/login/*`: Anmeldung, OIDC-Start und Bestätigung vorhandener Faktoren
+- `/account`, `/account/devices/*`, `/account/security`, `/account/password`: eigenes Konto
+- `/admin/*`: Verwaltung der Instanz, nur mit Admin-Zugang
+- `/assets/*`: gemeinsame Stylesheets und Browser-Skripte
+- `/logout`: Abmeldung per geschütztem Formular
+
+Alte Konto-, Login- und Asset-Links unter `/admin` werden auf die kanonischen
+Pfade weitergeleitet. Formular-POSTs behalten dabei ihre Methode und ihren
+Inhalt. Die registrierte WebUI-OIDC-Callback-URL `/admin/oidc/callback` bleibt
+aus Kompatibilitätsgründen unverändert; die Provider-Konfiguration muss nicht
+angepasst werden. Die OIDC-Callback-URL für Tailnet-Registrierungen bleibt
+separat unter `/oidc/callback`.
+
 ## Lokale Konten: 2FA und Passkeys
 
 Unter **Mein Konto → Sicherheit** können lokale Nutzer eine Authenticator-App
@@ -133,13 +177,17 @@ Passkeys benötigen eine öffentliche HTTPS-Adresse; für lokale Entwicklung
 ist `http://localhost` zulässig. Die Domain aus `server_url` bindet die Passkeys
 an diese Installation. Ein Passkey mit verpflichtender Gerätebestätigung
 (PIN oder Biometrie) kann direkt ohne Passwort und Authenticator-Code anmelden.
-OIDC-Anmeldungen verwenden die Sicherheitsregeln des OIDC-Anbieters. Eine in
-Meshora gesetzte Pflicht für 2FA oder Passkeys gilt zusätzlich auch für OIDC.
+Nach der Einrichtung eines Passkeys oder einer Authenticator-App reicht das
+Passwort allein nicht mehr zur Anmeldung. Bis zur Bestätigung eines vorhandenen
+Faktors bleibt der Nutzer auf der Login-Seite und kann weder das Passwort noch
+Anmeldemethoden ändern. Das gilt zusätzlich zu den Sicherheitsregeln des
+OIDC-Anbieters auch für OIDC-Anmeldungen. Nur eine ausdrücklich gesetzte,
+befristete Admin-Ausnahme erlaubt die dokumentierte Wiederherstellung.
 
 Administratoren können auf der Nutzerdetailseite **2FA oder Passkey verpflichtend
 verlangen**. Ohne bestätigten Faktor erhält der Nutzer nach der Anmeldung nur
-Zugriff auf Passwort und Sicherheitseinrichtung. Bereits vorhandene Passkeys
-können dort direkt bestätigt werden. Jede Änderung der Anmeldesicherheit beendet
+Zugriff auf Passwort und Sicherheitseinrichtung. Bereits vorhandene Faktoren
+müssen auf der Login-Seite bestätigt werden; sie öffnen keine neue Einrichtung. Jede Änderung der Anmeldesicherheit beendet
 alle bestehenden WebUI-Sitzungen des betroffenen Nutzers, auch OIDC-Sitzungen.
 
 Für Supportfälle gibt es getrennte Ausnahmen: die 2FA-Prüfung aussetzen und die
@@ -201,3 +249,59 @@ docker build -f Dockerfile.meshora --build-arg VERSION=dev -t meshora:dev .
 ```
 
 Beim Selbstbau `MESHORA_IMAGE=meshora` und `MESHORA_VERSION=dev` verwenden.
+
+### Temporary Tailscale SSH restriction
+
+Meshora disables Tailscale SSH by default (`tailscale_ssh_enabled: false`).
+Existing SSH rules remain stored, but clients receive an explicit empty SSH
+policy and pending or previously approved SSH checks are rejected. This does
+not disable normal OpenSSH connections allowed by the network policy.
+Keep this setting disabled while the Tailscale SSH security fixes are rolled
+out to clients. Enabling it is an explicit server-configuration opt-in;
+editing SSH rules in the WebUI cannot override the disabled setting.
+
+The restriction takes effect when this Meshora build is deployed and clients
+receive its network map. It cannot stop a disconnected client from using an
+old cached policy, or guarantee termination of an already established SSH
+session. For immediate protection on an affected host, disable Tailscale SSH
+there with `tailscale set --ssh=false`, after verifying an alternative admin
+access path. Apply the upstream client fixes when available.
+
+## Reproduzierbare Container-Basis
+
+Regulaeres Image und Debug-Image sind auf die Multiarch-Indizes des
+Headscale-0.29.6-Release-Stands festgelegt:
+
+- regulaer: sha256:f5e95195e998742ff590b7569bae479accce1226e51ae6c3118954030121cdcb
+- Debug: sha256:864c3a9f9e4718b65712bbf0ebc2c1a001ff1a3c3b80cece822532d8dc67b0bf
+
+Die Pins stehen in Dockerfile.meshora und .goreleaser.yml. Bei einem Update
+die Digests mit docker buildx imagetools inspect fuer base-debian13 und
+base-debian13:debug ermitteln, beide Architekturen und das CA-Bundle pruefen
+und die Pins gemeinsam aktualisieren. Ein neuer Tag allein aktualisiert die
+festgelegten Images nicht. Die Builder-Go-Version bleibt separat festgelegt.
+
+Pruefung am 28. Oktober 2026: Alle vier Basisvarianten (regulaer/Debug,
+AMD64/ARM64) enthalten 148 CA-Zertifikate. Das von Headscale 0.29.6 benannte
+emSign ECC Root CA - G3 ist nicht enthalten. Bundle-SHA256:
+e9c7b63ee2623386e9b0a3ee32f499d01a8ea23dc83b8383ddff9f8e749543b7.
+
+Lokale Multiarch-Builds beider Varianten und die ELF-Architekturen wurden
+geprueft. Version und HTTP-Ersteinrichtung starten in beiden AMD64-Images.
+Der Debug-Test verwendet denselben Dockerfile mit der in GoReleaser
+festgelegten Debug-Basis; dies ist kein vollstaendiger GoReleaser-Release-Lauf.
+ARM64 wurde korrekt crosskompiliert; ein ARM64-Laufzeittest steht aus, da
+diese lokale Umgebung weder ARM64-Hardware noch einen ARM64-Emulator hat.
+
+Dockerfile.meshora uebernimmt TARGETOS und TARGETARCH von BuildKit. Keine
+amd64-Vorbelegung setzen: Sie wuerde ein abweichendes Multiarch-Ziel
+ueberschreiben. Ein lokaler Multiarch-Build ist beispielsweise:
+
+```sh
+docker buildx build --platform linux/amd64,linux/arm64 --load \
+  -t meshora-local:validation -f Dockerfile.meshora .
+```
+
+Upstream-Referenz:
+[Headscale 0.29.6](https://github.com/juanfont/headscale/blob/v0.29.6/.goreleaser.yml)
+und [Sicherheitshinweise](https://github.com/juanfont/headscale/blob/v0.29.6/CHANGELOG.md).

@@ -153,6 +153,8 @@ func NewNodeStore(allNodes types.Nodes, peersFunc PeersFunc, batchSize int, batc
 // a new [Snapshot] is created with the updated state,
 // and replaces the old one atomically.
 type Snapshot struct {
+	// primaryRoutesByNode is immutable and reused with unchanged route elections.
+	primaryRoutesByNode map[types.NodeID][]netip.Prefix
 	// nodesByID is the main source of truth for nodes.
 	nodesByID map[types.NodeID]types.Node
 	// nodeViewsByID resolves peer adjacency IDs to immutable views from this
@@ -733,6 +735,20 @@ func snapshotFromNodes(
 		routes, isPrimaryRoute = electPrimaryRoutes(nodes, prevRoutes)
 	}
 
+	var primaryRoutesByNode map[types.NodeID][]netip.Prefix
+	if reuseRoutes {
+		primaryRoutesByNode = prev.primaryRoutesByNode
+	} else {
+		primaryRoutesByNode = make(map[types.NodeID][]netip.Prefix)
+		for prefix, id := range routes {
+			primaryRoutesByNode[id] = append(primaryRoutesByNode[id], prefix)
+		}
+
+		for _, prefixes := range primaryRoutesByNode {
+			slices.SortFunc(prefixes, netip.Prefix.Compare)
+		}
+	}
+
 	var peerIDsByNode map[types.NodeID][]types.NodeID
 
 	if reusePeers {
@@ -745,15 +761,16 @@ func snapshotFromNodes(
 	}
 
 	newSnap := Snapshot{
-		nodesByID:         nodes,
-		nodeViewsByID:     nodeViewsByID,
-		allNodes:          allNodes,
-		nodesByNodeKey:    make(map[key.NodePublic]types.NodeView),
-		nodesByMachineKey: make(map[key.MachinePublic]map[types.UserID]types.NodeView),
-		peersByNode:       peerIDsByNode,
-		nodesByUser:       make(map[types.UserID][]types.NodeView),
-		routes:            routes,
-		isPrimaryRoute:    isPrimaryRoute,
+		primaryRoutesByNode: primaryRoutesByNode,
+		nodesByID:           nodes,
+		nodeViewsByID:       nodeViewsByID,
+		allNodes:            allNodes,
+		nodesByNodeKey:      make(map[key.NodePublic]types.NodeView),
+		nodesByMachineKey:   make(map[key.MachinePublic]map[types.UserID]types.NodeView),
+		peersByNode:         peerIDsByNode,
+		nodesByUser:         make(map[types.UserID][]types.NodeView),
+		routes:              routes,
+		isPrimaryRoute:      isPrimaryRoute,
 	}
 
 	for _, n := range nodes {
@@ -1028,22 +1045,8 @@ func (s *NodeStore) PrimaryRouteFor(prefix netip.Prefix) (types.NodeID, bool) {
 // PrimaryRoutesForNode returns the prefixes for which id is the current
 // primary advertiser, sorted so an unchanged node renders identically.
 func (s *NodeStore) PrimaryRoutesForNode(id types.NodeID) []netip.Prefix {
-	snap := s.data.Load()
-	if !snap.isPrimaryRoute[id] {
-		return nil
-	}
-
-	out := make([]netip.Prefix, 0)
-
-	for prefix, nodeID := range snap.routes {
-		if nodeID == id {
-			out = append(out, prefix)
-		}
-	}
-
-	slices.SortFunc(out, netip.Prefix.Compare)
-
-	return out
+	// Return a copy so callers cannot mutate the shared snapshot.
+	return slices.Clone(s.data.Load().primaryRoutesByNode[id])
 }
 
 // HANodes returns the prefixes with two or more online advertisers, the

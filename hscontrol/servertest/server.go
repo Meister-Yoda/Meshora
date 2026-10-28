@@ -47,6 +47,7 @@ type serverConfig struct {
 	nodeStoreBatchTimeout time.Duration
 	taildropEnabled       bool
 	logTailEnabled        bool
+	tailscaleSSHEnabled   bool
 	realListener          bool
 	magicDNSDomain        string
 	dnsResolvers          []string
@@ -54,12 +55,19 @@ type serverConfig struct {
 
 func defaultServerConfig() *serverConfig {
 	return &serverConfig{
-		batchDelay:       50 * time.Millisecond,
-		bufferedChanSize: 30,
-		batcherWorkers:   1,
-		ephemeralTimeout: 30 * time.Second,
-		taildropEnabled:  true,
+		batchDelay:          50 * time.Millisecond,
+		bufferedChanSize:    30,
+		batcherWorkers:      1,
+		ephemeralTimeout:    30 * time.Second,
+		taildropEnabled:     true,
+		tailscaleSSHEnabled: true, // Legacy SSH regression coverage explicitly opts in.
 	}
+}
+
+// WithTailscaleSSHEnabled selects the SSH feature state for protocol tests.
+// Production configuration defaults to disabled.
+func WithTailscaleSSHEnabled(enabled bool) ServerOption {
+	return func(c *serverConfig) { c.tailscaleSSHEnabled = enabled }
 }
 
 // WithBatchDelay sets the batcher's change coalescing delay.
@@ -146,6 +154,7 @@ func NewServer(tb testing.TB, opts ...ServerOption) *TestServer {
 	prefixV6 := netip.MustParsePrefix("fd7a:115c:a1e0::/48")
 
 	cfg := types.Config{
+		TailscaleSSHEnabled: sc.tailscaleSSHEnabled,
 		// Placeholder; updated below once the in-memory server starts.
 		ServerURL:           "http://localhost:0",
 		NoisePrivateKeyPath: tmpDir + "/noise_private.key",

@@ -1112,3 +1112,22 @@ func TestPostgresConfigDSN(t *testing.T) {
 		})
 	}
 }
+
+func TestTailscaleSSHDisabledByDefault(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	for _, setting := range []string{"default", "disabled", "explicit opt-in"} {
+		t.Run(setting, func(t *testing.T) {
+			viper.Reset()
+			require.NoError(t, LoadConfig("testdata/base-domain-not-in-server-url.yaml", true))
+
+			if setting != "default" {
+				viper.Set("tailscale_ssh_enabled", setting == "explicit opt-in")
+			}
+
+			cfg, err := LoadServerConfig()
+			require.NoError(t, err)
+			assert.Equal(t, setting == "explicit opt-in", cfg.TailscaleSSHEnabled)
+		})
+	}
+}

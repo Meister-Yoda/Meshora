@@ -222,3 +222,62 @@ func BenchmarkOwnExitPeerMap(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkOwnExitDraftInspection(b *testing.B) {
+	user := types.User{ID: 1, Name: "alice"}
+	nodes := make(types.Nodes, 0, 64)
+
+	for i := 1; i <= 64; i++ {
+		n := node("device", fmt.Sprintf("100.64.0.%d", i), fmt.Sprintf("fd7a:115c:a1e0::%x", i), user)
+		n.ID = types.NodeID(i)
+		nodes = append(nodes, n)
+	}
+
+	model := types.NetworkZones{OwnExitOverrides: []types.OwnExitOverride{{User: 1, Rule: types.OwnExitRule{Mode: "allow", Services: []string{"tcp:443"}}}}}
+	raw, err := json.Marshal(map[string]any{"networkZones": model})
+	require.NoError(b, err)
+
+	for _, previous := range []bool{true, false} {
+		name := "single-parse"
+		if previous {
+			name = "previous-double-parse"
+		}
+
+		b.Run(name, func(b *testing.B) {
+			b.ReportAllocs()
+
+			for b.Loop() {
+				if previous {
+					_, err := types.NetworkZonesFromPolicy(string(raw))
+					if err != nil {
+						b.Fatal(err)
+					}
+				}
+
+				pm, err := NewPolicyManager(raw, []types.User{user}, nodes.ViewSlice())
+				if err != nil {
+					b.Fatal(err)
+				}
+
+				_, _ = pm.InspectOwnExits(nodes[0].View(), 1, 0)
+			}
+		})
+	}
+}
+
+func TestOwnExitInspectionDoesNotExposePolicySlices(t *testing.T) {
+	user := types.User{ID: 1, Name: "alice"}
+	n := node("device", "100.64.0.1", "fd7a:115c:a1e0::1", user)
+	n.ID = 1
+	raw := []byte("{\"networkZones\":{\"ownExitOverrides\":[{\"user\":1,\"rule\":{\"mode\":\"allow\",\"services\":[\"tcp:443\"]}}]}}")
+	pm, err := NewPolicyManager(raw, []types.User{user}, types.Nodes{n}.ViewSlice())
+	require.NoError(t, err)
+
+	direct, decision := pm.InspectOwnExits(n.View(), 1, 0)
+	require.Equal(t, pm.OwnExitDecision(n.View()), decision)
+	require.Equal(t, "allow", direct.Mode)
+	direct.Services[0] = "*"
+	decision.Rule.Services[0] = "*"
+	again, _ := pm.InspectOwnExits(n.View(), 1, 0)
+	require.Equal(t, []string{"tcp:443"}, again.Services)
+}

@@ -32,11 +32,6 @@ func (s *State) InspectOwnExitDraft(text string, user types.UserID, node types.N
 		return rule, types.OwnExitDecision{}, err
 	}
 
-	model, err := types.NetworkZonesFromPolicy(text)
-	if err != nil {
-		return rule, types.OwnExitDecision{}, err
-	}
-
 	var view types.NodeView
 	if node != 0 {
 		view, _ = s.GetNodeByID(node)
@@ -50,19 +45,12 @@ func (s *State) InspectOwnExitDraft(text string, user types.UserID, node types.N
 		view = working.View()
 	}
 
-	if model != nil {
-		for _, override := range model.OwnExitOverrides {
-			if (node != 0 && override.Node == node) || (node == 0 && override.User == user && override.Group == "") {
-				rule = override.Rule
-				break
-			}
-		}
-	}
-
 	manager, err := policyv2.NewPolicyManager([]byte(text), users, s.ListNodes())
 	if err != nil {
 		return rule, types.OwnExitDecision{}, err
 	}
 
-	return rule, manager.OwnExitDecision(view), nil
+	direct, decision := manager.InspectOwnExits(view, user, node)
+
+	return direct, decision, nil
 }

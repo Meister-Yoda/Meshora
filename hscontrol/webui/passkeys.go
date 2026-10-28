@@ -172,7 +172,7 @@ func (h *Handler) finishPasskeyRegistration(w http.ResponseWriter, r *http.Reque
 func (h *Handler) deletePasskey(w http.ResponseWriter, r *http.Request) {
 	err := h.proveSecurityChange(r)
 	if err != nil {
-		h.redirect(w, r, "/account/security", failure("Bestätigung fehlgeschlagen: %v", err))
+		h.redirectPublic(w, r, "/account/security", failure("Bestätigung fehlgeschlagen: %v", err))
 		return
 	}
 
@@ -180,7 +180,7 @@ func (h *Handler) deletePasskey(w http.ResponseWriter, r *http.Request) {
 
 	err = h.state.DeleteUserPasskey(sess.userID, sess.accountRevision, r.PostForm.Get("passkey_id"))
 	if err != nil {
-		h.redirect(w, r, "/account/security", failure("Passkey nicht entfernt: %v", err))
+		h.redirectPublic(w, r, "/account/security", failure("Passkey nicht entfernt: %v", err))
 		return
 	}
 
@@ -191,10 +191,6 @@ func (h *Handler) passkeyLoginCSRF(r *http.Request) bool {
 	token := r.Header.Get("X-CSRF-Token")
 	if token == "" || !h.validSecurityOrigin(r) {
 		return false
-	}
-
-	if sess, ok := h.currentSession(r); ok && tokensEqual(sess.csrf, token) {
-		return true
 	}
 
 	cookie, err := r.Cookie(loginCSRFCookie)

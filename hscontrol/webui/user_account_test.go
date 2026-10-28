@@ -36,26 +36,26 @@ func TestUnifiedUserFirstLoginAndPrivilegeIsolation(t *testing.T) {
 	client := newClient(t)
 	login, _ := env.login(client, user.Email, password)
 	require.Equal(t, http.StatusSeeOther, login.StatusCode)
-	require.Equal(t, "/admin/account/password", login.Header.Get("Location"))
+	require.Equal(t, "/account/password", login.Header.Get("Location"))
 
 	blocked, _ := env.get(client, "/admin/users")
-	require.Equal(t, "/admin/account/password", blocked.Header.Get("Location"))
+	require.Equal(t, "/account/password", blocked.Header.Get("Location"))
 
-	_, page := env.get(client, "/admin/account/password")
+	_, page := env.get(client, "/account/password")
 	token := csrfFrom(t, page)
-	bad, _ := env.post(client, "/admin/account/password", url.Values{"password": {"new personal password"}, "password_confirm": {"new personal password"}})
+	bad, _ := env.post(client, "/account/password", url.Values{"password": {"new personal password"}, "password_confirm": {"new personal password"}})
 	require.Equal(t, http.StatusForbidden, bad.StatusCode)
 
-	changed, _ := env.post(client, "/admin/account/password", url.Values{"csrf_token": {token}, "current_password": {password}, "password": {"new personal password"}, "password_confirm": {"new personal password"}})
+	changed, _ := env.post(client, "/account/password", url.Values{"csrf_token": {token}, "current_password": {password}, "password": {"new personal password"}, "password_confirm": {"new personal password"}})
 	require.Equal(t, http.StatusSeeOther, changed.StatusCode)
 
 	rejected, _ := env.login(client, user.Email, password)
 	require.Equal(t, http.StatusUnauthorized, rejected.StatusCode)
 
 	login, _ = env.login(client, user.Email, "new personal password")
-	require.Equal(t, "/admin/account", login.Header.Get("Location"))
+	require.Equal(t, "/account", login.Header.Get("Location"))
 
-	_, page = env.get(client, "/admin/account")
+	_, page = env.get(client, "/account")
 	require.Contains(t, page, "my-device")
 	require.NotContains(t, page, "foreign-device")
 	require.NotContains(t, page, `href="/admin/users"`)
@@ -65,11 +65,11 @@ func TestUnifiedUserFirstLoginAndPrivilegeIsolation(t *testing.T) {
 		require.Equal(t, http.StatusForbidden, res.StatusCode, adminPath)
 	}
 
-	hidden, _ := env.get(client, fmt.Sprintf("/admin/account/devices/%d", foreign.ID))
+	hidden, _ := env.get(client, fmt.Sprintf("/account/devices/%d", foreign.ID))
 	require.Equal(t, http.StatusNotFound, hidden.StatusCode)
 
 	_, _ = env.action(adminCSRF, path+"/admin", url.Values{"is_admin": {"on"}})
-	expired, _ := env.get(client, "/admin/account")
+	expired, _ := env.get(client, "/account")
 	require.Equal(t, "/", expired.Header.Get("Location"))
 
 	login, _ = env.login(client, user.Email, "new personal password")

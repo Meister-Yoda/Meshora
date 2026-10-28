@@ -107,3 +107,29 @@ performs extra runtime stack inspection in test binaries; confirm CPU
 findings against a standalone server before optimizing them. Docker/real
 tailscaled tests remain necessary for network behavior, data-plane traffic,
 and a server-only resource ceiling.
+
+## API clients and HA property checks
+
+`TestAPIv2` and `TestAPIv2OAuthScopes` execute real external API clients.
+Both `tofu` (OpenTofu) and `tscli` must be on `PATH`; `nix develop` provides
+both. Missing clients are test-environment errors, not optional skips.
+For standalone environments, use OpenTofu's checksum-verified release
+binary and build `github.com/jaxxstorm/tscli/cmd/tscli` at a pinned version.
+The Go package is under `cmd/tscli`, not the module root.
+
+```sh
+tofu version
+tscli --help
+go test ./hscontrol/servertest -run '^TestAPIv2' -count=1 -v -timeout=20m
+```
+
+`TestHAProberProperty` runs 100 randomized checks by default, including real
+Noise handshakes and reconnects. Each check costs about 15–25 seconds, so
+its full run needs a longer timeout than the ordinary suite. CI and
+`-short` intentionally skip this test. Run it separately without those
+settings; this preserves the full check budget and shrinking on failure:
+
+```sh
+env -u CI -u GITHUB_RUN_ID go test ./hscontrol/servertest \
+  -run '^TestHAProberProperty$' -count=1 -v -timeout=60m
+```

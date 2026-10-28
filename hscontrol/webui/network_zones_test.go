@@ -205,7 +205,7 @@ func TestZoneMatrixSelectionAndQuickActions(t *testing.T) {
 
 	require.Contains(t, body, "tcp:443, tcp:22")
 	require.NotContains(t, body, "<script>")
-	require.Contains(t, body, `src="/admin/assets/zones.js"`)
+	require.Contains(t, body, `src="/assets/zones.js"`)
 	require.NotContains(t, body, "style=")
 	// A quick allow updates only the selected pair and retains its filter.
 	form := zonesForm(t, env, csrf, "link")
@@ -493,7 +493,7 @@ func TestZoneEditorModalRoutesAndErrors(t *testing.T) {
 	require.Contains(t, body, "Zone bearbeiten: Privat")
 	require.Contains(t, body, `id="zone-editor" open`)
 
-	scriptResponse, script := env.get(env.client, "/admin/assets/zones.js")
+	scriptResponse, script := env.get(env.client, "/assets/zones.js")
 	require.Equal(t, http.StatusOK, scriptResponse.StatusCode)
 	require.Contains(t, scriptResponse.Header.Get("Content-Type"), "javascript")
 	require.Contains(t, script, "showModal")

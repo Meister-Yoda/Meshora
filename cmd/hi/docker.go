@@ -15,12 +15,12 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v5"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/api/types/mount"
-	"github.com/docker/docker/client"
-	"github.com/docker/docker/pkg/stdcopy"
+	"github.com/containerd/errdefs"
 	"github.com/juanfont/headscale/integration/dockertestutil"
+	"github.com/moby/moby/api/pkg/stdcopy"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/mount"
+	"github.com/moby/moby/client"
 )
 
 const defaultDirPerm = 0o755
@@ -92,7 +92,7 @@ func runTestContainer(ctx context.Context, config *RunConfig) error {
 		log.Printf("Created container: %s", resp.ID)
 	}
 
-	if err := cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil { //nolint:noinlineerr
+	if _, err := cli.ContainerStart(ctx, resp.ID, client.ContainerStartOptions{}); err != nil { //nolint:noinlineerr
 		return fmt.Errorf("starting container: %w", err)
 	}
 
@@ -239,10 +239,10 @@ func buildTestCommand(config *RunConfig) []string {
 }
 
 // createTestContainer creates a Docker container configured for running integration tests.
-func createTestContainer(ctx context.Context, cli *client.Client, config *RunConfig, containerName, logsDir string, testCmd []string) (container.CreateResponse, error) {
+func createTestContainer(ctx context.Context, cli *client.Client, config *RunConfig, containerName, logsDir string, testCmd []string) (client.ContainerCreateResult, error) {
 	pwd, err := os.Getwd()
 	if err != nil {
-		return container.CreateResponse{}, fmt.Errorf("getting working directory: %w", err)
+		return client.ContainerCreateResult{}, fmt.Errorf("getting working directory: %w", err)
 	}
 
 	projectRoot := findProjectRoot(pwd)
@@ -350,12 +350,12 @@ func createTestContainer(ctx context.Context, cli *client.Client, config *RunCon
 		Mounts:     mounts,
 	}
 
-	return cli.ContainerCreate(ctx, containerConfig, hostConfig, nil, nil, containerName)
+	return cli.ContainerCreate(ctx, client.ContainerCreateOptions{Config: containerConfig, HostConfig: hostConfig, Name: containerName})
 }
 
 // streamAndWait streams container output and waits for completion.
 func streamAndWait(ctx context.Context, cli *client.Client, containerID string) (int, error) {
-	out, err := cli.ContainerLogs(ctx, containerID, container.LogsOptions{
+	out, err := cli.ContainerLogs(ctx, containerID, client.ContainerLogsOptions{
 		ShowStdout: true,
 		ShowStderr: true,
 		Follow:     true,
@@ -373,13 +373,13 @@ func streamAndWait(ctx context.Context, cli *client.Client, containerID string) 
 		close(logsDone)
 	}()
 
-	statusCh, errCh := cli.ContainerWait(ctx, containerID, container.WaitConditionNotRunning)
+	wait := cli.ContainerWait(ctx, containerID, client.ContainerWaitOptions{Condition: container.WaitConditionNotRunning})
 	select {
-	case err := <-errCh:
+	case err := <-wait.Error:
 		if err != nil {
 			return -1, fmt.Errorf("waiting for container: %w", err)
 		}
-	case status := <-statusCh:
+	case status := <-wait.Result:
 		// ContainerWait can finish before the log stream delivers its tail.
 		// Drain through EOF so fast test exits retain their final summary.
 		select {
@@ -397,12 +397,12 @@ func streamAndWait(ctx context.Context, cli *client.Client, containerID string) 
 // waitForContainerFinalization ensures all test containers have properly finished and flushed their output.
 func waitForContainerFinalization(ctx context.Context, cli *client.Client, testContainerID string, verbose bool) error {
 	// First, get all related test containers
-	containers, err := cli.ContainerList(ctx, container.ListOptions{All: true})
+	containers, err := cli.ContainerList(ctx, client.ContainerListOptions{All: true})
 	if err != nil {
 		return fmt.Errorf("listing containers: %w", err)
 	}
 
-	testContainers := getCurrentTestContainers(containers, testContainerID, verbose)
+	testContainers := getCurrentTestContainers(containers.Items, testContainerID, verbose)
 
 	// Wait for all test containers to reach a final state
 	maxWaitTime := 10 * time.Second
@@ -424,7 +424,7 @@ func waitForContainerFinalization(ctx context.Context, cli *client.Client, testC
 			allFinalized := true
 
 			for _, testCont := range testContainers {
-				inspect, err := cli.ContainerInspect(ctx, testCont.ID)
+				inspect, err := cli.ContainerInspect(ctx, testCont.ID, client.ContainerInspectOptions{})
 				if err != nil {
 					if verbose {
 						log.Printf("Warning: failed to inspect container %s: %v", testCont.name, err)
@@ -434,11 +434,11 @@ func waitForContainerFinalization(ctx context.Context, cli *client.Client, testC
 				}
 
 				// Check if container is in a final state
-				if !isContainerFinalized(inspect.State) {
+				if !isContainerFinalized(inspect.Container.State) {
 					allFinalized = false
 
 					if verbose {
-						log.Printf("Container %s still finalizing (state: %s)", testCont.name, inspect.State.Status)
+						log.Printf("Container %s still finalizing (state: %s)", testCont.name, inspect.Container.State.Status)
 					}
 
 					break
@@ -500,12 +500,10 @@ type DockerContext struct {
 func createDockerClient(ctx context.Context) (*client.Client, error) {
 	contextInfo, err := getCurrentDockerContext(ctx)
 	if err != nil {
-		return client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+		return client.New(client.FromEnv)
 	}
 
 	var clientOpts []client.Opt
-
-	clientOpts = append(clientOpts, client.WithAPIVersionNegotiation())
 
 	if contextInfo != nil {
 		if endpoints, ok := contextInfo.Endpoints["docker"]; ok {
@@ -521,11 +519,11 @@ func createDockerClient(ctx context.Context) (*client.Client, error) {
 		}
 	}
 
-	if len(clientOpts) == 1 {
+	if len(clientOpts) == 0 {
 		clientOpts = append(clientOpts, client.FromEnv)
 	}
 
-	return client.NewClientWithOpts(clientOpts...)
+	return client.New(clientOpts...)
 }
 
 // getCurrentDockerContext retrieves the current Docker context information.
@@ -558,9 +556,9 @@ func getDockerSocketPath() string {
 
 // checkImageAvailableLocally checks if the specified Docker image is available locally.
 func checkImageAvailableLocally(ctx context.Context, cli *client.Client, imageName string) (bool, error) {
-	_, _, err := cli.ImageInspectWithRaw(ctx, imageName) //nolint:staticcheck // SA1019: deprecated but functional
+	_, err := cli.ImageInspect(ctx, imageName)
 	if err != nil {
-		if client.IsErrNotFound(err) { //nolint:staticcheck // SA1019: deprecated but functional
+		if errdefs.IsNotFound(err) {
 			return false, nil
 		}
 
@@ -598,7 +596,7 @@ func ensureImageAvailable(ctx context.Context, cli *client.Client, imageName str
 	_, err = backoff.Retry(
 		ctx,
 		func() (struct{}, error) {
-			reader, pullErr := cli.ImagePull(ctx, imageName, image.PullOptions{RegistryAuth: registryAuth})
+			reader, pullErr := cli.ImagePull(ctx, imageName, client.ImagePullOptions{RegistryAuth: registryAuth})
 			if pullErr != nil {
 				if isPermanentDockerPullError(pullErr) {
 					return struct{}{}, backoff.Permanent(pullErr)
@@ -713,13 +711,13 @@ func extractArtifactsFromContainers(ctx context.Context, testContainerID, logsDi
 	defer cli.Close()
 
 	// List all containers
-	containers, err := cli.ContainerList(ctx, container.ListOptions{All: true})
+	containers, err := cli.ContainerList(ctx, client.ContainerListOptions{All: true})
 	if err != nil {
 		return fmt.Errorf("listing containers: %w", err)
 	}
 
 	// Get containers from the specific test run
-	currentTestContainers := getCurrentTestContainers(containers, testContainerID, verbose)
+	currentTestContainers := getCurrentTestContainers(containers.Items, testContainerID, verbose)
 
 	extractedCount := 0
 
@@ -822,7 +820,7 @@ func extractContainerArtifacts(ctx context.Context, cli *client.Client, containe
 // extractContainerLogs saves the stdout and stderr logs from a container to files.
 func extractContainerLogs(ctx context.Context, cli *client.Client, containerID, containerName, logsDir string, verbose bool) error {
 	// Get container logs
-	logReader, err := cli.ContainerLogs(ctx, containerID, container.LogsOptions{
+	logReader, err := cli.ContainerLogs(ctx, containerID, client.ContainerLogsOptions{
 		ShowStdout: true,
 		ShowStderr: true,
 		Timestamps: false,

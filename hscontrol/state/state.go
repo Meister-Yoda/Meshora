@@ -1329,8 +1329,13 @@ func (s *State) ExpireExpiredNodes(lastCheck time.Time) (time.Time, []change.Cha
 	return started, nil, false
 }
 
-// SSHPolicy returns the SSH access policy for a node.
+// SSHPolicy returns an explicit empty policy while Tailscale SSH is disabled.
+// Sending nil would leave previously distributed client permissions intact.
 func (s *State) SSHPolicy(node types.NodeView) (*tailcfg.SSHPolicy, error) {
+	if s.cfg == nil || !s.cfg.TailscaleSSHEnabled {
+		return &tailcfg.SSHPolicy{Rules: []*tailcfg.SSHRule{}}, nil
+	}
+
 	return s.polMan.SSHPolicy(s.cfg.ServerURL, node)
 }
 
@@ -1340,6 +1345,10 @@ func (s *State) SSHCheckParams(
 	srcNodeID, dstNodeID types.NodeID,
 	localUser string,
 ) (time.Duration, bool) {
+	if s.cfg == nil || !s.cfg.TailscaleSSHEnabled {
+		return 0, false
+	}
+
 	return s.polMan.SSHCheckParams(srcNodeID, dstNodeID, localUser)
 }
 

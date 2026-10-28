@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## Meshora v0.2.1-rc.4 (2026-10-28)
+
+### Security
+
+- **BREAKING:** Disable Tailscale SSH by default (`tailscale_ssh_enabled: false`). Distribute explicit empty SSH policies and reject pending or previously approved SSH checks even when stored SSH rules permit access. Stored policy is preserved; re-enabling the feature requires an explicit server-configuration opt-in.
+- Preserve ordinary network access and OpenSSH traffic allowed by network policy. The restriction takes effect after deployment and client policy delivery; disconnected clients and existing sessions may require client-side action. Apply upstream Tailscale client security updates separately.
+
+### Changes
+
+- Harden account, OIDC and existing-factor authentication and normalize public/account routes.
+- Index primary routes per node and remove duplicate zone-draft parsing without reducing validation.
+- Pin regular/debug multiarch container bases and respect the requested build architecture.
+- Migrate Docker integration tooling to the current Moby APIs.
+- WireGuard gateway code remains outside main and is not included in this release candidate.
+
 ## Meshora v0.2.0 (2026-10-26)
 
 - Ship the network-zone feature set as a stable release with versioned AMD64/ARM64 images and an updated `latest` tag.

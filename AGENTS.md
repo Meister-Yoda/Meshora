@@ -15,6 +15,15 @@ enforcement, and DERP routing for self-hosted tailnets.
 These rules govern how you work in this repo. They are listed first
 because they shape every other decision.
 
+### Keep the central roadmap current
+
+[`ROADMAP.md`](ROADMAP.md) is the central record of planned Meshora work.
+Read it before planning features or follow-up work. Add newly agreed plans,
+link detailed proposals, and update status, priorities, blockers and next steps
+as work progresses. Preserve existing entries and record completed work with
+validation and commit or release when available. Distinguish proposals from
+agreed implementation and implementation from verified completion.
+
 ### Ask with comprehensive multiple-choice options
 
 When you need to clarify intent, scope, or approach, use the

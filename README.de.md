@@ -2,6 +2,9 @@
 
 [English](README.md) · **Deutsch**
 
+Geplante Funktionen, Prioritäten und offene Folgearbeiten stehen in der
+[zentralen Roadmap](ROADMAP.md).
+
 Meshora ist ein selbst gehosteter Tailscale-Control-Server auf Basis von
 [Headscale](https://github.com/juanfont/headscale), mit einem Web-Dashboard
 für Benutzer, Geräte, Registrierungen, Vorab-Schlüssel und Netzwerkeinstellungen.

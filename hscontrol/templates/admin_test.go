@@ -230,7 +230,7 @@ func TestPublicEnrollment(t *testing.T) {
 			}
 
 			assert.Contains(t, body, "https://mesh.example/mesh")
-			assert.Contains(t, body, `src="/mesh/admin/assets/enrollment.js"`)
+			assert.Contains(t, body, `src="/mesh/assets/enrollment.js"`)
 
 			if platform == "android" || platform == "ios" {
 				assert.NotContains(t, body, "tailscale login")
@@ -279,7 +279,7 @@ func TestAccountMenuGroupsLanguageAndSignOut(t *testing.T) {
 	assert.Contains(t, page, `id="account-options" popover="auto"`)
 	assert.Contains(t, page, `class="account-menu-label">Sprache</p>`)
 	assert.Contains(t, page, `aria-current="true" href="?lang=de"`)
-	assert.Contains(t, page, `action="/admin/logout" method="POST"`)
+	assert.Contains(t, page, `action="/logout" method="POST"`)
 	assert.Contains(t, page, `value="csrf-test"`)
 	assert.NotContains(t, page, `class="language-switcher"`)
 	assert.Contains(t, AdminLogin(AdminLoginInfo{Base: "/admin"}).Render(), `class="language-switcher"`)

@@ -11,6 +11,7 @@ import (
 
 	"github.com/juanfont/headscale/integration/dockertestutil"
 	"github.com/juanfont/headscale/integration/k3sic"
+	"github.com/moby/moby/client"
 )
 
 const (
@@ -137,7 +138,7 @@ func checkDockerDaemon(ctx context.Context) DoctorResult {
 	}
 	defer cli.Close()
 
-	_, err = cli.Ping(ctx)
+	_, err = cli.Ping(ctx, client.PingOptions{})
 	if err != nil {
 		return fail(
 			nameDockerDaemon,
@@ -184,7 +185,7 @@ func checkDockerSocket(ctx context.Context) DoctorResult {
 	}
 	defer cli.Close()
 
-	info, err := cli.Info(ctx)
+	info, err := cli.Info(ctx, client.InfoOptions{})
 	if err != nil {
 		return fail(
 			nameDockerSocket,
@@ -194,7 +195,7 @@ func checkDockerSocket(ctx context.Context) DoctorResult {
 		)
 	}
 
-	return pass(nameDockerSocket, fmt.Sprintf("Docker socket accessible (Server: %s)", info.ServerVersion))
+	return pass(nameDockerSocket, fmt.Sprintf("Docker socket accessible (Server: %s)", info.Info.ServerVersion))
 }
 
 // checkDockerHubCredentials warns when pulls would be anonymous and

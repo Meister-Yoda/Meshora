@@ -3350,6 +3350,7 @@ func createTestApp(t *testing.T) *Headscale {
 	tmpDir := t.TempDir()
 
 	cfg := types.Config{
+		TailscaleSSHEnabled: true, // Explicit opt-in for legacy SSH protocol tests.
 		ServerURL:           "http://localhost:8080",
 		NoisePrivateKeyPath: tmpDir + "/noise_private.key",
 		Database: types.DatabaseConfig{

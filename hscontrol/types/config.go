@@ -125,6 +125,10 @@ type Config struct {
 	Log                 LogConfig
 	DisableUpdateCheck  bool
 
+	// TailscaleSSHEnabled is an explicit opt-in. Keep disabled while the
+	// Tailscale SSH security fixes are being rolled out to clients.
+	TailscaleSSHEnabled bool
+
 	Database DatabaseConfig
 
 	DERP DERPConfig
@@ -1481,12 +1485,13 @@ func LoadServerConfig() (*Config, error) {
 	}
 
 	return &Config{
-		ConfigFilePath:     viper.ConfigFileUsed(),
-		ServerURL:          serverURL,
-		Addr:               viper.GetString("listen_addr"),
-		MetricsAddr:        viper.GetString("metrics_listen_addr"),
-		TrustedProxies:     trusted,
-		DisableUpdateCheck: false,
+		ConfigFilePath:      viper.ConfigFileUsed(),
+		ServerURL:           serverURL,
+		TailscaleSSHEnabled: viper.GetBool("tailscale_ssh_enabled"),
+		Addr:                viper.GetString("listen_addr"),
+		MetricsAddr:         viper.GetString("metrics_listen_addr"),
+		TrustedProxies:      trusted,
+		DisableUpdateCheck:  false,
 
 		PrefixV4:     prefix4,
 		PrefixV6:     prefix6,

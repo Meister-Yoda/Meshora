@@ -58,6 +58,8 @@ func sshScenario(
 			tsic.WithDockerWorkdir("/"),
 		},
 		append([]hsic.Option{
+			// Legacy SSH regression scenarios explicitly opt in; production defaults off.
+			hsic.WithConfigEnv(map[string]string{"HEADSCALE_TAILSCALE_SSH_ENABLED": "true"}),
 			hsic.WithACLPolicy(policy),
 			hsic.WithTestName(testName),
 		}, hsOpts...)...,
@@ -1014,6 +1016,7 @@ func TestSSHOneUserToOneCheckModeOIDC(t *testing.T) {
 	// defer scenario.ShutdownAssertNoPanics(t)
 
 	oidcMap := map[string]string{
+		"HEADSCALE_TAILSCALE_SSH_ENABLED":   "true",
 		"HEADSCALE_OIDC_ISSUER":             scenario.mockOIDC.Issuer(),
 		"HEADSCALE_OIDC_CLIENT_ID":          scenario.mockOIDC.ClientID(),
 		"CREDENTIALS_DIRECTORY_TEST":        "/tmp",
@@ -1131,6 +1134,7 @@ func TestSSHCheckModeUnapprovedTimeout(t *testing.T) {
 		hsic.WithACLPolicy(sshCheckPolicy()),
 		hsic.WithTestName("sshchecktimeout"),
 		hsic.WithConfigEnv(map[string]string{
+			"HEADSCALE_TAILSCALE_SSH_ENABLED":            "true",
 			"HEADSCALE_TUNING_REGISTER_CACHE_EXPIRATION": "15s",
 			"HEADSCALE_TUNING_REGISTER_CACHE_CLEANUP":    "5s",
 		}),
@@ -1686,6 +1690,7 @@ func TestSSHLocalpart(t *testing.T) {
 			defer scenario.ShutdownAssertNoPanics(t)
 
 			oidcMap := map[string]string{
+				"HEADSCALE_TAILSCALE_SSH_ENABLED":   "true",
 				"HEADSCALE_OIDC_ISSUER":             scenario.mockOIDC.Issuer(),
 				"HEADSCALE_OIDC_CLIENT_ID":          scenario.mockOIDC.ClientID(),
 				"CREDENTIALS_DIRECTORY_TEST":        "/tmp",

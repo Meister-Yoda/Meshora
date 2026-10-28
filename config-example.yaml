@@ -12,6 +12,12 @@
 #
 server_url: http://127.0.0.1:8080
 
+# Tailscale SSH is disabled by default as a temporary security precaution.
+# Existing SSH rules remain stored but grant no SSH access while disabled.
+# This does not block ordinary OpenSSH traffic permitted by network policy.
+# Leave false until affected Tailscale clients have received security fixes.
+tailscale_ssh_enabled: false
+
 # Address to listen to / bind to on the server
 #
 # For production:

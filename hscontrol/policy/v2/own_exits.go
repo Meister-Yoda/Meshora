@@ -46,6 +46,31 @@ func (pm *PolicyManager) OwnExitDecision(node types.NodeView) types.OwnExitDecis
 	return pm.pol.ownExitDecision(node, pm.users)
 }
 
+// InspectOwnExits returns the direct override and effective decision from the
+// same validated policy. It does not expose mutable policy-owned slices.
+func (pm *PolicyManager) InspectOwnExits(node types.NodeView, user types.UserID, id types.NodeID) (types.OwnExitRule, types.OwnExitDecision) {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+
+	rule := types.OwnExitRule{Mode: "inherit"}
+
+	if pm.pol != nil && pm.pol.NetworkZones != nil {
+		for _, override := range pm.pol.NetworkZones.OwnExitOverrides {
+			if (id != 0 && override.Node == id) || (id == 0 && override.User == user && override.Group == "") {
+				rule = override.Rule
+				rule.Services = slices.Clone(rule.Services)
+
+				break
+			}
+		}
+	}
+
+	decision := pm.pol.ownExitDecision(node, pm.users)
+	decision.Rule.Services = slices.Clone(decision.Rule.Services)
+
+	return rule, decision
+}
+
 func (pol *Policy) compileOwnExitGrants(users types.Users, nodes views.Slice[types.NodeView]) []compiledGrant {
 	if pol == nil || pol.NetworkZones == nil {
 		return nil

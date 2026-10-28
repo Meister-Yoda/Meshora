@@ -175,6 +175,7 @@ func setupBatcherWithTestData(
 	prefixV6 := netip.MustParsePrefix("fd7a:115c:a1e0::/48")
 
 	cfg := &types.Config{
+		TailscaleSSHEnabled: true, // Explicit opt-in for legacy SSH protocol tests.
 		Database: types.DatabaseConfig{
 			Type: types.DatabaseSqlite,
 			Sqlite: types.SqliteConfig{

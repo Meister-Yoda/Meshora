@@ -36,7 +36,7 @@ const submitType = "submit"
 
 const buttonType = "button"
 
-// AdminStylesheetPath is the stylesheet's path below the dashboard base.
+// AdminStylesheetPath is the shared public stylesheet path.
 const AdminStylesheetPath = "/assets/admin.css"
 
 // adminCSSVersion busts browser caches of the stylesheet, which is served
@@ -108,7 +108,7 @@ func AdminLogin(info AdminLoginInfo) *elem.Element {
 		}
 
 		card = append(card, elem.Form(attrs.Props{
-			attrs.Method: "POST", attrs.Action: info.Base + "/login/oidc", attrs.Class: "stack",
+			attrs.Method: "POST", attrs.Action: publicUIPath(info.Base, "/login/oidc"), attrs.Class: "stack",
 		}, adminCSRFInput(info.CSRFToken), elem.Button(attrs.Props{
 			attrs.Type: submitType, attrs.Class: "btn btn-ghost btn-block",
 		}, buttonLabel)))
@@ -120,9 +120,9 @@ func AdminLogin(info AdminLoginInfo) *elem.Element {
 	}
 
 	card = append(card,
-		elem.Form(attrs.Props{attrs.Method: "POST", attrs.Action: info.Base + "/passkeys/login/begin", attrs.Class: "stack", "data-passkey-login": "", "data-finish": info.Base + "/passkeys/login/finish"}, adminCSRFInput(info.CSRFToken), elem.Button(attrs.Props{attrs.Type: submitType, attrs.Class: "btn btn-secondary btn-block", attrs.Disabled: "true"}, elem.Text("Mit Passkey anmelden"))),
+		elem.Form(attrs.Props{attrs.Method: "POST", attrs.Action: publicUIPath(info.Base, "/login/passkeys/begin"), attrs.Class: "stack", "data-passkey-login": "", "data-finish": publicUIPath(info.Base, "/login/passkeys/finish")}, adminCSRFInput(info.CSRFToken), elem.Button(attrs.Props{attrs.Type: submitType, attrs.Class: "btn btn-secondary btn-block", attrs.Disabled: "true"}, elem.Text("Mit Passkey anmelden"))),
 		elem.P(attrs.Props{attrs.ID: "passkey-status", attrs.Class: "muted", attrs.Role: statusClass, "aria-live": "polite"}),
-		elem.Script(attrs.Props{attrs.Src: info.Base + "/assets/security.js", "defer": "true"}))
+		elem.Script(attrs.Props{attrs.Src: publicUIPath(info.Base, "/assets/security.js"), "defer": "true"}))
 
 	return adminDocument(info.Base, "Sign in · Meshora", "auth",
 		elem.Main(attrs.Props{attrs.Class: "auth-card"}, card...),
@@ -222,6 +222,11 @@ type AdminPageInfo struct {
 	// Now is the reference time for relative times; zero means time.Now.
 	Now time.Time
 }
+
+// publicUIPath resolves a public URL from the administration base, preserving proxy prefixes.
+func publicUIPath(base, path string) string { return strings.TrimSuffix(base, "/admin") + path }
+
+func (p AdminPageInfo) RootPath(path string) string { return publicUIPath(p.Base, path) }
 
 func (p AdminPageInfo) now() time.Time {
 	if p.Now.IsZero() {
@@ -734,7 +739,7 @@ func adminDocument(base, title, bodyClass string, body ...elem.Node) *elem.Eleme
 			elem.Link(attrs.Props{attrs.Rel: "icon", attrs.Href: "/favicon.ico?v=meshora"}),
 			elem.Link(attrs.Props{
 				attrs.Rel:  "stylesheet",
-				attrs.Href: base + AdminStylesheetPath + "?v=" + adminCSSVersion,
+				attrs.Href: publicUIPath(base, AdminStylesheetPath) + "?v=" + adminCSSVersion,
 			}),
 		),
 		elem.Body(attrs.Props{attrs.Class: bodyClass, "translate": "no"},
@@ -896,14 +901,14 @@ func AdminEnrollment(info AdminPageInfo, serverURL, platform string, oidc bool) 
 		elem.Section(attrs.Props{attrs.Class: "card"}, elem.H2(nil, i18nText("4. Check your device")),
 			elem.P(nil, i18nText("After registration, return to the Tailscale app and check its connection state. An administrator can open your device in the device list to check the recorded state and next steps. Registration alone does not prove an active connection or reachability. If the request expired, start sign-in again on the device.")),
 			elem.Div(attrs.Props{attrs.Class: adminActionsClass}, linkButton(info.Base+"/pending", "Review requests (admin)", "btn-secondary"), linkButton(info.Base+"/nodes", "Find device (admin)", "btn-primary"))),
-		elem.Script(attrs.Props{attrs.Src: html.EscapeString(info.Base + "/assets/enrollment.js"), "defer": "true"}),
+		elem.Script(attrs.Props{attrs.Src: html.EscapeString(info.RootPath("/assets/enrollment.js")), "defer": "true"}),
 	)
 
 	return shell(body...)
 }
 
 func adminTopbar(base, username, csrf string, admin bool) elem.Node {
-	home := base + "/account"
+	home := publicUIPath(base, "/account")
 	brandChildren := []elem.Node{elem.Raw(meshoraMark)}
 
 	if admin {
@@ -932,10 +937,10 @@ func adminTopbar(base, username, csrf string, admin bool) elem.Node {
 						elem.Div(attrs.Props{attrs.Class: "account-languages"},
 							elem.A(attrs.Props{attrs.Href: "?lang=de", "lang": "de", "hreflang": "de", attrs.Title: "Deutsch", "aria-label": "Deutsch"}, elem.Text("DE")),
 							elem.A(attrs.Props{attrs.Href: "?lang=en", "lang": "en", "hreflang": "en", attrs.Title: "English", "aria-label": "English"}, elem.Text("EN")))),
-					elem.A(attrs.Props{attrs.Href: base + "/account"}, elem.Text("Mein Konto")),
+					elem.A(attrs.Props{attrs.Href: publicUIPath(base, "/account")}, elem.Text("Mein Konto")),
 					elem.A(attrs.Props{attrs.Href: "https://github.com/Meister-Yoda/Meshora", attrs.Rel: "noreferrer noopener", attrs.Target: "_blank", attrs.Class: "account-repo"},
 						elem.Raw(`<svg class="account-item-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H5v14h14v-4 M14 4h6v6 M20 4 10 14"/></svg>`), elem.Text("GitHub Repository")),
-					elem.Form(attrs.Props{attrs.Method: "POST", attrs.Action: base + "/logout"}, adminCSRFInput(csrf),
+					elem.Form(attrs.Props{attrs.Method: "POST", attrs.Action: publicUIPath(base, "/logout")}, adminCSRFInput(csrf),
 						elem.Button(attrs.Props{attrs.Type: submitType, attrs.Class: "account-signout"},
 							elem.Raw(`<svg class="account-item-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 4H5v16h5 M9 12h12 M17 8l4 4-4 4"/></svg>`), i18nText("Sign out")))),
 			),

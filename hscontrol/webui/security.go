@@ -29,7 +29,12 @@ const (
 	securityTTL    = 5 * time.Minute
 )
 
-var errSecurityFlow = errors.New("die Sicherheitsprüfung abgelaufen; bitte erneut beginnen")
+var (
+	errSecurityFlow           = errors.New("die Sicherheitsprüfung abgelaufen; bitte erneut beginnen")
+	errExistingFactorRequired = errors.New("ein bereits eingerichteter Faktor muss zuerst bestätigt werden")
+)
+
+const msgExistingFactorRequired = "Bestätige die Anmeldung mit deinem eingerichteten Passkey oder Authenticator-Code. Vorher ist kein Kontozugriff möglich."
 
 type securityFlow struct {
 	Kind        string
@@ -114,6 +119,10 @@ func (h *Handler) proveSecurityChange(r *http.Request) error {
 		return errCSRFMismatch
 	}
 
+	err := h.requireVerifiedFactor(sess)
+	if err != nil {
+		return err
+	}
 	account, err := h.state.UserAccount(sess.userID)
 	if err != nil {
 		return err
@@ -222,7 +231,7 @@ func sessionSecurityKey(r *http.Request, kind string) string {
 func (h *Handler) beginTOTP(w http.ResponseWriter, r *http.Request) {
 	err := h.proveSecurityChange(r)
 	if err != nil {
-		h.redirect(w, r, "/account/security", failure("Bestätigung fehlgeschlagen: %v", err))
+		h.redirectPublic(w, r, "/account/security", failure("Bestätigung fehlgeschlagen: %v", err))
 		return
 	}
 
@@ -230,19 +239,19 @@ func (h *Handler) beginTOTP(w http.ResponseWriter, r *http.Request) {
 
 	security, err := h.state.UserSecurity(sess.userID)
 	if err != nil {
-		h.redirect(w, r, "/account/security", failure("Sicherheitseinstellungen nicht verfügbar."))
+		h.redirectPublic(w, r, "/account/security", failure("Sicherheitseinstellungen nicht verfügbar."))
 		return
 	}
 
 	policy, err := h.state.UserAuthPolicy(sess.userID)
 	if err != nil || (len(security.EncryptedTOTPSecret) > 0 && !policy.TOTPBypassedAt(time.Now())) {
-		h.redirect(w, r, "/account/security", failure("2FA ist bereits aktiv oder nicht verfügbar."))
+		h.redirectPublic(w, r, "/account/security", failure("2FA ist bereits aktiv oder nicht verfügbar."))
 		return
 	}
 
 	_, err = h.securityKey()
 	if err != nil {
-		h.redirect(w, r, "/account/security", failure("2FA nicht verfügbar: %v", err))
+		h.redirectPublic(w, r, "/account/security", failure("2FA nicht verfügbar: %v", err))
 		return
 	}
 
@@ -311,7 +320,7 @@ func (h *Handler) enableTOTP(w http.ResponseWriter, r *http.Request) {
 
 	rateKey := "totp-setup:" + strconv.FormatUint(uint64(sess.userID), 10)
 	if !ok || flow.UserID != sess.userID || flow.Revision != sess.accountRevision || h.blocked(rateKey) {
-		h.redirect(w, r, "/account/security", failure("%v", errSecurityFlow))
+		h.redirectPublic(w, r, "/account/security", failure("%v", errSecurityFlow))
 		return
 	}
 
@@ -319,7 +328,7 @@ func (h *Handler) enableTOTP(w http.ResponseWriter, r *http.Request) {
 
 	step, err := totpStep(flow.Secret, strings.TrimSpace(r.PostForm.Get("code")), time.Now())
 	if err != nil {
-		h.redirect(w, r, "/account/security", failure("Code ungültig. Einrichtung bitte erneut beginnen."))
+		h.redirectPublic(w, r, "/account/security", failure("Code ungültig. Einrichtung bitte erneut beginnen."))
 		return
 	}
 
@@ -337,7 +346,7 @@ func (h *Handler) enableTOTP(w http.ResponseWriter, r *http.Request) {
 
 	err = h.state.EnableUserTOTP(sess.userID, sess.accountRevision, flow.Secret, key, step, hashes)
 	if err != nil {
-		h.redirect(w, r, "/account/security", failure("2FA nicht aktiviert: %v", err))
+		h.redirectPublic(w, r, "/account/security", failure("2FA nicht aktiviert: %v", err))
 		return
 	}
 
@@ -349,7 +358,7 @@ func (h *Handler) enableTOTP(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) disableTOTP(w http.ResponseWriter, r *http.Request) {
 	err := h.proveSecurityChange(r)
 	if err != nil {
-		h.redirect(w, r, "/account/security", failure("Bestätigung fehlgeschlagen: %v", err))
+		h.redirectPublic(w, r, "/account/security", failure("Bestätigung fehlgeschlagen: %v", err))
 		return
 	}
 
@@ -357,7 +366,7 @@ func (h *Handler) disableTOTP(w http.ResponseWriter, r *http.Request) {
 
 	err = h.state.DisableUserTOTP(sess.userID, sess.accountRevision)
 	if err != nil {
-		h.redirect(w, r, "/account/security", failure("2FA nicht entfernt: %v", err))
+		h.redirectPublic(w, r, "/account/security", failure("2FA nicht entfernt: %v", err))
 		return
 	}
 
@@ -474,6 +483,10 @@ func (h *Handler) issueSession(w http.ResponseWriter, r *http.Request, account *
 	authentication.authenticatedAt = time.Now()
 
 	err := h.applyAuthPolicy(authentication)
+	if errors.Is(err, errExistingFactorRequired) {
+		h.renderLogin(w, r, http.StatusUnauthorized, authentication.username, msgExistingFactorRequired)
+		return
+	}
 	if err != nil {
 		http.Error(w, "Sicherheitsrichtlinie nicht verfügbar", http.StatusServiceUnavailable)
 		return
@@ -484,17 +497,17 @@ func (h *Handler) issueSession(w http.ResponseWriter, r *http.Request, account *
 	h.setCookie(w, r, sessionCookie, token, 0)
 	h.clearFailures("ip:" + clientIP(r))
 
-	target := h.publicPath + "/account"
+	target := h.rootPath("/account")
 	if account.IsAdmin {
 		target = h.publicPath + "/"
 	}
 
 	if authentication.enrollmentOnly {
-		target = h.publicPath + "/account/security"
+		target = h.rootPath("/account/security")
 	}
 
 	if account.MustChangePassword {
-		target = h.publicPath + "/account/password"
+		target = h.rootPath("/account/password")
 	}
 
 	if strings.Contains(r.Header.Get("Accept"), "application/json") {
@@ -515,7 +528,7 @@ func securityJSON(w http.ResponseWriter, payload any) {
 }
 
 func enrollmentPath(path string) bool {
-	switch strings.TrimPrefix(path, BasePath) {
+	switch path {
 	case "/account/security", "/account/security/totp/begin", "/account/security/totp/qr", "/account/security/totp/enable", "/account/security/passkeys/begin", "/account/security/passkeys/finish", "/account/password", "/logout":
 		return true
 	default:
@@ -523,24 +536,76 @@ func enrollmentPath(path string) bool {
 	}
 }
 
-// applyAuthPolicy turns password-only sign-ins into restricted enrollment sessions when required.
-func (h *Handler) applyAuthPolicy(authentication *session) error {
+// hasEnrolledFactor intentionally counts suspended passkeys too: only an explicit
+// administrative 2FA recovery exception may permit password-only access.
+func (h *Handler) hasEnrolledFactor(id types.UserID) (bool, error) {
+	security, err := h.state.UserSecurity(id)
+	if err != nil {
+		return false, err
+	}
+
+	keys, err := h.state.UserPasskeys(id)
+	if err != nil {
+		return false, err
+	}
+
+	return len(security.EncryptedTOTPSecret) > 0 || len(keys) > 0, nil
+}
+
+// requireVerifiedFactor also rejects weak sessions issued before this guard was deployed.
+func (h *Handler) requireVerifiedFactor(authentication *session) error {
+	if authentication.strongAuth {
+		return nil
+	}
 	policy, err := h.state.UserAuthPolicy(authentication.userID)
 	if err != nil {
 		return err
 	}
 
+	if policy.TOTPBypassedAt(time.Now()) {
+		return nil
+	}
+
+	enrolled, err := h.hasEnrolledFactor(authentication.userID)
+	if err != nil {
+		return err
+	}
+
+	if enrolled {
+		return errExistingFactorRequired
+	}
+
+	return nil
+}
+
+// applyAuthPolicy permits initial enrollment only when no factor exists yet.
+func (h *Handler) applyAuthPolicy(authentication *session) error {
+	policy, err := h.state.UserAuthPolicy(authentication.userID)
+	if err != nil {
+		return err
+	}
 	now := time.Now()
 	bypass := policy.TOTPBypassedAt(now)
 
-	authentication.enrollmentOnly = policy.RequireStrongAuth && !authentication.strongAuth && !bypass
-	if authentication.enrollmentOnly {
-		authentication.validUntil = now.Add(10 * time.Minute)
+	authentication.enrollmentOnly = false
+	if !authentication.strongAuth && !bypass {
+		enrolled, loadErr := h.hasEnrolledFactor(authentication.userID)
+		if loadErr != nil {
+			return loadErr
+		}
+
+		if enrolled {
+			return errExistingFactorRequired
+		}
+
+		authentication.enrollmentOnly = policy.RequireStrongAuth
+		if authentication.enrollmentOnly {
+			authentication.validUntil = now.Add(10 * time.Minute)
+		}
 	}
 
-	if !authentication.strongAuth && bypass && (policy.RequireStrongAuth || authentication.oidcSubject == "") {
+	if !authentication.strongAuth && bypass {
 		authentication.validUntil = *policy.TOTPSuspendedUntil
 	}
-
 	return nil
 }

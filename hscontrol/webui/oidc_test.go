@@ -35,6 +35,8 @@ func TestAdminOIDCFlow(t *testing.T) {
 		{"no_admin", http.StatusSeeOther},
 		{"required_enrollment", http.StatusSeeOther},
 		{"required_totp", http.StatusSeeOther},
+		{"existing_totp", http.StatusSeeOther},
+		{"existing_passkey", http.StatusUnauthorized},
 		{"policy_revocation", http.StatusSeeOther},
 		{"new_verified", http.StatusSeeOther},
 		{"new_unverified_required", http.StatusForbidden},
@@ -84,6 +86,25 @@ func TestAdminOIDCFlow(t *testing.T) {
 					require.NoError(t, keyErr)
 					require.NoError(t, env.state.EnableUserTOTP(types.UserID(user.ID), account.Revision, generated.Secret(), encryptionKey, -1, []string{recoveryDigest("OIDC-TEST-RECOVERY-CODE")}))
 				}
+			}
+
+			if tc.name == "existing_totp" {
+				securityTestKey(t, env)
+				account, loadErr := env.state.UserAccount(types.UserID(user.ID))
+				require.NoError(t, loadErr)
+
+				generated, generateErr := totp.Generate(totp.GenerateOpts{Issuer: "Test", AccountName: user.Email})
+				require.NoError(t, generateErr)
+
+				encryptionKey, keyErr := env.handler.securityKey()
+				require.NoError(t, keyErr)
+				require.NoError(t, env.state.EnableUserTOTP(types.UserID(user.ID), account.Revision, generated.Secret(), encryptionKey, -1, []string{recoveryDigest("OIDC-TEST-RECOVERY-CODE")}))
+			}
+
+			if tc.name == "existing_passkey" {
+				account, loadErr := env.state.UserAccount(types.UserID(user.ID))
+				require.NoError(t, loadErr)
+				require.NoError(t, env.state.AddUserPasskey(types.UserID(user.ID), account.Revision, types.UserPasskey{ID: "oidc-existing-key", Name: "Existing passkey", CredentialJSON: "{}"}))
 			}
 			var issuer string
 
@@ -217,7 +238,7 @@ func TestAdminOIDCFlow(t *testing.T) {
 
 			_, page := env.get(env.client, "/?local=1")
 			assert.Contains(t, page, "Sign in with Authentik")
-			resp, _ := env.post(env.client, "/admin/login/oidc", url.Values{"csrf_token": {csrfFrom(t, page)}})
+			resp, _ := env.post(env.client, "/login/oidc", url.Values{"csrf_token": {csrfFrom(t, page)}})
 			require.Equal(t, http.StatusSeeOther, resp.StatusCode)
 			authorization, err := url.Parse(resp.Header.Get("Location"))
 			require.NoError(t, err)
@@ -261,7 +282,7 @@ func TestAdminOIDCFlow(t *testing.T) {
 			}
 			require.Equal(t, tc.status, resp.StatusCode)
 
-			if tc.name == "required_totp" {
+			if tc.name == "required_totp" || tc.name == "existing_totp" {
 				require.Equal(t, "/login/2fa", resp.Header.Get("Location"))
 
 				blocked, _ := env.get(env.client, "/admin/")
@@ -274,11 +295,11 @@ func TestAdminOIDCFlow(t *testing.T) {
 			if tc.status == http.StatusSeeOther {
 				target := "/admin/"
 				if tc.name == "no_admin" || strings.HasPrefix(tc.name, "new_") {
-					target = "/admin/account"
+					target = "/account"
 				}
 
 				if tc.name == "required_enrollment" {
-					target = "/admin/account/security"
+					target = "/account/security"
 				}
 				assert.Equal(t, target, resp.Header.Get("Location"))
 				resp, page = env.get(env.client, target)
@@ -290,7 +311,7 @@ func TestAdminOIDCFlow(t *testing.T) {
 					assert.Contains(t, page, "Sichere Anmeldung erforderlich")
 
 					blocked, _ := env.get(env.client, "/admin/users")
-					assert.Equal(t, "/admin/account/security", blocked.Header.Get("Location"))
+					assert.Equal(t, "/account/security", blocked.Header.Get("Location"))
 				} else {
 					assert.Contains(t, page, "Overview")
 				}
@@ -307,10 +328,10 @@ func TestAdminOIDCFlow(t *testing.T) {
 				assert.Zero(t, sess.adminID)
 				assert.Equal(t, "stable-admin-subject", sess.oidcSubject)
 				// The usual session CSRF enforcement also applies to SSO admins.
-				resp, _ = env.post(env.client, "/admin/logout", url.Values{})
+				resp, _ = env.post(env.client, "/logout", url.Values{})
 				assert.Equal(t, http.StatusForbidden, resp.StatusCode)
 
-				if tc.name == "required_totp" {
+				if tc.name == "required_totp" || tc.name == "existing_totp" {
 					assert.True(t, sess.strongAuth)
 				}
 
@@ -348,12 +369,12 @@ func TestAdminOIDCDisabledAndCSRF(t *testing.T) {
 	_, page := env.get(env.client, "/?local=1")
 	assert.NotContains(t, page, "Sign in with Authentik")
 
-	resp, _ := env.post(env.client, "/admin/login/oidc", nil)
+	resp, _ := env.post(env.client, "/login/oidc", nil)
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 
 	env.handler.activeOIDC = types.OIDCConfig{Issuer: "https://auth.example.com", ClientID: "meshora"}
 	env.handler.adminOIDCGroups = []string{"meshora-admins"}
-	resp, _ = env.post(env.client, "/admin/login/oidc", url.Values{"csrf_token": {"forged"}})
+	resp, _ = env.post(env.client, "/login/oidc", url.Values{"csrf_token": {"forged"}})
 	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
 	resp, _ = env.get(env.client, "/admin/oidc/callback?state=forged&code=forged")
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)

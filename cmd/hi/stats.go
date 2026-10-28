@@ -13,11 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/events"
-	"github.com/docker/docker/api/types/filters"
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/client"
 )
 
 // ErrStatsCollectionAlreadyStarted is returned when trying to start stats collection that is already running.
@@ -118,7 +115,7 @@ func (sc *StatsCollector) StopCollection() {
 func (sc *StatsCollector) monitorExistingContainers(ctx context.Context, runID string, verbose bool) {
 	defer sc.wg.Done()
 
-	containers, err := sc.client.ContainerList(ctx, container.ListOptions{})
+	containers, err := sc.client.ContainerList(ctx, client.ContainerListOptions{})
 	if err != nil {
 		if verbose {
 			log.Printf("Failed to list existing containers: %v", err)
@@ -127,7 +124,7 @@ func (sc *StatsCollector) monitorExistingContainers(ctx context.Context, runID s
 		return
 	}
 
-	for _, cont := range containers {
+	for _, cont := range containers.Items {
 		if sc.shouldMonitorContainer(cont, runID) {
 			sc.startStatsForContainer(ctx, cont.ID, cont.Names[0], verbose)
 		}
@@ -138,15 +135,15 @@ func (sc *StatsCollector) monitorExistingContainers(ctx context.Context, runID s
 func (sc *StatsCollector) monitorDockerEvents(ctx context.Context, runID string, verbose bool) {
 	defer sc.wg.Done()
 
-	filter := filters.NewArgs()
+	filter := make(client.Filters)
 	filter.Add("type", "container")
 	filter.Add("event", "start")
 
-	eventOptions := events.ListOptions{
+	eventOptions := client.EventsListOptions{
 		Filters: filter,
 	}
 
-	events, errs := sc.client.Events(ctx, eventOptions)
+	stream := sc.client.Events(ctx, eventOptions)
 
 	for {
 		select {
@@ -154,26 +151,26 @@ func (sc *StatsCollector) monitorDockerEvents(ctx context.Context, runID string,
 			return
 		case <-ctx.Done():
 			return
-		case event := <-events:
+		case event := <-stream.Messages:
 			if event.Type == "container" && event.Action == "start" {
 				// Get container details
-				containerInfo, err := sc.client.ContainerInspect(ctx, event.ID) //nolint:staticcheck // SA1019: use Actor.ID
+				containerInfo, err := sc.client.ContainerInspect(ctx, event.Actor.ID, client.ContainerInspectOptions{})
 				if err != nil {
 					continue
 				}
 
-				// Convert to [types.Container] format for consistency
-				cont := types.Container{ //nolint:staticcheck // SA1019: use container.Summary
-					ID:     containerInfo.ID,
-					Names:  []string{containerInfo.Name},
-					Labels: containerInfo.Config.Labels,
+				// Convert to [container.Summary] format for consistency
+				cont := container.Summary{
+					ID:     containerInfo.Container.ID,
+					Names:  []string{containerInfo.Container.Name},
+					Labels: containerInfo.Container.Config.Labels,
 				}
 
 				if sc.shouldMonitorContainer(cont, runID) {
 					sc.startStatsForContainer(ctx, cont.ID, cont.Names[0], verbose)
 				}
 			}
-		case err := <-errs:
+		case err := <-stream.Err:
 			if verbose {
 				log.Printf("Error in Docker events stream: %v", err)
 			}
@@ -184,7 +181,7 @@ func (sc *StatsCollector) monitorDockerEvents(ctx context.Context, runID string,
 }
 
 // shouldMonitorContainer determines if a container should be monitored.
-func (sc *StatsCollector) shouldMonitorContainer(cont types.Container, runID string) bool { //nolint:staticcheck // SA1019: use container.Summary
+func (sc *StatsCollector) shouldMonitorContainer(cont container.Summary, runID string) bool {
 	// Check if it has the correct run ID label
 	if cont.Labels == nil || cont.Labels["hi.run-id"] != runID {
 		return false
@@ -233,7 +230,7 @@ func (sc *StatsCollector) collectStatsForContainer(ctx context.Context, containe
 	defer sc.wg.Done()
 
 	// Use Docker API streaming stats - much more efficient than CLI
-	statsResponse, err := sc.client.ContainerStats(ctx, containerID, true)
+	statsResponse, err := sc.client.ContainerStats(ctx, containerID, client.ContainerStatsOptions{Stream: true})
 	if err != nil {
 		if verbose {
 			log.Printf("Failed to get stats stream for container %s: %v", containerID[:12], err)
@@ -245,7 +242,7 @@ func (sc *StatsCollector) collectStatsForContainer(ctx context.Context, containe
 
 	decoder := json.NewDecoder(statsResponse.Body)
 
-	var prevStats *container.Stats //nolint:staticcheck // SA1019: use StatsResponse
+	var prevStats *container.StatsResponse
 
 	for {
 		select {
@@ -254,7 +251,7 @@ func (sc *StatsCollector) collectStatsForContainer(ctx context.Context, containe
 		case <-ctx.Done():
 			return
 		default:
-			var stats container.Stats //nolint:staticcheck // SA1019: use StatsResponse
+			var stats container.StatsResponse
 
 			err := decoder.Decode(&stats)
 			if err != nil {
@@ -305,7 +302,7 @@ func (sc *StatsCollector) collectStatsForContainer(ctx context.Context, containe
 }
 
 // calculateCPUPercent calculates CPU usage percentage from Docker stats.
-func calculateCPUPercent(prevStats, stats *container.Stats) float64 { //nolint:staticcheck // SA1019: use StatsResponse
+func calculateCPUPercent(prevStats, stats *container.StatsResponse) float64 {
 	// CPU calculation based on Docker's implementation
 	cpuDelta := float64(stats.CPUStats.CPUUsage.TotalUsage) - float64(prevStats.CPUStats.CPUUsage.TotalUsage)
 	systemDelta := float64(stats.CPUStats.SystemUsage) - float64(prevStats.CPUStats.SystemUsage)

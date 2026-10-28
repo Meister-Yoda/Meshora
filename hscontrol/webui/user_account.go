@@ -41,19 +41,37 @@ func (h *Handler) accountPage(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) accountPasswordPage(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r)
+
+	err := h.requireVerifiedFactor(sess)
+	if err != nil {
+		h.endCurrentSession(w, r)
+		h.renderLogin(w, r, http.StatusUnauthorized, "", msgExistingFactorRequired)
+
+		return
+	}
+
 	writeHTML(w, 200, templates.UserPasswordPage(h.pageInfo(r), sess.mustChangePassword, sess.oidcSubject != "" || sess.passkey).Render())
 }
 
 func (h *Handler) saveAccountPassword(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r)
-	if r.PostForm.Get("password") != r.PostForm.Get("password_confirm") {
-		h.redirect(w, r, "/account/password", failure("Die Passwörter stimmen nicht überein."))
+
+	err := h.requireVerifiedFactor(sess)
+	if err != nil {
+		h.endCurrentSession(w, r)
+		http.Error(w, msgExistingFactorRequired, http.StatusForbidden)
+
 		return
 	}
 
-	err := h.state.ChangeUserPassword(sess.userID, sess.accountRevision, r.PostForm.Get("current_password"), r.PostForm.Get("password"), sess.oidcSubject != "" || sess.passkey)
+	if r.PostForm.Get("password") != r.PostForm.Get("password_confirm") {
+		h.redirectPublic(w, r, "/account/password", failure("Die Passwörter stimmen nicht überein."))
+		return
+	}
+
+	err = h.state.ChangeUserPassword(sess.userID, sess.accountRevision, r.PostForm.Get("current_password"), r.PostForm.Get("password"), sess.oidcSubject != "" || sess.passkey)
 	if err != nil {
-		h.redirect(w, r, "/account/password", failure("Passwort nicht geändert: %v", err))
+		h.redirectPublic(w, r, "/account/password", failure("Passwort nicht geändert: %v", err))
 		return
 	}
 
@@ -65,12 +83,12 @@ func (h *Handler) saveAccountProfile(w http.ResponseWriter, r *http.Request) {
 
 	_, changes, err := h.state.UpdateUser(sess.userID, func(u *types.User) error { u.DisplayName = formValue(r, "display_name"); return nil })
 	if err != nil {
-		h.redirect(w, r, "/account", failure("Profil nicht gespeichert: %v", err))
+		h.redirectPublic(w, r, "/account", failure("Profil nicht gespeichert: %v", err))
 		return
 	}
 
 	h.change(changes)
-	h.redirect(w, r, "/account", success("Profil gespeichert."))
+	h.redirectPublic(w, r, "/account", success("Profil gespeichert."))
 }
 
 func (h *Handler) accountDevice(w http.ResponseWriter, r *http.Request) {
@@ -115,7 +133,7 @@ func (h *Handler) resetAccountPassword(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if types.UserID(id) == sessionFrom(r).userID {
-		h.redirect(w, r, "/account/password", failure("Das eigene Passwort bitte hier ändern."))
+		h.redirectPublic(w, r, "/account/password", failure("Das eigene Passwort bitte hier ändern."))
 		return
 	}
 

@@ -1,6 +1,6 @@
 FROM --platform=$BUILDPLATFORM golang:1.27.3 AS build
-ARG TARGETOS=linux
-ARG TARGETARCH=amd64
+ARG TARGETOS
+ARG TARGETARCH
 ARG VERSION=dev
 ARG COMMIT=unknown
 ARG BUILD_TIME=unknown
@@ -12,7 +12,7 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath \
     -ldflags "-s -w -X github.com/juanfont/headscale/hscontrol/types.buildVersion=$VERSION -X github.com/juanfont/headscale/hscontrol/types.buildCommit=$COMMIT -X github.com/juanfont/headscale/hscontrol/types.buildTime=$BUILD_TIME" \
     -o /out/headscale ./cmd/headscale
 
-FROM gcr.io/distroless/base-debian13
+FROM gcr.io/distroless/base-debian13@sha256:f5e95195e998742ff590b7569bae479accce1226e51ae6c3118954030121cdcb
 COPY --from=build /out/headscale /usr/local/bin/headscale
 COPY --from=build /src/LICENSE /LICENSE
 COPY packaging/docker/config.yaml /etc/meshora/config.yaml

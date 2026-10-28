@@ -29,16 +29,12 @@ func securityCodeField(label, suffix string) elem.Node {
 }
 
 func UserSecurityPage(info AdminPageInfo, hasPassword, totpEnabled, passkeysAvailable bool, keys []types.UserPasskey, policy *types.UserAuthPolicy, enrollmentOnly bool) *elem.Element {
-	content := []elem.Node{backLink(info.Base+"/account", "Mein Konto"), pageHead("Sicherheit", "Schütze deine lokale Anmeldung mit einer Authenticator-App oder Passkeys.")}
+	content := []elem.Node{backLink(info.RootPath("/account"), "Mein Konto"), pageHead("Sicherheit", "Schütze deine lokale Anmeldung mit einer Authenticator-App oder Passkeys.")}
 	if enrollmentOnly {
 		content = content[1:]
-		content = append(content, cardSection("Sichere Anmeldung erforderlich", "Dein Administrator verlangt 2FA oder einen Passkey. Bis zur Einrichtung kannst du nur dein Passwort und deine Anmeldesicherheit verwalten."))
+		content = append(content, cardSection("Sichere Anmeldung erforderlich", "Dein Administrator verlangt 2FA oder einen Passkey. Für die erstmalige Einrichtung kannst du nur dein Passwort und deine Anmeldesicherheit verwalten."))
 	} else if policy.RequireStrongAuth {
 		content = append(content, cardSection("Verpflichtende Anmeldung", "Für dieses Konto ist 2FA oder ein Passkey erforderlich."))
-	}
-
-	if enrollmentOnly && len(keys) > 0 && !policy.PasskeysSuspendedAt(time.Now()) {
-		content = append(content, cardSection("Vorhandenen Passkey verwenden", "Du hast bereits einen Passkey. Bestätige ihn, um die Anmeldung abzuschließen.", elem.Form(attrs.Props{attrs.Method: "POST", attrs.Action: info.Base + "/passkeys/login/begin", attrs.Class: "stack", "data-passkey-login": "", "data-finish": info.Base + "/passkeys/login/finish"}, adminCSRFInput(info.CSRFToken), elem.Button(attrs.Props{attrs.Type: submitType, attrs.Class: securityPrimaryButtonClass, attrs.Disabled: "true"}, elem.Text("Mit Passkey bestätigen")))))
 	}
 
 	paused := policy.TOTPBypassedAt(time.Now())
@@ -51,7 +47,7 @@ func UserSecurityPage(info AdminPageInfo, hasPassword, totpEnabled, passkeysAvai
 	}
 
 	if !hasPassword {
-		content = append(content, cardSection("Lokale Anmeldung", "Lege zuerst ein lokales Passwort fest, um 2FA und Passkeys zu verwalten.", linkButton(info.Base+"/account/password", "Passwort festlegen", "btn-primary")))
+		content = append(content, cardSection("Lokale Anmeldung", "Lege zuerst ein lokales Passwort fest, um 2FA und Passkeys zu verwalten.", linkButton(info.RootPath("/account/password"), "Passwort festlegen", "btn-primary")))
 		return personalPage(info, "Sicherheit", content...)
 	}
 
@@ -71,14 +67,14 @@ func UserSecurityPage(info AdminPageInfo, hasPassword, totpEnabled, passkeysAvai
 
 	fields := securityProof(totpEnabled && !paused, "totp")
 	fields = append(fields, submitButton(label, "btn-secondary"))
-	content = append(content, cardSection("Authenticator-App", totpHint, postForm(info, action, "action-form", fields...)))
+	content = append(content, cardSection("Authenticator-App", totpHint, accountPostForm(info, action, fields...)))
 
 	var rows []elem.Node
 
 	for _, key := range keys {
 		fields := securityProof(totpEnabled && !paused, "key-"+key.ID)
 		fields = append(fields, elem.Input(attrs.Props{attrs.Type: inputTypeHidden, attrs.Name: "passkey_id", attrs.Value: key.ID}), submitButton("Passkey entfernen", "btn-secondary"))
-		rows = append(rows, elem.Tr(nil, elem.Td(nil, elem.Text(key.Name)), elem.Td(nil, postForm(info, "/account/security/passkeys/delete", "action-form", fields...))))
+		rows = append(rows, elem.Tr(nil, elem.Td(nil, elem.Text(key.Name)), elem.Td(nil, accountPostForm(info, "/account/security/passkeys/delete", fields...))))
 	}
 
 	passkeyNodes := []elem.Node{elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text("Passkeys melden dich ohne Passwort an. Dein Gerät bestätigt dich per PIN, Fingerabdruck oder Gesichtserkennung. Der private Schlüssel bleibt bei deinem Gerät oder Passkey-Anbieter."))}
@@ -93,21 +89,21 @@ func UserSecurityPage(info AdminPageInfo, hasPassword, totpEnabled, passkeysAvai
 		fields = append(fields, textField("Name für diesen Passkey", "name", "", true))
 		fields = append(fields, securityProof(totpEnabled && !paused, "register")...)
 		fields = append(fields, elem.Button(attrs.Props{attrs.Type: submitType, attrs.Class: securityPrimaryButtonClass, attrs.Disabled: "true"}, elem.Text("Passkey hinzufügen")))
-		passkeyNodes = append(passkeyNodes, elem.Form(attrs.Props{attrs.Method: "POST", attrs.Action: info.Base + "/account/security/passkeys/begin", attrs.Class: "action-form", "data-passkey-register": "", "data-finish": info.Base + "/account/security/passkeys/finish"}, append([]elem.Node{adminCSRFInput(info.CSRFToken)}, fields...)...))
+		passkeyNodes = append(passkeyNodes, elem.Form(attrs.Props{attrs.Method: "POST", attrs.Action: info.RootPath("/account/security/passkeys/begin"), attrs.Class: "action-form", "data-passkey-register": "", "data-finish": info.RootPath("/account/security/passkeys/finish")}, append([]elem.Node{adminCSRFInput(info.CSRFToken)}, fields...)...))
 	} else {
 		passkeyNodes = append(passkeyNodes, elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text("Passkeys benötigen HTTPS. Prüfe die öffentliche Serveradresse.")))
 	}
 
 	passkeyNodes = append(passkeyNodes, elem.P(attrs.Props{attrs.ID: "passkey-status", attrs.Class: "muted", attrs.Role: statusClass, "aria-live": "polite"}, elem.Text("Passkeys werden von modernen Browsern auf sicheren Verbindungen unterstützt.")))
-	content = append(content, cardSection("Passkeys", "", passkeyNodes...), elem.Script(attrs.Props{attrs.Src: info.Base + "/assets/security.js", "defer": "true"}))
+	content = append(content, cardSection("Passkeys", "", passkeyNodes...), elem.Script(attrs.Props{attrs.Src: info.RootPath("/assets/security.js"), "defer": "true"}))
 
 	return personalPage(info, "Sicherheit", content...)
 }
 
 func UserTOTPSetup(info AdminPageInfo, secret string) *elem.Element {
-	return personalPage(info, "2FA einrichten", backLink(info.Base+"/account/security", "Sicherheit"), pageHead("Authenticator-App verbinden", "Scanne den QR-Code und bestätige danach den angezeigten Code. Erst dann wird 2FA aktiviert."),
-		cardSection("1. In deiner Authenticator-App hinzufügen", "", elem.Img(attrs.Props{attrs.Src: info.Base + "/account/security/totp/qr", attrs.Alt: "QR-Code zum Einrichten deiner Authenticator-App", attrs.Width: "240", attrs.Height: "240", attrs.Class: "totp-qr"}), elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text("Alternativ diesen Einrichtungsschlüssel manuell eingeben:")), elem.Pre(attrs.Props{attrs.Class: "codeblock recovery-codes"}, elem.Code(attrs.Props{attrs.ID: "totp-secret"}, elem.Text(secret)))),
-		cardSection("2. Verbindung bestätigen", "", postForm(info, "/account/security/totp/enable", "action-form", securityCodeField("Sechsstelliger Code", "setup"), submitButton("2FA aktivieren", "btn-primary"))))
+	return personalPage(info, "2FA einrichten", backLink(info.RootPath("/account/security"), "Sicherheit"), pageHead("Authenticator-App verbinden", "Scanne den QR-Code und bestätige danach den angezeigten Code. Erst dann wird 2FA aktiviert."),
+		cardSection("1. In deiner Authenticator-App hinzufügen", "", elem.Img(attrs.Props{attrs.Src: info.RootPath("/account/security/totp/qr"), attrs.Alt: "QR-Code zum Einrichten deiner Authenticator-App", attrs.Width: "240", attrs.Height: "240", attrs.Class: "totp-qr"}), elem.P(attrs.Props{attrs.Class: "muted"}, elem.Text("Alternativ diesen Einrichtungsschlüssel manuell eingeben:")), elem.Pre(attrs.Props{attrs.Class: "codeblock recovery-codes"}, elem.Code(attrs.Props{attrs.ID: "totp-secret"}, elem.Text(secret)))),
+		cardSection("2. Verbindung bestätigen", "", accountPostForm(info, "/account/security/totp/enable", securityCodeField("Sechsstelliger Code", "setup"), submitButton("2FA aktivieren", "btn-primary"))))
 }
 
 func UserRecoveryCodes(base, login string, codes []string) *elem.Element {

@@ -112,6 +112,7 @@ func (h *setupHandler) routes() http.Handler {
 		_, _ = io.WriteString(w, `{"status":"pass","setup_required":true}`)
 	})
 	mux.HandleFunc("GET /admin"+templates.AdminStylesheetPath, stylesheet)
+	mux.HandleFunc("GET "+templates.AdminStylesheetPath, stylesheet)
 
 	for path, data := range map[string][]byte{
 		"/assets/meshora-logo.png":      assets.Logo,

@@ -466,6 +466,11 @@ func (ns *noiseServer) sshAction(
 	srcNodeID, dstNodeID types.NodeID,
 	localUser, authIDStr string,
 ) (*tailcfg.SSHAction, error) {
+	// Reject cached check URLs too, including already approved follow-ups.
+	if ns.headscale.cfg == nil || !ns.headscale.cfg.TailscaleSSHEnabled {
+		return &tailcfg.SSHAction{Reject: true}, nil
+	}
+
 	action := tailcfg.SSHAction{
 		AllowAgentForwarding:      true,
 		AllowLocalPortForwarding:  true,
