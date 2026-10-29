@@ -338,8 +338,20 @@ Die frühere reine HTML-Vorschau hatte diesen Headerfehler nicht erfasst.
 Validierung: HTTP-Header-Regression und Mail-Einstellungstests bestanden.
 Chromium mit restriktiver CSP prüft aktive Versandart, Umschalten, Werterhalt
 und mobile Darstellung. Lint der Änderungen: 0 Befunde; diff --check bestanden.
-Erneute Veröffentlichung des bestehenden RC.6 auf Nutzerwunsch läuft.
+Erneute Veröffentlichung des bestehenden RC.6 abgeschlossen, Commit 9ba19b75.
 
 RC.6-Update: Bestehenden Tag und Artefakte auf ausdrücklichen Nutzerwunsch
 ersetzen; kein RC.7. Vorheriger Tag-Objektstand:
 `72010a4fea77f5d630f51ab9e326179de4edfc2f`.
+
+
+## RC.6-Update bestätigt (29. Oktober 2026)
+
+Release-Workflow 40750492272 erfolgreich abgeschlossen. RC.6-Tag, Downloads
+und Prüfsummen auf Commit 9ba19b75 aktualisiert. OIDC-Passkey-Fortsetzung
+und CSP-/Abstandsfix der Mailseite enthalten. Release-Tests, Gesamtbuild,
+AMD64-/ARM64-Build und AMD64-Starttest bestanden.
+GHCR v0.2.1-rc.6 und RC zeigen auf:
+`sha256:13f89fa346a8990ca23000772902b288173b3e5999a4b2579c5e8bcded87a7c2`.
+latest bleibt unverändert. Bestehenden RC.6 erneut pullen und Container
+neu erstellen. Echte Authentik-/Mailanbieter- und ARM64-Abnahme bleiben offen.
