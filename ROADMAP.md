@@ -355,3 +355,11 @@ GHCR v0.2.1-rc.6 und RC zeigen auf:
 `sha256:13f89fa346a8990ca23000772902b288173b3e5999a4b2579c5e8bcded87a7c2`.
 latest bleibt unverändert. Bestehenden RC.6 erneut pullen und Container
 neu erstellen. Echte Authentik-/Mailanbieter- und ARM64-Abnahme bleiben offen.
+
+
+## v0.2.2 als stabile Veröffentlichung (30. Oktober 2026)
+
+Vom Nutzer freigegeben: aktuellen Main-Stand als v0.2.2 veröffentlichen
+und latest sowie RC auf denselben neuen Multiarch-Digest aktualisieren.
+Enthält den aktualisierten RC.6 einschließlich OIDC-/Mailseiten-Fixes,
+weiterhin ohne WireGuard-Gateway. Status: Veröffentlichung läuft.

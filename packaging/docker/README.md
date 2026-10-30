@@ -1,16 +1,16 @@
 # Meshora starten und im Browser einrichten
 
-## Meshora v0.2.1-rc.6 (28. Oktober 2026)
+## Meshora v0.2.2 (30. Oktober 2026)
 
-**RC.6 aktualisiert:** Der bestehende Tag und die Artefakte wurden mit den
-folgenden Korrekturen neu erstellt. Vorhandene RC.6-Installationen müssen
-das Image erneut herunterladen und den Container neu erstellen.
+Stabile Veröffentlichung des geprüften Main-Stands einschließlich der
+Korrekturen aus dem aktualisierten RC.6. Die Container-Tags `latest` und
+`RC` werden auf v0.2.2 aktualisiert.
 
 - OIDC mit vorhandenem Passkey führt direkt zur gebundenen Faktorbestätigung.
 - Mailseite: Umschaltung unter der produktiven Sicherheitsrichtlinie repariert
   und Feldabstände korrigiert.
 
-Release Candidate des aktuellen main-Stands. WireGuard-Gateway-Code ist
+Stabile Version des aktuellen main-Stands. WireGuard-Gateway-Code ist
 nicht enthalten; der Prototyp bleibt auf dem separaten lokalen Branch.
 
 - Mail-Einstellungen zeigen nur die gewählte Versandart. Optionale JMAP-IDs
@@ -31,14 +31,14 @@ nicht enthalten; der Prototyp bleibt auf dem separaten lokalen Branch.
   bleiben erhalten; Bestätigung und Freigabeänderungen beenden Sitzungen.
 - Enthält die Absicherungen aus RC.4; Tailscale SSH bleibt standardmäßig aus.
 
-Vor dem Update Konfiguration und Datenbank sichern. Zum expliziten RC-Test:
+Vor dem Update Konfiguration und Datenbank sichern. Zum Update auf diese Version:
 
 ```sh
-MESHORA_VERSION=v0.2.1-rc.6 docker compose pull
-MESHORA_VERSION=v0.2.1-rc.6 docker compose up -d
+MESHORA_VERSION=v0.2.2 docker compose pull
+MESHORA_VERSION=v0.2.2 docker compose up -d
 ```
 
-Der RC verschiebt latest nicht. Die neue Datenbankmigration
+v0.2.2 aktualisiert sowohl latest als auch RC. Die neue Datenbankmigration
 `202610281800-user-email-changes` wird beim Start angewandt. Vor einem
 Downgrade ist die Sicherung wiederherzustellen.
 

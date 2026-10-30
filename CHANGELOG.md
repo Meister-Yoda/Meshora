@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## Meshora v0.2.2 (2026-10-30)
+
+- Publish the tested RC.6 changes as v0.2.2: personal account navigation, verified email login addresses with per-user controls, TLS SMTP and HTTPS JMAP delivery.
+- Include account-bound OIDC Passkey confirmation and the production mail-settings CSP and layout fixes. OIDC callback URLs remain unchanged.
+- Include authentication hardening, route lookup optimization and pinned multiarch images from RC.4. WireGuard gateway remains excluded.
+- **Upgrade:** Back up configuration and database before the appended user-email-changes migration. Tailscale SSH is disabled by default and requires explicit opt-in.
+- Local provider tests do not replace live Authentik/mail-provider validation or ARM64 runtime acceptance; the existing full lint baseline remains outstanding.
+
 ## Meshora v0.2.1-rc.6 (2026-10-28)
 
 RC.6 republished at the user's request with the fixes below; tag and artifacts replace the initial RC.6 build.
