@@ -362,4 +362,22 @@ neu erstellen. Echte Authentik-/Mailanbieter- und ARM64-Abnahme bleiben offen.
 Vom Nutzer freigegeben: aktuellen Main-Stand als v0.2.2 veröffentlichen
 und latest sowie RC auf denselben neuen Multiarch-Digest aktualisieren.
 Enthält den aktualisierten RC.6 einschließlich OIDC-/Mailseiten-Fixes,
-weiterhin ohne WireGuard-Gateway. Status: Veröffentlichung läuft.
+weiterhin ohne WireGuard-Gateway. Status: veröffentlicht.
+
+
+## v0.2.2 bestätigt (30. Oktober 2026)
+
+[Stabiles Release](https://github.com/Meister-Yoda/Meshora/releases/tag/v0.2.2),
+Commit `46b0d74b`, als neuestes GitHub-Release markiert.
+[Release-Workflow](https://github.com/Meister-Yoda/Meshora/actions/runs/40987158677)
+erfolgreich: Race-Tests, Gesamtbuild, AMD64-/ARM64-Builds,
+AMD64-Start-/Health-/Setup-Test, Downloads und Prüfsummen.
+
+GHCR `v0.2.2`, `latest` und `RC` haben denselben Multiarch-Digest:
+`sha256:de5af952c0ee4a9c80ca921e60ea5762d44d975317c58d4b2b16d8fc81e146b9`.
+
+Separater Docs-Deploy 40987158590: Dokumentation gebaut, Push nach gh-pages
+mit HTTP 403 abgewiesen (fehlende Schreibrechte für github-actions[bot]).
+Nicht Teil des erfolgreichen Release-/Registry-Workflows; Folgepunkt offen.
+Echte Authentik-/Mailanbieter-Abnahme, ARM64-Laufzeit und die bekannte
+vollständige Lint-Baseline bleiben separat offen.
