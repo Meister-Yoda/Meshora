@@ -421,11 +421,30 @@ Validierung für Testmail, Sitzungsverwaltung und Einladungen:
 - Chromium prüft Desktop/Mobil mit restriktiver CSP, bedienbare Sitzungen,
   Mailformular und Einladung; Linktoken wird aus der Browseradresse entfernt.
 
-Für Veröffentlichung als v0.2.3-rc.1 freigegeben; Veröffentlichung läuft. Keine produktiven Testmails versendet. Vor einem
+Veröffentlicht als v0.2.3-rc.1, Commit 53c8ace2. Keine produktiven Testmails versendet. Vor einem
 späteren Upgrade Datenbank sichern (neue Einladungsmigration).
 
 ## v0.2.3-rc.1 (30. Oktober 2026)
 
 Vom Nutzer freigegeben: Testmail, Sitzungsverwaltung und Einladungen
 als v0.2.3-rc.1 veröffentlichen und RC aktualisieren. latest bleibt v0.2.2.
-Status: Veröffentlichung läuft.
+Status: veröffentlicht.
+
+
+## v0.2.3-rc.1 bestätigt (30. Oktober 2026)
+
+[Release](https://github.com/Meister-Yoda/Meshora/releases/tag/v0.2.3-rc.1),
+Commit `53c8ace2`.
+[Workflow](https://github.com/Meister-Yoda/Meshora/actions/runs/40991351841)
+erfolgreich: Release-Race-Tests, Gesamtbuild, AMD64-/ARM64-Container,
+AMD64-Start-/Health-/Setup-Test, öffentliche Downloads und Prüfsummen.
+
+GHCR `v0.2.3-rc.1` und `RC`:
+`sha256:96e45eab0de4a81d65b08e7a4d5215d027c39e2c9fa0ee6e515a3913c90d0ef4`.
+`latest` bleibt auf v0.2.2:
+`sha256:de5af952c0ee4a9c80ca921e60ea5762d44d975317c58d4b2b16d8fc81e146b9`.
+
+Testmail, Sitzungsverwaltung und lokale/OIDC-Einladungen sind damit
+als Vorabversion veröffentlicht. Vor Upgrade sichern
+(Migration 202610301200-user-invitations).
+Produktiver Mailversand bleibt offen; Gateway nicht enthalten.
