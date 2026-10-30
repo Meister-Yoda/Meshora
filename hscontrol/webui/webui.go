@@ -64,6 +64,9 @@ var (
 
 // session is the server-side state of a logged-in admin.
 type session struct {
+	managementID       string
+	userAgent          string
+	endsAt             time.Time
 	userID             types.UserID
 	accountRevision    uint64
 	isAdmin            bool
@@ -200,6 +203,8 @@ func (h *Handler) Routes(r chi.Router) {
 		// Keep the registered provider redirect URI and its narrowly scoped flow cookie.
 		r.Get("/admin/oidc/callback", h.oidcCallback)
 		r.Get("/connect", h.enrollment)
+		r.Get("/invite", h.invitationPage)
+		r.Post("/invite", h.acceptInvitation)
 		r.Get(templates.AdminStylesheetPath, stylesheet)
 		r.Get("/assets/security.js", h.securityScript)
 		r.Get("/assets/enrollment.js", func(w http.ResponseWriter, r *http.Request) {
@@ -235,6 +240,8 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Use(h.requireSession)
 			r.Get("/account", h.accountPage)
 			r.Get("/account/devices", h.accountDevices)
+			r.Get("/account/sessions", h.accountSessions)
+			r.Post("/account/sessions/revoke", h.revokeAccountSessions)
 			r.Get("/account/email", h.accountEmailPage)
 			r.Get("/account/security", h.securityPage)
 			r.Post("/account/security/totp/begin", h.beginTOTP)
@@ -315,8 +322,12 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Get("/settings/{section}", h.settingsPage)
 			r.Post("/settings/oidc", h.saveOIDCSettings)
 			r.Post("/settings/oidc-button", h.saveOIDCButtonText)
+			r.Get("/invitations", h.invitationsPage)
+			r.Post("/invitations", h.createInvitation)
+			r.Post("/invitations/revoke", h.revokeInvitation)
 			r.Get("/settings/mail", h.mailSettingsPage)
 			r.Post("/settings/mail", h.saveMailSettings)
+			r.Post("/settings/mail/test", h.testMailSettings)
 		})
 	})
 }
@@ -526,6 +537,8 @@ func (h *Handler) pageInfo(r *http.Request) templates.AdminPageInfo {
 	}
 
 	switch {
+	case strings.HasPrefix(path, "/sessions"):
+		section = templates.AccountSessions
 	case strings.HasPrefix(path, "/devices"):
 		section = templates.AccountDevices
 	case strings.HasPrefix(path, "/email"):

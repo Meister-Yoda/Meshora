@@ -2,6 +2,7 @@ package templates
 
 import (
 	"strconv"
+	"time"
 
 	"github.com/chasefleming/elem-go"
 	"github.com/chasefleming/elem-go/attrs"
@@ -93,4 +94,48 @@ func UserMergePage(info AdminPageInfo, sourceID, sourceName string, choices []Ad
 			postForm(info, "/users/"+sourceID+"/merge", "action-form", zoneSelect("Zielkonto", "target", "merge-target", choices, nil, false),
 				checkboxField("Falls beide Konten ein Passwort besitzen: Zielpasswort behalten und Quellpasswort verwerfen", "keep_password"),
 				checkboxField("Diese beiden Konten gehören derselben Person. Zusammenführung bestätigen.", "confirm"), submitButton("Konten endgültig zusammenführen", "btn-danger"))))
+}
+
+type UserSessionRow struct {
+	ID        string
+	Current   bool
+	CreatedAt time.Time
+	ExpiresAt time.Time
+	Browser   string
+	Method    string
+}
+
+func UserSessionsPage(info AdminPageInfo, sessions []UserSessionRow) *elem.Element {
+	entries := make([]elem.Node, 0, len(sessions))
+	for _, entry := range sessions {
+		label := "Andere Sitzung"
+		if entry.Current {
+			label = "Diese Sitzung"
+		}
+
+		browser := entry.Browser
+		if browser == "" {
+			browser = "Keine Browserangabe"
+		}
+
+		until := "Nach Servervorgabe"
+		if !entry.ExpiresAt.IsZero() {
+			until = entry.ExpiresAt.UTC().Format("02.01.2006, 15:04 UTC")
+		}
+
+		entries = append(entries, cardSection(label, browser,
+			detailList(detail("Anmeldeart", elem.Text(entry.Method)), detail("Angemeldet seit", elem.Text(entry.CreatedAt.UTC().Format("02.01.2006, 15:04 UTC"))), detail("Gültig bis", elem.Text(until))),
+			accountPostForm(info, "/account/sessions/revoke",
+				elem.Input(attrs.Props{attrs.Type: inputTypeHidden, attrs.Name: "scope", attrs.Value: "one"}),
+				elem.Input(attrs.Props{attrs.Type: inputTypeHidden, attrs.Name: "session_id", attrs.Value: entry.ID}),
+				submitButton("Diese Sitzung abmelden", "btn-secondary"))))
+	}
+
+	entries = append(entries, cardSection("Sitzungen beenden", "Beim Beenden aller Sitzungen wirst du auch hier abgemeldet.",
+		accountPostForm(info, "/account/sessions/revoke", elem.Input(attrs.Props{attrs.Type: inputTypeHidden, attrs.Name: "scope", attrs.Value: "others"}), submitButton("Alle anderen abmelden", "btn-secondary")),
+		accountPostForm(info, "/account/sessions/revoke", elem.Input(attrs.Props{attrs.Type: inputTypeHidden, attrs.Name: "scope", attrs.Value: "all"}), submitButton("Alle Sitzungen abmelden", "btn-danger"))))
+	content := make([]elem.Node, 0, len(entries)+1)
+	content = append(content, pageHead("Sitzungen", "Deine Anmeldungen an dieser Meshora-Instanz. Browserangaben werden vom jeweiligen Gerät gemeldet. Abmelden sperrt weitere Zugriffe; laufende Anfragen können noch abschließen."))
+
+	return personalPage(info, "Sitzungen", append(content, entries...)...)
 }

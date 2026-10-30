@@ -32,6 +32,9 @@ func TestAdminOIDCFlow(t *testing.T) {
 		status int
 	}{
 		{"success", http.StatusSeeOther},
+		{"invite_oidc", http.StatusSeeOther},
+		{"invite_wrong_email", http.StatusForbidden},
+		{"invite_unverified", http.StatusForbidden},
 		{"no_admin", http.StatusSeeOther},
 		{"required_enrollment", http.StatusSeeOther},
 		{"required_totp", http.StatusSeeOther},
@@ -142,6 +145,13 @@ func TestAdminOIDCFlow(t *testing.T) {
 						"preferred_username": testAdmin, "email": "oidc-admin@example.test", "email_verified": true,
 					}
 
+					if strings.HasPrefix(tc.name, "invite_") && tc.name != "invite_wrong_email" {
+						claims["email"] = "new-invite@example.test"
+					}
+
+					if tc.name == "invite_unverified" {
+						claims["email_verified"] = false
+					}
 					if strings.HasPrefix(tc.name, "new_") {
 						claims["email"] = "new-oidc@example.test"
 					}
@@ -238,7 +248,20 @@ func TestAdminOIDCFlow(t *testing.T) {
 
 			_, page := env.get(env.client, "/?local=1")
 			assert.Contains(t, page, "Sign in with Authentik")
-			resp, _ := env.post(env.client, "/login/oidc", url.Values{"csrf_token": {csrfFrom(t, page)}})
+
+			var resp result
+
+			if strings.HasPrefix(tc.name, "invite_") {
+				actor, actorErr := env.state.AuthenticateUserAccount(testAdmin, testPassword)
+				require.NoError(t, actorErr)
+
+				token := randomToken()
+				require.NoError(t, env.state.CreateUserInvitation(types.UserID(actor.UserID), actor.Revision, "new-invite@example.test", "oidc", randomToken(), hashToken(token)))
+				_, invitePage := env.get(env.client, "/invite")
+				resp, _ = env.post(env.client, "/invite", url.Values{"csrf_token": {csrfFrom(t, invitePage)}, "token": {token}})
+			} else {
+				resp, _ = env.post(env.client, "/login/oidc", url.Values{"csrf_token": {csrfFrom(t, page)}})
+			}
 			require.Equal(t, http.StatusSeeOther, resp.StatusCode)
 			authorization, err := url.Parse(resp.Header.Get("Location"))
 			require.NoError(t, err)
@@ -307,7 +330,7 @@ func TestAdminOIDCFlow(t *testing.T) {
 			}
 			if tc.status == http.StatusSeeOther {
 				target := "/admin/"
-				if tc.name == "no_admin" || strings.HasPrefix(tc.name, "new_") {
+				if tc.name == "no_admin" || strings.HasPrefix(tc.name, "new_") || tc.name == "invite_oidc" {
 					target = "/account"
 				}
 
@@ -318,7 +341,7 @@ func TestAdminOIDCFlow(t *testing.T) {
 				resp, page = env.get(env.client, target)
 				assert.Equal(t, http.StatusOK, resp.StatusCode)
 
-				if tc.name == "no_admin" || strings.HasPrefix(tc.name, "new_") {
+				if tc.name == "no_admin" || strings.HasPrefix(tc.name, "new_") || tc.name == "invite_oidc" {
 					assert.Contains(t, page, "Mein Konto")
 				} else if tc.name == "required_enrollment" {
 					assert.Contains(t, page, "Sichere Anmeldung erforderlich")

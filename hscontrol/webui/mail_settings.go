@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/juanfont/headscale/hscontrol/db"
 	"github.com/juanfont/headscale/hscontrol/templates"
 	"gopkg.in/yaml.v3"
 )
@@ -132,4 +133,43 @@ func (h *Handler) saveMailSettings(w http.ResponseWriter, r *http.Request) {
 
 	h.mailConfig = cfg
 	h.redirect(w, r, "/settings/mail", success("Mailversand gespeichert und sofort aktiv."))
+}
+
+// testMailSettings deliberately uses saved settings and a fixed message body.
+func (h *Handler) testMailSettings(w http.ResponseWriter, r *http.Request) {
+	if h.emailAccountProof(r) != nil {
+		h.redirect(w, r, "/settings/mail", failure("Eigene Anmeldung bitte zuerst bestätigen."))
+		return
+	}
+
+	key := "test-mail:" + strconv.FormatUint(uint64(sessionFrom(r).userID), 10)
+	if h.blocked(key) {
+		h.redirect(w, r, "/settings/mail", failure("%s", msgTooManyAttempts))
+		return
+	}
+
+	h.recordFailure(key)
+
+	recipient, err := db.NormalizeAccountEmail(r.PostForm.Get("recipient"))
+	if err != nil || strings.ContainsAny(r.PostForm.Get("recipient"), "\r\n") {
+		h.redirect(w, r, "/settings/mail", failure("Gültige Empfängeradresse eingeben."))
+		return
+	}
+
+	h.settingsMu.Lock()
+	cfg := h.mailConfig
+	h.settingsMu.Unlock()
+
+	if !validMailConfig(cfg) {
+		h.redirect(w, r, "/settings/mail", failure("Mailversand zuerst einrichten und speichern."))
+		return
+	}
+
+	err = h.emailSender(r.Context(), cfg, recipient, "Dies ist eine Testnachricht von Meshora. Der gespeicherte Mailversand hat diese Nachricht an den Mailserver übergeben. Diese Nachricht ändert keine Kontoeinstellungen.")
+	if err != nil {
+		h.redirect(w, r, "/settings/mail", failure("Testmail konnte nicht an den Mailserver übergeben werden. Bitte Versandart, Zugangsdaten und Absender prüfen."))
+		return
+	}
+
+	h.redirect(w, r, "/settings/mail", success("Testmail an den Mailserver übergeben. Bitte Posteingang und Spamordner prüfen; die Zustellung kann verzögert sein."))
 }

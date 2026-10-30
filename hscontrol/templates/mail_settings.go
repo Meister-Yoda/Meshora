@@ -94,7 +94,20 @@ func MailSettingsPage(info AdminPageInfo, cfg MailSettings, proof *AdminUserSecu
 		form = postForm(info, "/settings/mail", "action-form", fields...)
 	}
 
+	testFields := []elem.Node{textField("Empfängeradresse", "recipient", "", true)}
+	if proof.NeedPassword {
+		testFields = append(testFields, securityProof(proof.NeedCode, "test-mail")...)
+	}
+
+	testFields = append(testFields, submitButton("Testmail senden", "btn-secondary"))
+
+	var testForm elem.Node = elem.P(nil, elem.Text("Mailversand zuerst einrichten und speichern."))
+	if cfg.Configured {
+		testForm = postForm(info, "/settings/mail/test", "action-form", testFields...)
+	}
+
 	return info.shell("Settings", pageHead("Mailversand", "Bestätigungslinks für E-Mail-Adressen versenden."),
 		cardSection("Mailversand", hint, form),
+		cardSection("Testmail", "Verwendet die gespeicherten Einstellungen. Eine erfolgreiche Übergabe bestätigt noch nicht die Zustellung im Postfach.", testForm),
 		elem.Script(attrs.Props{attrs.Src: info.RootPath("/assets/security.js"), "defer": "true"}))
 }

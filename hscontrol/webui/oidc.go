@@ -20,11 +20,12 @@ import (
 const adminOIDCCookie = "meshora_admin_oidc"
 
 type adminOIDCFlow struct {
-	nonce    string
-	verifier string
-	browser  string
-	provider *oidc.Provider
-	config   oauth2.Config
+	invitation string
+	nonce      string
+	verifier   string
+	browser    string
+	provider   *oidc.Provider
+	config     oauth2.Config
 }
 
 func (h *Handler) adminOIDCEnabled() bool {
@@ -56,7 +57,7 @@ func (h *Handler) oidcLogin(w http.ResponseWriter, r *http.Request) {
 
 // startOIDC uses prompt=none only for the automatic attempt. All failures render
 // the local login directly, avoiding an authentication redirect loop.
-func (h *Handler) startOIDC(w http.ResponseWriter, r *http.Request, automatic bool) {
+func (h *Handler) startOIDC(w http.ResponseWriter, r *http.Request, automatic bool, invitation ...string) {
 	rateKey := "oidc:" + clientIP(r)
 	if h.blocked(rateKey) {
 		h.renderLogin(w, r, http.StatusTooManyRequests, "", msgTooManyAttempts)
@@ -85,9 +86,14 @@ func (h *Handler) startOIDC(w http.ResponseWriter, r *http.Request, automatic bo
 		ClientID: h.activeOIDC.ClientID, ClientSecret: h.activeOIDC.ClientSecret,
 		Endpoint: provider.Endpoint(), RedirectURL: h.serverURL + "/admin/oidc/callback", Scopes: scopes,
 	}
+
+	inviteHash := ""
+	if len(invitation) == 1 {
+		inviteHash = invitation[0]
+	}
 	state, browser, nonce, verifier := randomToken(), randomToken(), randomToken(), oauth2.GenerateVerifier()
 	h.oidcFlows.Add(hashToken(state), adminOIDCFlow{
-		nonce: nonce, verifier: verifier, browser: hashToken(browser), provider: provider, config: config,
+		nonce: nonce, verifier: verifier, browser: hashToken(browser), provider: provider, config: config, invitation: inviteHash,
 	})
 	h.setOIDCCookie(w, r, browser, 600)
 
@@ -202,7 +208,12 @@ func (h *Handler) oidcCallback(w http.ResponseWriter, r *http.Request) {
 
 	claims.Iss, claims.Sub = idToken.Issuer, idToken.Subject
 
-	user, err := h.state.ResolveOIDCUser(&claims, h.activeOIDC.EmailVerifiedRequired)
+	var user *types.User
+	if flow.invitation != "" {
+		user, err = h.state.AcceptUserInvitation(flow.invitation, "oidc", "", &claims)
+	} else {
+		user, err = h.state.ResolveOIDCUser(&claims, h.activeOIDC.EmailVerifiedRequired)
+	}
 	if err != nil {
 		log.Warn().Err(err).Bool("email_present", claims.Email != "").Bool("email_verified", bool(claims.EmailVerified)).Msg("WebUI OIDC account resolution failed")
 

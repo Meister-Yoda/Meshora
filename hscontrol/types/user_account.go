@@ -65,3 +65,14 @@ type UserEmailChange struct {
 	RequestedAt     time.Time
 	ExpiresAt       time.Time
 }
+
+// UserInvitation stores only a hash of the single-use acceptance token.
+type UserInvitation struct {
+	ID        string `gorm:"primaryKey"`
+	Email     string
+	Mode      string
+	TokenHash string `json:"-"`
+	CreatedBy uint64
+	CreatedAt time.Time
+	ExpiresAt time.Time
+}

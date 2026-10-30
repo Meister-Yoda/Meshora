@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## Meshora v0.2.3-rc.1 (2026-10-30)
+
+- Add guarded test-mail delivery using saved SMTP/JMAP settings.
+- Add personal session listing and individual, other-session and full logout controls.
+- Add administrator email invitations for local-password or OIDC accounts, with 24-hour hashed single-use tokens, revocation, verified-email matching and atomic account creation. Append the user-invitations database migration.
+
 ## Meshora v0.2.2 (2026-10-30)
 
 - Publish the tested RC.6 changes as v0.2.2: personal account navigation, verified email login addresses with per-user controls, TLS SMTP and HTTPS JMAP delivery.

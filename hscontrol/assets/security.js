@@ -75,3 +75,17 @@
  transport.addEventListener("change", update);
  update();
 })();
+
+;(() => {
+ const field=document.getElementById("invitation-token");
+ if (!field) return;
+ const params=new URLSearchParams(location.hash.slice(1));
+ const token=params.get("token");
+ history.replaceState(null,"",location.pathname+location.search);
+ if (!token || !/^[A-Za-z0-9_-]{32,128}$/.test(token)) return;
+ field.value=token;
+ const local=document.getElementById("invitation-local-fields");
+ if (local) local.hidden=params.get("mode")==="oidc";
+ document.getElementById("invitation-submit").disabled=false;
+ document.getElementById("invitation-status").textContent="Einladungslink geladen. Bitte die Einladung ausdrücklich annehmen.";
+})();

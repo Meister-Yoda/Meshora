@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"html"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"regexp"
 	"testing"
@@ -136,4 +137,65 @@ func TestPersonalMenuSeparatesPagesAndKeepsAdminNavigation(t *testing.T) {
 		require.Contains(t, page, `href="/account/devices"`)
 		require.Contains(t, page, `href="/account/email"`)
 	}
+}
+
+func TestAccountSessionManagementIsolation(t *testing.T) {
+	env := newTestEnv(t)
+	env.signedIn()
+
+	other := newClient(t)
+	response, _ := env.login(other, testAdmin, testPassword)
+	require.Equal(t, http.StatusSeeOther, response.StatusCode)
+	normal, _, _ := emailUser(t, env)
+	lookup := func(client *http.Client) *session {
+		target, err := url.Parse(env.server.URL)
+		require.NoError(t, err)
+
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, env.server.URL+"/account", nil)
+		for _, cookie := range client.Jar.Cookies(target) {
+			req.AddCookie(cookie)
+		}
+
+		sess, ok := env.handler.currentSession(req)
+		require.True(t, ok)
+
+		return sess
+	}
+	current, second, foreign := lookup(env.client), lookup(other), lookup(normal)
+	_, page := env.get(env.client, "/account/sessions")
+	require.Contains(t, page, current.managementID)
+	require.Contains(t, page, second.managementID)
+	require.NotContains(t, page, foreign.managementID)
+
+	target, _ := url.Parse(env.server.URL)
+	for _, cookie := range env.client.Jar.Cookies(target) {
+		if cookie.Name == sessionCookie {
+			require.NotContains(t, page, cookie.Value)
+			require.NotContains(t, page, hashToken(cookie.Value))
+		}
+	}
+
+	response, _ = env.post(env.client, "/account/sessions/revoke", url.Values{"scope": {"one"}, "session_id": {second.managementID}})
+	require.Equal(t, http.StatusForbidden, response.StatusCode)
+	csrf := csrfFrom(t, page)
+	response, _ = env.post(env.client, "/account/sessions/revoke", url.Values{"csrf_token": {csrf}, "scope": {"one"}, "session_id": {foreign.managementID}})
+	require.Equal(t, http.StatusNotFound, response.StatusCode)
+	response, _ = env.post(env.client, "/account/sessions/revoke", url.Values{"csrf_token": {csrf}, "scope": {"one"}, "session_id": {second.managementID}})
+	require.Equal(t, http.StatusSeeOther, response.StatusCode)
+	response, _ = env.get(other, "/account")
+	require.Equal(t, http.StatusSeeOther, response.StatusCode)
+
+	_, _ = env.login(other, testAdmin, testPassword)
+	response, _ = env.post(env.client, "/account/sessions/revoke", url.Values{"csrf_token": {csrf}, "scope": {"others"}})
+	require.Equal(t, http.StatusSeeOther, response.StatusCode)
+	response, _ = env.get(other, "/account")
+	require.Equal(t, http.StatusSeeOther, response.StatusCode)
+	response, _ = env.get(env.client, "/account/sessions")
+	require.Equal(t, http.StatusOK, response.StatusCode)
+	response, _ = env.post(env.client, "/account/sessions/revoke", url.Values{"csrf_token": {csrf}, "scope": {"all"}})
+	require.Equal(t, http.StatusSeeOther, response.StatusCode)
+	response, _ = env.get(env.client, "/account")
+	require.Equal(t, http.StatusSeeOther, response.StatusCode)
+	response, _ = env.get(normal, "/account")
+	require.Equal(t, http.StatusOK, response.StatusCode)
 }

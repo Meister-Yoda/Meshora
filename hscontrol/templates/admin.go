@@ -716,6 +716,7 @@ const (
 	AccountEmail    = "account-email"
 	AccountSecurity = "account-security"
 	AccountPassword = "account-password"
+	AccountSessions = "account-sessions"
 )
 
 func accountNavigationItems(base, current string) []elem.Node {
@@ -726,6 +727,7 @@ func accountNavigationItems(base, current string) []elem.Node {
 		navLink(publicUIPath(base, "/account/email"), "E-Mail-Adresse", current == AccountEmail),
 		navLink(publicUIPath(base, "/account/security"), "Sicherheit", current == AccountSecurity),
 		navLink(publicUIPath(base, "/account/password"), "Passwort", current == AccountPassword),
+		navLink(publicUIPath(base, "/account/sessions"), "Sitzungen", current == AccountSessions),
 	}
 }
 
@@ -746,6 +748,7 @@ func mainNavigation(base, current string) elem.Node {
 	items = append(items,
 		elem.P(attrs.Props{attrs.Class: "sidebar-label"}, i18nText("Administration")),
 		navLink(base+"/keys", "Keys", current == "Keys"),
+		navLink(base+"/invitations", "Einladungen", current == "Einladungen"),
 		navLink(base+"/settings", "Settings", current == "Settings"),
 	)
 	if current == "Settings" {
@@ -812,6 +815,8 @@ func navLink(href, label string, current bool) *elem.Element {
 	}
 
 	paths := map[string]string{
+		"Sitzungen":      "M3 5h18v12H3z M8 21h8 M12 17v4 M8 9h8 M8 13h5",
+		"Einladungen":    "M3 5h18v14H3z M3 6l9 7 9-7",
 		"Zonen":          "M4 4h6v6H4z M14 14h6v6h-6z M7 10v7h7 M10 7h7v7",
 		"DNS":            "M3 5h18v5H3z M3 14h18v5H3z M7 7.5h.01 M7 16.5h.01 M16 7.5h2 M16 16.5h2",
 		"Policy":         "M12 3l8 3v5c0 5-4 8-8 10-4-2-8-5-8-10V6z M8 12l3 3 5-6",

@@ -3,6 +3,7 @@ package webui
 import (
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -324,4 +325,97 @@ func (h *Handler) saveUserAuthPolicy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.redirect(w, r, target, success("Anmeldesicherheit gespeichert. Alle WebUI-Sitzungen dieses Nutzers sind beendet."))
+}
+
+func (h *Handler) accountSessions(w http.ResponseWriter, r *http.Request) {
+	current := sessionFrom(r)
+	rows := []templates.UserSessionRow{}
+
+	for _, key := range h.sessions.Keys() {
+		candidate, ok := h.sessions.Peek(key)
+		if !ok || candidate.userID != current.userID || candidate.accountRevision != current.accountRevision || candidate.managementID == "" {
+			continue
+		}
+
+		until := candidate.endsAt
+		for _, limit := range []time.Time{candidate.validUntil, candidate.expires} {
+			if !limit.IsZero() && (until.IsZero() || limit.Before(until)) {
+				until = limit
+			}
+		}
+
+		if !until.IsZero() && !time.Now().Before(until) {
+			continue
+		}
+
+		method := "Passwort"
+		if candidate.oidcSubject != "" {
+			method = "OIDC"
+		}
+
+		if candidate.passkey {
+			if candidate.oidcSubject == "" {
+				method = "Passkey"
+			} else {
+				method += " + Passkey"
+			}
+		} else if candidate.strongAuth {
+			method += " + zweiter Faktor"
+		}
+
+		rows = append(rows, templates.UserSessionRow{ID: candidate.managementID, Current: candidate == current, CreatedAt: candidate.authenticatedAt, ExpiresAt: until, Browser: candidate.userAgent, Method: method})
+	}
+
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Current != rows[j].Current {
+			return rows[i].Current
+		}
+
+		return rows[i].CreatedAt.After(rows[j].CreatedAt)
+	})
+	writeHTML(w, http.StatusOK, templates.UserSessionsPage(h.pageInfo(r), rows).Render())
+}
+
+func (h *Handler) revokeAccountSessions(w http.ResponseWriter, r *http.Request) {
+	current := sessionFrom(r)
+	target := r.PostForm.Get("session_id")
+
+	scope := r.PostForm.Get("scope")
+	if scope != "one" && scope != "others" && scope != "all" {
+		http.Error(w, "Ungültige Auswahl", http.StatusBadRequest)
+		return
+	}
+
+	removed, currentRemoved := false, false
+
+	for _, key := range h.sessions.Keys() {
+		candidate, ok := h.sessions.Peek(key)
+		if !ok || candidate.userID != current.userID {
+			continue
+		}
+
+		selected := scope == "all" || (scope == "others" && candidate != current) || (scope == "one" && candidate.managementID != "" && tokensEqual(candidate.managementID, target))
+		if !selected {
+			continue
+		}
+
+		if h.sessions.Remove(key) {
+			removed = true
+			currentRemoved = currentRemoved || candidate == current
+		}
+	}
+
+	if currentRemoved {
+		h.setCookie(w, r, sessionCookie, "", -1)
+		http.Redirect(w, r, h.loginPath()+"?local=1", http.StatusSeeOther)
+
+		return
+	}
+
+	if !removed && scope == "one" {
+		http.Error(w, "Sitzung nicht gefunden", http.StatusNotFound)
+		return
+	}
+
+	h.redirectPublic(w, r, "/account/sessions", success("Ausgewählte Sitzungen beendet."))
 }

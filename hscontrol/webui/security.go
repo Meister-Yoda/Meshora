@@ -483,6 +483,17 @@ func (h *Handler) issueSession(w http.ResponseWriter, r *http.Request, account *
 	authentication.username = cmp.Or(user.Email, account.LegacyLogin.String, user.DisplayName, user.Name)
 	authentication.csrf = randomToken()
 	authentication.authenticatedAt = time.Now()
+	authentication.managementID = randomToken()
+
+	agent := r.UserAgent()
+	if len(agent) > 512 {
+		agent = agent[:512]
+	}
+
+	authentication.userAgent = strings.ToValidUTF8(agent, "")
+	if ttl := h.runtimeConfig.WebAdmin.SessionTTL; ttl > 0 {
+		authentication.endsAt = authentication.authenticatedAt.Add(ttl)
+	}
 
 	err := h.applyAuthPolicy(authentication)
 	if errors.Is(err, errExistingFactorRequired) {

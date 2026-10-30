@@ -167,3 +167,13 @@ CREATE TABLE user_email_changes (
  requested_at datetime NOT NULL,
  expires_at datetime NOT NULL
 );
+
+CREATE TABLE user_invitations (
+ id text PRIMARY KEY,
+ email text NOT NULL UNIQUE,
+ mode text NOT NULL CHECK (mode IN ('local','oidc')),
+ token_hash text NOT NULL UNIQUE,
+ created_by bigint NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ created_at datetime NOT NULL,
+ expires_at datetime NOT NULL
+);

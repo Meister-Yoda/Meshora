@@ -1,5 +1,23 @@
 # Meshora starten und im Browser einrichten
 
+## Meshora v0.2.3-rc.1 (30. Oktober 2026)
+
+Vorabversion mit Testmail, eigener Sitzungsverwaltung und Einladungen für
+lokale oder OIDC-Konten. Enthält die geprüften Korrekturen aus v0.2.2.
+Ohne WireGuard-Gateway. Container-Tag `RC` folgt diesem Build; `latest`
+bleibt auf v0.2.2.
+
+Vor dem Upgrade Datenbank und Konfiguration sichern. Neue Migration:
+`202610301200-user-invitations`. Ein Downgrade benötigt die Sicherung.
+
+```sh
+MESHORA_VERSION=v0.2.3-rc.1 docker compose pull
+MESHORA_VERSION=v0.2.3-rc.1 docker compose up -d
+```
+
+Race-Tests, SQLite/PostgreSQL, lokaler OIDC-Testanbieter, Browserprüfung
+und Build bestanden. Produktiver Mailversand ist noch nicht abgenommen.
+
 ## Meshora v0.2.2 (30. Oktober 2026)
 
 Stabile Veröffentlichung des geprüften Main-Stands einschließlich der
@@ -360,3 +378,21 @@ Das persönliche Menü bündelt Profil, eigene Geräte, E-Mail, Sicherheit und
 Passwort. Admins finden diese Einträge im bestehenden Hauptmenü unter
 **Mein Konto**; normale Nutzer sehen ausschließlich ihr Kontomenü.
 Auf kleinen Bildschirmen ist das Menü unter **Navigation** aufklappbar.
+
+## Kontofunktionen ab v0.2.3-rc.1
+
+Admins finden unter **Einstellungen → Mailversand → Testmail** einen
+Versandtest mit den gespeicherten SMTP-/JMAP-Daten. Übergabe an den Mailserver
+ist noch keine bestätigte Zustellung; Posteingang und Spamordner prüfen.
+
+**Mein Konto → Sitzungen** zeigt eigene Anmeldungen dieser Serverinstanz.
+Einzelne, alle anderen oder alle Sitzungen können beendet werden. Die Liste
+liegt wie die Anmeldungen selbst im Servercache und endet beim Neustart.
+
+Unter **Einladungen** erstellen Admins per E-Mail versandte Links für lokale
+Konten oder OIDC. Links gelten 24 Stunden, sind einmalig und widerrufbar.
+Lokale Nutzer setzen ein Passwort; OIDC muss die eingeladene E-Mail bestätigt
+liefern. Bestehende Konten und Adminrechte werden nicht übernommen.
+Eine erneute Einladung ersetzt den vorigen Link. Allgemeine OIDC-Zugangsregeln
+werden nicht auf Einladungen beschränkt. Die neue Datenbankmigration
+`202610301200-user-invitations` erfordert wie jedes Upgrade eine Sicherung.

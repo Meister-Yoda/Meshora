@@ -381,3 +381,51 @@ mit HTTP 403 abgewiesen (fehlende Schreibrechte für github-actions[bot]).
 Nicht Teil des erfolgreichen Release-/Registry-Workflows; Folgepunkt offen.
 Echte Authentik-/Mailanbieter-Abnahme, ARM64-Laufzeit und die bekannte
 vollständige Lint-Baseline bleiben separat offen.
+
+## 11. Testmail und eigene Sitzungen
+
+**Status:** Lokal umgesetzt und geprüft (30. Oktober 2026), unveröffentlicht.
+
+Admins können mit gespeicherten SMTP-/JMAP-Einstellungen eine feste Testmail
+versenden: bestätigte Anmeldung, CSRF, begrenzte Versuche und keine
+Providerantworten oder Geheimnisse in Fehleranzeigen. Übergabe und Zustellung
+werden sprachlich unterschieden.
+
+Eigene Sitzungen im Kontomenü mit Anmeldezeit, Art und Browserangabe anzeigen.
+Einzeln, alle anderen oder alle eigenen Sitzungen beenden; fremde Konten
+bleiben unzugänglich. Flüchtige Sitzungen bleiben im vorhandenen Servercache.
+Keine Datenbankmigration. Unveröffentlicht.
+
+Produktive Abnahme: Nutzer bestätigt Authentik-Login samt zweitem Faktor
+unter mesh.langsebastian.eu. Mailversand aktuell nicht testbar; bleibt offen.
+
+## 12. Einladungen für lokale und OIDC-Konten
+
+**Status:** Lokal umgesetzt und geprüft, unveröffentlicht.
+Admins wählen lokalen Passwortzugang oder OIDC je Einladung. Link 24 Stunden,
+einmalig, Hash gespeichert; Versand per eingerichtetem SMTP/JMAP. OIDC muss
+die eingeladene Adresse bestätigt liefern. Keine Kontenübernahme oder
+Adminrechte, bestehende OIDC-Zulassung unverändert. Append-only Migration
+202610301200-user-invitations. Unveröffentlicht.
+
+
+Validierung für Testmail, Sitzungsverwaltung und Einladungen:
+- Vollständige Race-Tests für webui, templates, db, state und types bestanden.
+- Gesamtbuild, Lint der Änderungen (0 Befunde) und git diff --check bestanden.
+- SQLite und isoliertes echtes PostgreSQL prüfen Einmaligkeit, Ablauf,
+  erneute Einladung, Widerruf und konkurrierende Annahme.
+- HTTP-Tests prüfen Admin-/Benutzerrechte, CSRF, Versandlimit, gespeicherte
+  Mailkonfiguration, generische Fehlermeldungen und entfernte Sitzungen.
+- Vollständiger OIDC-Testanbieter prüft Einladung mit passender bestätigter
+  Adresse und Ablehnung falscher/unbestätigter Adressen.
+- Chromium prüft Desktop/Mobil mit restriktiver CSP, bedienbare Sitzungen,
+  Mailformular und Einladung; Linktoken wird aus der Browseradresse entfernt.
+
+Für Veröffentlichung als v0.2.3-rc.1 freigegeben; Veröffentlichung läuft. Keine produktiven Testmails versendet. Vor einem
+späteren Upgrade Datenbank sichern (neue Einladungsmigration).
+
+## v0.2.3-rc.1 (30. Oktober 2026)
+
+Vom Nutzer freigegeben: Testmail, Sitzungsverwaltung und Einladungen
+als v0.2.3-rc.1 veröffentlichen und RC aktualisieren. latest bleibt v0.2.2.
+Status: Veröffentlichung läuft.
