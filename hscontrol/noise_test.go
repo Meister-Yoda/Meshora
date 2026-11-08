@@ -8,9 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -25,6 +28,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"tailscale.com/net/netutil"
 	"tailscale.com/tailcfg"
 	"tailscale.com/types/key"
 	"tailscale.com/util/zstdframe"
@@ -1343,4 +1347,388 @@ func TestPollNetMapHandler_ForeignMachineKeyStillRejected(t *testing.T) {
 	}))
 
 	assert.Equal(t, http.StatusNotFound, rec.Code, "body=%q", rec.Body.String())
+}
+
+func manyServices(n int) []tailcfg.Service {
+	services := make([]tailcfg.Service, n)
+	for i := range services {
+		services[i] = tailcfg.Service{Proto: tailcfg.TCP, Port: uint16(i)}
+	}
+
+	return services
+}
+
+func TestPollNetMapHandler_AcceptsClientReport(t *testing.T) {
+	t.Parallel()
+
+	app := createTestApp(t)
+	user := app.state.CreateUserForTest("report-map-user")
+	node := putTestNodeInStore(t, app, user, "report-map-node")
+
+	endpoints := make([]netip.AddrPort, types.MaxEndpoints+1)
+	for i := range endpoints {
+		endpoints[i] = netip.AddrPortFrom(netip.MustParseAddr("192.0.2.1"), uint16(i))
+	}
+
+	report := tailcfg.MapRequest{
+		Version:       tailcfg.CurrentCapabilityVersion,
+		NodeKey:       node.NodeKey,
+		DiscoKey:      node.DiscoKey,
+		OmitPeers:     true,
+		Endpoints:     endpoints,
+		EndpointTypes: make([]tailcfg.EndpointType, types.MaxEndpoints+1),
+		Hostinfo: &tailcfg.Hostinfo{
+			Hostname:    "report-map-node",
+			Services:    manyServices(300),
+			NetInfo:     &tailcfg.NetInfo{PreferredDERP: 1, DERPLatency: map[string]float64{"1-v4": 0.01}},
+			RoutableIPs: slices.Repeat([]netip.Prefix{netip.MustParsePrefix("192.0.2.0/24")}, types.MaxRoutableIPs+1),
+		},
+	}
+
+	ns := &noiseServer{headscale: app, machineKey: node.MachineKey}
+	rec := httptest.NewRecorder()
+	ns.PollNetMapHandler(rec, newMapRequest(t, report))
+	require.Equal(t, http.StatusOK, rec.Code, "body=%q", rec.Body.String())
+
+	stored, ok := app.state.GetNodeByID(node.ID)
+	require.True(t, ok)
+	assert.Equal(t, report.Hostinfo.Hostname, stored.Hostname())
+	report.Endpoints = report.Endpoints[:types.MaxEndpoints]
+	report.EndpointTypes = report.EndpointTypes[:types.MaxEndpoints]
+	report.Hostinfo.RoutableIPs = report.Hostinfo.RoutableIPs[:types.MaxRoutableIPs]
+	report.Hostinfo.NetInfo.DERPLatency = nil
+	assert.Equal(t, report.Endpoints, stored.Endpoints().AsSlice())
+	assert.True(t, report.Hostinfo.Equal(stored.Hostinfo().AsStruct()),
+		"accepted Hostinfo must remain unchanged, including lists longer than 256 entries")
+
+	c, err := app.state.UpdateNodeFromMapRequest(node.ID, report)
+	require.NoError(t, err)
+	assert.True(t, c.IsEmpty(),
+		"an unchanged report must not be a change, got %s", c.Type())
+}
+
+func TestPollNetMapHandler_RejectsOversizedClientReport(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name   string
+		report tailcfg.MapRequest
+		status int
+	}{
+		{
+			name:   "zoned IPv6 endpoint",
+			report: tailcfg.MapRequest{Endpoints: []netip.AddrPort{netip.MustParseAddrPort("[fe80::1%eth0]:41641")}},
+			status: http.StatusBadRequest,
+		},
+		{
+			name: "hostname",
+			report: tailcfg.MapRequest{Hostinfo: &tailcfg.Hostinfo{
+				Hostname: strings.Repeat("h", types.MaxHostnameLength+1),
+			}},
+		},
+		{
+			name: "requested tags",
+			report: tailcfg.MapRequest{Hostinfo: &tailcfg.Hostinfo{
+				RequestTags: slices.Repeat([]string{"tag:test"}, types.MaxRequestTags+1),
+			}},
+		},
+		{
+			name: "metadata",
+			report: tailcfg.MapRequest{Hostinfo: &tailcfg.Hostinfo{
+				OSVersion: strings.Repeat("v", types.MaxHostinfoSize),
+			}},
+		},
+		{
+			name: "netinfo",
+			report: tailcfg.MapRequest{Hostinfo: &tailcfg.Hostinfo{
+				NetInfo: &tailcfg.NetInfo{LinkType: strings.Repeat("l", types.MaxHostinfoSize)},
+			}},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			app := createTestApp(t)
+			user := app.state.CreateUserForTest("rejected-report")
+			node := putTestNodeInStore(t, app, user, "rejected-report")
+			before, ok := app.state.GetNodeByID(node.ID)
+			require.True(t, ok)
+
+			ns := &noiseServer{headscale: app, machineKey: node.MachineKey}
+			rec := httptest.NewRecorder()
+			tt.report.Version = tailcfg.CurrentCapabilityVersion
+
+			tt.report.NodeKey = node.NodeKey
+			if tt.status == 0 {
+				tt.status = http.StatusRequestEntityTooLarge
+			}
+
+			ns.PollNetMapHandler(rec, newMapRequest(t, tt.report))
+			assert.Equal(t, tt.status, rec.Code, "body=%q", rec.Body.String())
+
+			after, ok := app.state.GetNodeByID(node.ID)
+			require.True(t, ok)
+			assert.Equal(t, before, after, "rejection must not mutate the node")
+		})
+	}
+}
+
+func TestPollNetMapHandler_UnknownNodeBeforeReportValidation(t *testing.T) {
+	t.Parallel()
+	app := createTestApp(t)
+	ns := &noiseServer{headscale: app, machineKey: key.NewMachine().Public()}
+	rec := httptest.NewRecorder()
+	ns.PollNetMapHandler(rec, newMapRequest(t, tailcfg.MapRequest{
+		Version: tailcfg.CurrentCapabilityVersion, NodeKey: key.NewNode().Public(),
+		Hostinfo: &tailcfg.Hostinfo{Hostname: strings.Repeat("h", types.MaxHostnameLength+1)},
+	}))
+	require.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestRegistrationHandler_ValidatesClientReport(t *testing.T) {
+	t.Parallel()
+
+	t.Run("oversized report", func(t *testing.T) {
+		t.Parallel()
+
+		// A nil headscale proves rejection happens before any state access.
+		ns := &noiseServer{machineKey: key.NewMachine().Public()}
+
+		rec := serveRegister(t, ns, tailcfg.RegisterRequest{
+			Version: tailcfg.CurrentCapabilityVersion,
+			NodeKey: key.NewNode().Public(),
+			Hostinfo: &tailcfg.Hostinfo{
+				OSVersion: strings.Repeat("v", types.MaxHostinfoSize),
+			},
+		})
+		require.Equal(t, http.StatusOK, rec.Code, "body=%q", rec.Body.String())
+
+		var resp tailcfg.RegisterResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		assert.Contains(t, resp.Error, types.ErrHostinfoTooLarge.Error())
+		assert.Empty(t, resp.AuthURL)
+	})
+
+	t.Run("pre-auth key trims routes and drops unused latency", func(t *testing.T) {
+		t.Parallel()
+		app := createTestApp(t)
+		user := app.state.CreateUserForTest("trim-pak-user")
+		pak, err := app.state.CreatePreAuthKey(user.TypedID(), false, false, nil, nil)
+		require.NoError(t, err)
+
+		nodeKey := key.NewNode().Public()
+		ns := &noiseServer{headscale: app, machineKey: key.NewMachine().Public()}
+		rec := serveRegister(t, ns, tailcfg.RegisterRequest{
+			Version: tailcfg.CurrentCapabilityVersion, NodeKey: nodeKey,
+			Auth: &tailcfg.RegisterResponseAuth{AuthKey: pak.Key},
+			Hostinfo: &tailcfg.Hostinfo{
+				Hostname:    "trim-pak-node",
+				RoutableIPs: slices.Repeat([]netip.Prefix{netip.MustParsePrefix("192.0.2.0/24")}, types.MaxRoutableIPs+1),
+				NetInfo:     &tailcfg.NetInfo{PreferredDERP: 1, DERPLatency: map[string]float64{"1-v4": 0.01}},
+			},
+		})
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		var resp tailcfg.RegisterResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		require.Empty(t, resp.Error)
+
+		node, ok := app.state.GetNodeByNodeKey(nodeKey)
+		require.True(t, ok)
+
+		hi := node.Hostinfo().AsStruct()
+		assert.Len(t, hi.RoutableIPs, types.MaxRoutableIPs)
+		assert.Equal(t, tailcfg.DERPRegionID(1), hi.NetInfo.PreferredDERP)
+		assert.Nil(t, hi.NetInfo.DERPLatency)
+	})
+
+	t.Run("oversized report leaves pre-auth key unused", func(t *testing.T) {
+		t.Parallel()
+
+		app := createTestApp(t)
+		user := app.state.CreateUserForTest("report-pak-user")
+
+		pak, err := app.state.CreatePreAuthKey(user.TypedID(), false, false, nil, nil)
+		require.NoError(t, err)
+
+		nodeKey := key.NewNode().Public()
+		ns := &noiseServer{headscale: app, machineKey: key.NewMachine().Public()}
+
+		rec := serveRegister(t, ns, tailcfg.RegisterRequest{
+			Version:  tailcfg.CurrentCapabilityVersion,
+			NodeKey:  nodeKey,
+			Auth:     &tailcfg.RegisterResponseAuth{AuthKey: pak.Key},
+			Hostinfo: &tailcfg.Hostinfo{Hostname: strings.Repeat("p", types.MaxHostnameLength+1)},
+		})
+		require.Equal(t, http.StatusOK, rec.Code, "body=%q", rec.Body.String())
+
+		var resp tailcfg.RegisterResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		assert.Contains(t, resp.Error, types.ErrHostinfoTooLarge.Error())
+		assert.Empty(t, resp.AuthURL)
+
+		_, ok := app.state.GetNodeByNodeKey(nodeKey)
+		assert.False(t, ok)
+
+		stored, err := app.state.GetPreAuthKey(pak.Key)
+		require.NoError(t, err)
+		assert.False(t, stored.Used)
+	})
+}
+
+// TestNoiseHTTPServerTimeouts pins the limits of the server inside a Noise
+// tunnel. Any machine key gets a tunnel, so without them a stalled request
+// body or an empty tunnel lives as long as the TCP connection.
+func TestNoiseHTTPServerTimeouts(t *testing.T) {
+	t.Parallel()
+
+	const timeout = 200 * time.Millisecond
+
+	// serve runs handler the way NoiseUpgradeHandler serves a tunnel. It
+	// returns a client for the tunnel and a channel closed once the server
+	// has closed the connection.
+	serve := func(t *testing.T, handler http.Handler) (*http.Client, <-chan struct{}) {
+		t.Helper()
+
+		serverConn, clientConn := net.Pipe()
+
+		t.Cleanup(func() {
+			serverConn.Close()
+			clientConn.Close()
+		})
+
+		closed := make(chan struct{})
+		srv := newNoiseHTTPServer(handler, timeout)
+		srv.ConnState = func(_ net.Conn, state http.ConnState) {
+			if state == http.StateClosed {
+				close(closed)
+			}
+		}
+
+		go func() { _ = srv.Serve(netutil.NewOneConnListener(serverConn, nil)) }()
+
+		protocols := new(http.Protocols)
+		protocols.SetUnencryptedHTTP2(true)
+
+		transport := &http.Transport{
+			Protocols: protocols,
+			DialContext: func(context.Context, string, string) (net.Conn, error) {
+				return clientConn, nil
+			},
+		}
+		t.Cleanup(transport.CloseIdleConnections)
+
+		return &http.Client{Transport: transport}, closed
+	}
+
+	t.Run("stalled body times out", func(t *testing.T) {
+		t.Parallel()
+
+		readErr := make(chan error, 1)
+		client, _ := serve(t, http.HandlerFunc(func(
+			_ http.ResponseWriter, r *http.Request,
+		) {
+			_, err := io.ReadAll(r.Body)
+			readErr <- err
+		}))
+
+		// One byte of body, then silence.
+		body, bodyWriter := io.Pipe()
+
+		t.Cleanup(func() { bodyWriter.Close() })
+
+		go func() { _, _ = bodyWriter.Write([]byte("{")) }()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*timeout)
+		defer cancel()
+
+		req, err := http.NewRequestWithContext(
+			ctx, http.MethodPost, "http://noise/machine/register", body,
+		)
+		require.NoError(t, err)
+
+		resp, err := client.Do(req)
+		require.NoError(t, err, "the handler must not stay blocked on a stalled body")
+		resp.Body.Close()
+
+		require.ErrorIs(t, <-readErr, os.ErrDeadlineExceeded)
+	})
+
+	// set-dns answers only once the nameservers serve the record, which can
+	// take longer than the timeout, and writes nothing until then.
+	t.Run("quiet answer past the timeout is delivered", func(t *testing.T) {
+		t.Parallel()
+
+		client, _ := serve(t, http.HandlerFunc(func(
+			w http.ResponseWriter, r *http.Request,
+		) {
+			_, _ = io.ReadAll(r.Body)
+
+			select {
+			case <-time.After(3 * timeout):
+			case <-r.Context().Done():
+				return
+			}
+
+			_, _ = io.WriteString(w, "{}")
+		}))
+
+		req, err := http.NewRequestWithContext(
+			context.Background(), http.MethodPost, "http://noise/machine/set-dns",
+			strings.NewReader("{}"),
+		)
+		require.NoError(t, err)
+
+		resp, err := client.Do(req)
+		require.NoError(t, err)
+
+		got, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		require.NoError(t, err)
+		assert.Equal(t, "{}", string(got))
+	})
+
+	t.Run("long poll is kept, then the idle tunnel closes", func(t *testing.T) {
+		t.Parallel()
+
+		const chunks = 5
+
+		client, closed := serve(t, http.HandlerFunc(func(
+			w http.ResponseWriter, r *http.Request,
+		) {
+			_, _ = io.ReadAll(r.Body)
+
+			for range chunks {
+				_, _ = io.WriteString(w, "chunk\n")
+				w.(http.Flusher).Flush() //nolint:forcetypeassert // h2 writers flush
+
+				select {
+				case <-time.After(timeout):
+				case <-r.Context().Done():
+					return
+				}
+			}
+		}))
+
+		req, err := http.NewRequestWithContext(
+			context.Background(), http.MethodPost, "http://noise/machine/map",
+			strings.NewReader("{}"),
+		)
+		require.NoError(t, err)
+
+		resp, err := client.Do(req)
+		require.NoError(t, err)
+
+		got, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		require.NoError(t, err)
+		assert.Equal(t, strings.Repeat("chunk\n", chunks), string(got),
+			"a stream that outlives the timeout must not be cut")
+
+		select {
+		case <-closed:
+		case <-time.After(10 * timeout):
+			t.Fatal("the server kept a tunnel with no open stream")
+		}
+	})
 }

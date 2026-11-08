@@ -719,7 +719,7 @@ Optionale Remoteupdates und Zertifikate gesondert entscheiden.
 
 ## 16. Cloud-Umsetzung des Upstream-Reviews (8. November 2026)
 
-**Status:** Vom Nutzer beauftragt; Cloud-Start noch nicht erfolgt.
+**Status:** Auf Nutzerwunsch lokale Umsetzung begonnen; Cloud-Start entfällt.
 Arbeitsauftrag: [Cloud-Uebergabe](docs/about/headscale-cloud-task.md).
 Priorisierte Umsetzung aus Abschnitt 15 mit getrennten Commitpaketen,
 gezielten Tests und Erhalt aller Meshora-Konto-/Zonenregeln. Kein
@@ -730,3 +730,55 @@ und im Umgebungswaehler keine eingerichtete Projektumgebung. Erforderliche
 Meshora-Umgebungs-ID beim Nutzer angefragt. Kein Cloud-Task wurde erzeugt.
 Uebergabebranch: codex/headscale-sync-2026-11-08. Nur Plan/Arbeitsauftrag;
 lokale unfertige Exit-Compose-Aenderungen sind nicht Bestandteil der Uebergabe.
+
+
+### Lokale Umsetzung: Sicherheitsgrundlage (8. November 2026)
+
+Branch: codex/headscale-sync-2026-11-08. Noch kein Merge oder Release.
+
+- Implementiert: E-Mail/Verifikationsflag als Paar (208043c8), Metrics aus
+  Noise entfernt (cd66e241), begrenzte Legacy-Hash-Wartezeit und erneutes
+  Laden nach Prüfung (41067c7e), unveränderte OIDC-Subjects (499b58e7).
+  Meshora-Anpassung: Ablehnung zentral in ResolveOIDCUser und zusätzlich
+  beim Annehmen von OIDC-Einladungen, ohne Identifier umzubenennen.
+- Implementiert: Maschinenkennung vor wartender Folgeanfrage prüfen
+  (7892a846), IPs nur nach tatsächlicher Löschung freigeben (b5bebf9b),
+  clientbestimmte Logfelder begrenzen (21c91d4b).
+- Implementiert: Hostinfo/Endpoints/Routen begrenzen, gespeicherte Altdaten
+  vor NodeStore-Laden bereinigen, Body-/Idle-Timeouts im Noise-Tunnel
+  (2e563635, 4ce92841, 28959cb2); unbenutzte Registrierungssperren
+  aufräumen (c9e9f728).
+- Nachweise bisher: gezielte Sicherheits-, Grenzwert-, Timeout- und
+  Löschtests grün. Erster vollständiger Lauf für hscontrol, types, db,
+  state und webui grün, vor den später ergänzten Grenzen/Sperren.
+  Race-Prüfung aller oben genannten gezielten Sicherheits-/Grenzwerttests
+  einschließlich konkurrierender Registrierungssperren ebenfalls grün.
+- Noch offen: übrige Registrierungs-/NodeKey-/Ablauffixes und API-Rechte,
+  Policy-/Migrationspaket, DERP/Leistung/Kompatibilität aus Abschnitt 15.
+  Kein echter Exit-Paketfluss und kein produktiver Login damit abgenommen.
+
+- Weiteres Registrierungs-/Wartepaket 5a4d366c/b833be28 nicht übernommen:
+  wiederholter Kontextfehler in hscontrol/state/state.go:2097.
+  Unvollständige Teiländerungen zurückgenommen; keine abgeschwächten Tests.
+  Nächster Schritt ist eine fachliche Anpassung der Ablauf-/Metadatenlogik,
+  kein weiterer Patchversuch mit veränderten Kontextoptionen.
+
+- Abschließende Prüfung des bereinigten Blocks: vollständige Pakettests
+  `go test -timeout 8m ./hscontrol ./hscontrol/types ./hscontrol/db ./hscontrol/state ./hscontrol/webui`
+  grün (Serverpaket 184,756 s); gezielte Race-Tests grün.
+  OIDC-Einladungen zusätzlich mit echtem PostgreSQL 17 im isolierten
+  Container und SQLite bestanden. `go build ./cmd/headscale`,
+  Diff-Lint über hscontrol (0 neue Meldungen) und `git diff --check` grün.
+- OIDC-/Credentials-Commit: b5376173. Zweiter lokaler Commit enthält
+  Noise-/Clientgrenzen, Logbegrenzung und Registrierungssperren.
+  Keine Schema-/Moduländerungen, kein Push, Merge oder Release.
+
+| Paket | Stand | Nachweis / verbleibender Umfang |
+| --- | --- | --- |
+| A: kleine Sicherheitsfixes | angepasst implementiert | b5376173; Metrics-Entfernung im zweiten Commit; Paket-/Race- und Einladungstests grün; separate Live-Noise-Metrics-Abnahme noch offen |
+| B: Registrierung / Rechte | teilweise implementiert | Größen-/Zeit-/Loggrenzen, Maschinenprüfung, Löschung und Sperren getestet; Metadaten-/Wartepaket nach wiederholtem Kontextfehler zurückgenommen; übrige Identitäts-/API-Fixes offen |
+| C: Policy / Datenbank | offen | keine Übernahme oder Migrationsabnahme in diesem Block |
+| D: Stabilität / Leistung | offen | keine Übernahme oder Meshora-Benchmarks in diesem Block |
+| E: optionale Funktionen | Vorschläge | weiterhin getrennte Bewertung und Voraussetzungen gemäß Abschnitt 15 |
+
+Die Gesamtliste ist damit ausdrücklich noch nicht abgeschlossen.

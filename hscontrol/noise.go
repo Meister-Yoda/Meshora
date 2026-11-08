@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -16,6 +17,7 @@ import (
 	"github.com/go-chi/metrics"
 	"github.com/juanfont/headscale/hscontrol/capver"
 	"github.com/juanfont/headscale/hscontrol/types"
+	"github.com/juanfont/headscale/hscontrol/util/zlog/zf"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"tailscale.com/control/controlbase"
@@ -158,8 +160,6 @@ func (h *Headscale) NoiseUpgradeHandler(
 	r.Use(middleware.RequestLogger(&zerologRequestLogger{}))
 	r.Use(middleware.Recoverer)
 
-	r.Handle("/metrics", metrics.Handler())
-
 	r.Route("/machine", func(r chi.Router) {
 		r.Post("/register", ns.RegistrationHandler)
 		r.Post("/map", ns.PollNetMapHandler)
@@ -202,16 +202,28 @@ func (h *Headscale) NoiseUpgradeHandler(
 		r.Post("/c2n", ns.NotImplementedHandler)
 	})
 
+	// Serve returns once the listener is drained; the connection outlives it.
+	_ = newNoiseHTTPServer(r, types.HTTPTimeout).
+		Serve(netutil.NewOneConnListener(noiseConn, nil))
+}
+
+// newNoiseHTTPServer builds the server for one Noise tunnel. The hijack drops
+// the outer server's deadlines and any machine key gets a tunnel, so this is
+// where a stalled request body (ReadTimeout) and a tunnel with no open stream
+// (IdleTimeout) are bounded. WriteTimeout stays unset: it would cut long polls
+// and a set-dns waiting for its record to propagate.
+func newNoiseHTTPServer(handler http.Handler, timeout time.Duration) *http.Server {
 	srv := &http.Server{
-		Handler:           r,
-		ReadHeaderTimeout: types.HTTPTimeout,
+		Handler:           handler,
+		ReadHeaderTimeout: timeout,
+		ReadTimeout:       timeout,
+		IdleTimeout:       timeout,
 		Protocols:         new(http.Protocols),
 	}
 	// Noise already encrypts, so HTTP/2 runs without TLS.
 	srv.Protocols.SetUnencryptedHTTP2(true)
 
-	// Serve returns once the listener is drained; the connection outlives it.
-	_ = srv.Serve(netutil.NewOneConnListener(noiseConn, nil))
+	return srv
 }
 
 func unsupportedClientError(version tailcfg.CapabilityVersion) error {
@@ -414,7 +426,7 @@ func (ns *noiseServer) SSHActionHandler(
 	reqLog := log.With().
 		Uint64("src_node_id", srcNodeID.Uint64()).
 		Uint64("dst_node_id", dstNodeID.Uint64()).
-		Str("local_user", req.URL.Query().Get("local_user")).
+		Str(zf.LocalUser, clipForLog(req.URL.Query().Get("local_user"))).
 		Logger()
 
 	reqLog.Trace().Caller().Msg("SSH action request")
@@ -773,6 +785,42 @@ func (ns *noiseServer) PollNetMapHandler(
 		return
 	}
 
+	// Keep preferred endpoints first; clients retry rejected reports unchanged.
+	count := min(len(mapRequest.Endpoints), types.MaxEndpoints)
+	mapRequest.Endpoints = slices.Clone(mapRequest.Endpoints[:count])
+
+	mapRequest.EndpointTypes = slices.Clone(mapRequest.EndpointTypes[:min(len(mapRequest.EndpointTypes), types.MaxEndpoints)])
+	for _, endpoint := range mapRequest.Endpoints {
+		if endpoint.Addr().Zone() != "" {
+			httpError(writer, NewHTTPError(http.StatusBadRequest, "endpoint must not include an IPv6 zone", nil))
+			return
+		}
+	}
+
+	if hi := mapRequest.Hostinfo; hi != nil {
+		if len(hi.RoutableIPs) > types.MaxRoutableIPs {
+			log.Warn().Uint64(zf.NodeID, uint64(nv.ID())).Int(zf.RoutableIPCount, len(hi.RoutableIPs)).
+				Msgf("client announced too many routes, keeping the first %d", types.MaxRoutableIPs)
+			hi.RoutableIPs = hi.RoutableIPs[:types.MaxRoutableIPs]
+		}
+
+		if hi.NetInfo != nil {
+			// Latency measurements are not used by the control server.
+			hi.NetInfo.DERPLatency = nil
+		}
+	}
+
+	// Reject before the session, the node or its peers keep the report.
+	err = types.ValidateHostinfo(mapRequest.Hostinfo)
+	if err != nil {
+		httpError(writer, NewHTTPError(http.StatusRequestEntityTooLarge, err.Error(), err))
+		return
+	}
+
+	// A repeated JSON key can leave a short slice backed by a larger array.
+	mapRequest.Hostinfo = mapRequest.Hostinfo.Clone()
+	mapRequest.DebugFlags = nil
+
 	sess := ns.headscale.newMapSession(req.Context(), mapRequest, writer, nv.AsStruct())
 	sess.log.Trace().Caller().Msg("a node sending a MapRequest with Noise protocol")
 
@@ -801,6 +849,25 @@ func (ns *noiseServer) RegistrationHandler(
 	var registerRequest tailcfg.RegisterRequest
 
 	decodeErr := json.NewDecoder(req.Body).Decode(&registerRequest)
+	if decodeErr == nil {
+		if hi := registerRequest.Hostinfo; hi != nil {
+			if len(hi.RoutableIPs) > types.MaxRoutableIPs {
+				log.Warn().Str(zf.MachineKey, ns.machineKey.ShortString()).
+					Int(zf.RoutableIPCount, len(hi.RoutableIPs)).
+					Msgf("client announced too many routes, keeping the first %d", types.MaxRoutableIPs)
+				hi.RoutableIPs = hi.RoutableIPs[:types.MaxRoutableIPs]
+			}
+
+			if hi.NetInfo != nil {
+				hi.NetInfo.DERPLatency = nil
+			}
+		}
+	}
+
+	// Reject before a pending registration, a waiting follow-up or the node keeps it.
+	if decodeErr == nil {
+		decodeErr = types.ValidateHostinfo(registerRequest.Hostinfo)
+	}
 
 	// The floor must be enforced before handleRegister: a logout, pre-auth
 	// key use or auth-cache write it performs is not undone by a later 400.
@@ -813,6 +880,9 @@ func (ns *noiseServer) RegistrationHandler(
 		if decodeErr != nil {
 			return regErr(decodeErr)
 		}
+
+		// A waiting follow-up must not retain the decoder's excess slice capacity.
+		registerRequest.Hostinfo = registerRequest.Hostinfo.Clone()
 
 		resp, err := ns.headscale.handleRegister(req.Context(), registerRequest, ns.machineKey)
 		if err != nil {

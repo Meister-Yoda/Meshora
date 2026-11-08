@@ -52,6 +52,7 @@ import (
 	"tailscale.com/types/key"
 	"tailscale.com/types/views"
 	"tailscale.com/util/dnsname"
+	"tailscale.com/util/truncate"
 )
 
 const (
@@ -209,22 +210,53 @@ type State struct {
 	// registerLocks serialises registration per machine key so concurrent
 	// registrations of the same machine resolve to a single node instead of
 	// racing the find-then-create section and each creating their own.
-	// ponytail: entries are never pruned; bounded by distinct machine keys
-	// seen, add cleanup on node delete only if it ever matters.
-	registerLocks *xsync.Map[key.MachinePublic, *sync.Mutex]
+	// Entries exist only while a registration holds or waits for its lock.
+	registerLocks *xsync.Map[key.MachinePublic, *registerLock]
+}
+
+// registerLock is the registration lock of one machine key. refs counts the
+// holder and the waiters, and is only changed inside [xsync.Map.Compute].
+type registerLock struct {
+	mu   sync.Mutex
+	refs int
 }
 
 // lockRegistration serialises registration for a single machine key and
 // returns the unlock function.
-var (
-	errUser1 = errors.New("user UID is immutable")
-)
+var errUser1 = errors.New("user UID is immutable")
 
 func (s *State) lockRegistration(machineKey key.MachinePublic) func() {
-	mu, _ := s.registerLocks.LoadOrStore(machineKey, &sync.Mutex{})
-	mu.Lock()
+	// Count this registration before blocking on the mutex, so the entry
+	// cannot be deleted and replaced while it waits.
+	lock, _ := s.registerLocks.Compute(
+		machineKey,
+		func(existing *registerLock, loaded bool) (*registerLock, xsync.ComputeOp) {
+			if !loaded {
+				existing = &registerLock{}
+			}
 
-	return mu.Unlock
+			existing.refs++
+
+			return existing, xsync.UpdateOp
+		},
+	)
+	lock.mu.Lock()
+
+	return func() {
+		lock.mu.Unlock()
+
+		s.registerLocks.Compute(
+			machineKey,
+			func(existing *registerLock, _ bool) (*registerLock, xsync.ComputeOp) {
+				existing.refs--
+				if existing.refs == 0 {
+					return existing, xsync.DeleteOp
+				}
+
+				return existing, xsync.CancelOp
+			},
+		)
+	}
 }
 
 // NewState creates and initializes a new [State] instance, setting up the database,
@@ -256,6 +288,39 @@ func NewState(cfg *types.Config) (*State, error) {
 	// This ensures we don't have stale online status from previous runs
 	for _, node := range nodes {
 		node.IsOnline = new(false)
+		// Legacy reports must pass the same checks before entering the NodeStore.
+		// The next persist rewrites trimmed or discarded metadata.
+		if len(node.Hostname) > types.MaxHostnameLength {
+			log.Warn().Uint64(zf.NodeID, node.ID.Uint64()).Msg("trimming oversized stored hostname")
+			node.Hostname = strings.Clone(truncate.String(node.Hostname, types.MaxHostnameLength))
+		}
+
+		node.Endpoints = slices.DeleteFunc(node.Endpoints, func(ep netip.AddrPort) bool {
+			return ep.Addr().Zone() != ""
+		})
+		node.Endpoints = slices.Clone(node.Endpoints[:min(len(node.Endpoints), types.MaxEndpoints)])
+
+		if hi := node.Hostinfo; hi != nil {
+			if hi.NetInfo != nil {
+				hi.NetInfo.DERPLatency = nil
+			}
+
+			if len(hi.Hostname) > types.MaxHostnameLength {
+				hi.Hostname = strings.Clone(truncate.String(hi.Hostname, types.MaxHostnameLength))
+			}
+
+			if len(hi.RoutableIPs) > types.MaxRoutableIPs {
+				log.Warn().Uint64(zf.NodeID, node.ID.Uint64()).Msgf(
+					"too many stored routes, keeping the first %d", types.MaxRoutableIPs)
+				hi.RoutableIPs = slices.Clone(hi.RoutableIPs[:types.MaxRoutableIPs])
+			}
+		}
+
+		err := types.ValidateHostinfo(node.Hostinfo)
+		if err != nil {
+			log.Warn().Uint64(zf.NodeID, node.ID.Uint64()).Err(err).Msg("discarding stored Hostinfo until the node reports again")
+			node.Hostinfo = nil
+		}
 	}
 
 	users, err := db.ListUsers(nil)
@@ -302,7 +367,7 @@ func NewState(cfg *types.Config) (*State, error) {
 		pings:     newPingTracker(),
 
 		sshCheckAuth:  make(map[sshCheckPair]time.Time),
-		registerLocks: xsync.NewMap[key.MachinePublic, *sync.Mutex](),
+		registerLocks: xsync.NewMap[key.MachinePublic, *registerLock](),
 	}
 
 	// Surface nodes whose stored data would break map generation (e.g. an
@@ -662,7 +727,9 @@ func (s *State) SaveNode(node types.NodeView) (types.NodeView, change.Change, er
 // Once the database deletion commits, the returned changes always start with
 // the node-removal notification, even if a later policy refresh fails. Callers
 // must publish the changes before handling the error so live sessions are
-// still torn down after a committed deletion.
+// still torn down after a committed deletion. Concurrent deletes of one node
+// act once: a call that finds the row already gone returns no changes, and
+// only the call that removed the row frees the addresses.
 func (s *State) DeleteNode(node types.NodeView) ([]change.Change, error) {
 	genBefore := s.polMan.NodesGeneration()
 
@@ -672,6 +739,10 @@ func (s *State) DeleteNode(node types.NodeView) ([]change.Change, error) {
 	s.persistMu.Unlock()
 
 	if err != nil {
+		if errors.Is(err, hsdb.ErrNodeNotFound) {
+			return nil, nil
+		}
+
 		return nil, err
 	}
 

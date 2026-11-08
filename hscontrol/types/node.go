@@ -1,6 +1,7 @@
 package types
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -24,6 +25,7 @@ import (
 )
 
 var (
+	ErrHostinfoTooLarge     = errors.New("hostinfo too large")
 	ErrNodeAddressesInvalid = errors.New("parsing node addresses")
 	ErrHostnameTooLong      = errors.New("hostname too long, cannot accept more than 255 ASCII chars")
 	ErrNodeHasNoGivenName   = errors.New("node has no given name")
@@ -1306,4 +1308,43 @@ func (nv NodeView) TailNode(
 	}
 
 	return &tNode, nil
+}
+
+// ValidateHostinfo checks the report before it is retained or sent to peers.
+// Routes have a count limit; their encoded size depends on the address family.
+// NetInfo has a separate budget because omitted NetInfo preserves the old value.
+func ValidateHostinfo(hi *tailcfg.Hostinfo) error {
+	if hi == nil {
+		return nil
+	}
+
+	if len(hi.Hostname) > MaxHostnameLength {
+		return fmt.Errorf("%w: hostname exceeds %d bytes", ErrHostinfoTooLarge, MaxHostnameLength)
+	}
+
+	if len(hi.RoutableIPs) > MaxRoutableIPs {
+		return fmt.Errorf("%w: more than %d routes", ErrHostinfoTooLarge, MaxRoutableIPs)
+	}
+
+	if len(hi.RequestTags) > MaxRequestTags {
+		return fmt.Errorf("%w: more than %d requested tags", ErrHostinfoTooLarge, MaxRequestTags)
+	}
+
+	// Encoding also counts fields added upstream without a local field list.
+	rest := *hi
+	rest.RoutableIPs = nil
+	rest.NetInfo = nil
+
+	for _, part := range []any{&rest, hi.NetInfo} {
+		encoded, err := json.Marshal(part)
+		if err != nil {
+			return fmt.Errorf("encoding hostinfo: %w", err)
+		}
+
+		if len(encoded) > MaxHostinfoSize {
+			return fmt.Errorf("%w: %d bytes, limit %d", ErrHostinfoTooLarge, len(encoded), MaxHostinfoSize)
+		}
+	}
+
+	return nil
 }
