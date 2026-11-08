@@ -782,3 +782,49 @@ Branch: codex/headscale-sync-2026-11-08. Noch kein Merge oder Release.
 | E: optionale Funktionen | Vorschläge | weiterhin getrennte Bewertung und Voraussetzungen gemäß Abschnitt 15 |
 
 Die Gesamtliste ist damit ausdrücklich noch nicht abgeschlossen.
+
+
+## 17. Fortsetzung des Upstream-Abgleichs (9. November 2026)
+
+**Status:** Lokale Umsetzung auf codex/headscale-sync-2026-11-08 läuft.
+Der frühere Kontextfehler aus Abschnitt 16 ist fachlich aufgelöst: Die
+abweichenden Kommentare zur Ablaufzeit werden nicht ersetzt; Meshoras
+vorhandene Ablaufzweige bleiben bei der Metadaten-Anpassung erhalten.
+
+- 5a4d366c angepasst: Pending-Anmeldungen behalten nur Hostname, OS und
+  eine eigene Kopie der Tags. Bei erneuter Anmeldung bleiben Betriebsdaten,
+  Dienste, Routen und Discovery-Key erhalten; zu große zusammengeführte
+  Daten werden ohne Mutation abgelehnt.
+- b833be28: Pro Anmeldung/SSH-Check wartet eine Folgeanfrage. Neuere
+  Anfragen lösen ältere ab; Folge-URLs sind begrenzt und nicht benötigte
+  Request-Daten werden vor dem Warten freigegeben.
+- 221a387b: MapRequests prüfen den aktuellen NodeKey im NodeStore-Writer.
+  Veraltete wartende Anfragen dürfen weder Schlüssel noch Gerätezustand
+  überschreiben. Nur Registrierung darf den NodeKey wechseln.
+- e67ef861: Administrative Ablaufzeiten getaggter Geräte erfordern bei
+  erneuter Anmeldung einen gültigen Schlüssel; verbrauchte Schlüssel
+  heben den Ablauf nicht mehr auf.
+- bd74ce67 angepasst: Registrierung und Ablaufänderungen nutzen die
+  gemeinsame Persistenzsperre und speichern die aktuelle NodeStore-Zeile.
+  Rollback nimmt nur noch eigene unveränderte Felder zurück und erhält
+  spätere Admin-/Map-Änderungen.
+- d67ee0bd angepasst: Feste Anzahl von Schlüsselsperren serialisiert
+  parallele Erstnutzung eines Einmalschlüssels. Schlüssel nach Warten erneut
+  laden; höchstens ein Gerät erhält die Rechte, auch vorübergehend.
+  Der zuerst fehlgeschlagene Regressionstest deckte die noch fehlende
+  bd74ce67-Persistenzabhängigkeit auf; nach deren Anpassung grün.
+- Nachweise: vollständige Tests für hscontrol/state/types/db/webui grün
+  (Serverpaket 188,794 s); gezielte Race-Tests für Metadaten, Folgeanfragen,
+  Schlüsselwechsel, Einmalschlüssel, Persistenz und Rollback grün.
+  Diff-Lint 0 neue Meldungen; Build und diff --check grün.
+- Zusätzlich gefunden: Terraform-Provider 0.29.3 benötigt ACL-Validierung.
+  a63ee3e0 plus a336e1e7 ergänzt /acl/validate und strukturierte
+  Policy-Testfehler, ohne eine Policy zu speichern. Endpunkttests und
+  zuvor fehlgeschlagene echte OpenTofu-Provider-Fälle grün (22,327 s).
+  Diese Commits ändern keine Proto-/Generatorquellen; entgegen dem alten
+  Übergabetext ist für dieses konkrete Paket keine Generierung nötig.
+- Der breite servertest-Gesamtlauf erreichte nach 8 Minuten sein Limit;
+  dadurch keine vollständige Gesamtabnahme. Die darin tatsächlich
+  gemeldeten ACL-Provider-Fehler wurden gezielt behoben und nachgeprüft.
+  Restliche Registrierungs-/API-/Policy-/DB-/DERP-Pakete bleiben offen.
+- Kein Push, Main-Merge, Release oder produktiver Konfigurationseingriff.

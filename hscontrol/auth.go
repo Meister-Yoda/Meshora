@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -124,7 +125,7 @@ func (h *Headscale) handleRegister(
 	// node has already started the registration process and we should wait for
 	// it to finish the original registration.
 	if req.Followup != "" {
-		return h.waitForFollowup(ctx, req, machineKey)
+		return h.waitForFollowup(ctx, req.Followup, registrationDataFromRequest(req, machineKey))
 	}
 
 	// Pre authenticated keys are handled slightly different than interactive
@@ -299,12 +300,18 @@ func nodeToRegisterResponse(node types.NodeView) *tailcfg.RegisterResponse {
 	return resp
 }
 
+const maxFollowupURLLength = 2048
+
 func (h *Headscale) waitForFollowup(
 	ctx context.Context,
-	req tailcfg.RegisterRequest,
-	machineKey key.MachinePublic,
+	followup string,
+	regData *types.RegistrationData,
 ) (*tailcfg.RegisterResponse, error) {
-	fu, err := url.Parse(req.Followup)
+	if len(followup) > maxFollowupURLLength {
+		return nil, NewHTTPError(http.StatusUnauthorized, "followup URL too long", nil)
+	}
+
+	fu, err := url.Parse(followup)
 	if err != nil {
 		return nil, NewHTTPError(http.StatusUnauthorized, "invalid followup URL", err)
 	}
@@ -323,13 +330,15 @@ func (h *Headscale) waitForFollowup(
 		// [State.HandleNodeFromAuthPath] builds the node from this cached
 		// [types.RegistrationData.MachineKey]. [Headscale.handleRegister]
 		// and [Headscale.handleLogout] apply the same check.
-		if !reg.IsRegistration() || reg.RegistrationData().MachineKey != machineKey {
+		if !reg.IsRegistration() || reg.RegistrationData().MachineKey != regData.MachineKey {
 			return nil, NewHTTPError(
 				http.StatusUnauthorized,
 				"registration was opened by a different machine key",
 				nil,
 			)
 		}
+
+		superseded := reg.Park()
 
 		var verdict types.AuthVerdict
 		select {
@@ -342,6 +351,12 @@ func (h *Headscale) waitForFollowup(
 			select {
 			case <-ctx.Done():
 				return nil, NewHTTPError(http.StatusUnauthorized, "registration timed out", ctx.Err())
+			case <-superseded:
+				// tailscaled keeps one follow-up in flight, so only a request
+				// it already abandoned is displaced.
+				return nil, NewHTTPError(
+					http.StatusConflict, "superseded by a newer followup request", nil,
+				)
 			case verdict = <-reg.WaitForAuth():
 			}
 		}
@@ -349,7 +364,7 @@ func (h *Headscale) waitForFollowup(
 		if verdict.Accept() {
 			if !verdict.Node.Valid() {
 				// registration is expired in the cache, instruct the client to try a new registration
-				return h.reqToNewRegisterResponse(req, machineKey)
+				return h.reqToNewRegisterResponse(regData)
 			}
 
 			return nodeToRegisterResponse(verdict.Node), nil
@@ -357,24 +372,21 @@ func (h *Headscale) waitForFollowup(
 	}
 
 	// if the follow-up registration isn't found anymore, instruct the client to try a new registration
-	return h.reqToNewRegisterResponse(req, machineKey)
+	return h.reqToNewRegisterResponse(regData)
 }
 
 // reqToNewRegisterResponse refreshes the registration flow by creating a new
 // registration ID and returning the corresponding [tailcfg.RegisterResponse.AuthURL]
 // so the client can restart the authentication process.
 func (h *Headscale) reqToNewRegisterResponse(
-	req tailcfg.RegisterRequest,
-	machineKey key.MachinePublic,
+	regData *types.RegistrationData,
 ) (*tailcfg.RegisterResponse, error) {
 	newAuthID, err := types.NewAuthID()
 	if err != nil {
 		return nil, NewHTTPError(http.StatusInternalServerError, "failed to generate registration ID", err)
 	}
 
-	authRegReq := types.NewRegisterAuthRequest(
-		registrationDataFromRequest(req, machineKey),
-	)
+	authRegReq := types.NewRegisterAuthRequest(regData)
 
 	log.Info().Msgf("new followup node registration using auth id: %s", newAuthID)
 	h.state.SetAuthCacheEntry(newAuthID, authRegReq)
@@ -384,25 +396,32 @@ func (h *Headscale) reqToNewRegisterResponse(
 	}, nil
 }
 
-// registrationDataFromRequest builds the [types.RegistrationData] payload stored
-// in the auth cache for a pending registration. The original [tailcfg.Hostinfo] is
-// retained so that consumers (auth callback, observability) see the
-// fields the client originally announced; the bounded-LRU cap on the
-// cache is what bounds the unauthenticated cache-fill DoS surface.
+// registrationDataFromRequest keeps only auth and confirmation metadata;
+// operational metadata arrives with the node's first MapRequest.
 func registrationDataFromRequest(
 	req tailcfg.RegisterRequest,
 	machineKey key.MachinePublic,
 ) *types.RegistrationData {
-	var hostname string
+	var (
+		hostname string
+		hostinfo *tailcfg.Hostinfo
+	)
+
 	if req.Hostinfo != nil {
 		hostname = req.Hostinfo.Hostname
+
+		hostinfo = &tailcfg.Hostinfo{
+			Hostname:    hostname,
+			OS:          req.Hostinfo.OS,
+			RequestTags: slices.Clone(req.Hostinfo.RequestTags),
+		}
 	}
 
 	regData := &types.RegistrationData{
 		MachineKey: machineKey,
 		NodeKey:    req.NodeKey,
 		Hostname:   hostname,
-		Hostinfo:   req.Hostinfo,
+		Hostinfo:   hostinfo,
 	}
 
 	if !req.Expiry.IsZero() {

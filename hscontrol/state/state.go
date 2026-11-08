@@ -24,6 +24,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -60,10 +61,8 @@ const (
 	registerCacheExpiration = time.Minute * 15
 
 	// defaultRegisterCacheMaxEntries is the default upper bound on the number
-	// of pending registration entries the auth cache will hold. With a 15-minute
-	// TTL and a stripped-down RegistrationData payload (~200 bytes per entry),
-	// 1024 entries cap the worst-case cache footprint at well under 1 MiB even
-	// under sustained unauthenticated cache-fill attempts.
+	// of pending registration entries the auth cache will hold. Entries keep
+	// only hostname, OS and requested tags, capped by types.ValidateHostinfo.
 	defaultRegisterCacheMaxEntries = 1024
 
 	// defaultNodeStoreBatchSize is the default number of write operations to batch
@@ -101,9 +100,6 @@ var ErrNodeNameNotUnique = errors.New("node name is not unique")
 //     PreAuthKey references after a key has been deleted (#2862).
 //   - User: GORM association, not a real column.
 //   - IsOnline: runtime-only field (gorm:"-").
-//
-// Expiry is included here but may be omitted at call sites that must
-// not touch it (see persistNodeAndRefreshPolicy).
 var nodeUpdateColumns = []string{
 	"MachineKey",
 	"NodeKey",
@@ -130,6 +126,9 @@ var ErrRegistrationExpired = errors.New("registration expired")
 // already bound to a different machine, enforcing the 1:1 NodeKey<->MachineKey
 // binding.
 var ErrNodeKeyInUse = errors.New("node key already in use by another machine")
+
+// ErrNodeKeyNotCurrent is returned when a map request uses a replaced node key.
+var ErrNodeKeyNotCurrent = errors.New("node key is no longer current")
 
 // ErrAmbiguousNodeOwnership is returned when a machine key maps to a set of
 // nodes from which the correct one to update or convert cannot be determined:
@@ -212,6 +211,9 @@ type State struct {
 	// racing the find-then-create section and each creating their own.
 	// Entries exist only while a registration holds or waits for its lock.
 	registerLocks *xsync.Map[key.MachinePublic, *registerLock]
+
+	// Bound lock storage while serialising first use across machines.
+	singleUseKeyLocks [64]sync.Mutex
 }
 
 // registerLock is the registration lock of one machine key. refs counts the
@@ -648,6 +650,15 @@ func (s *State) ListAllUsers() ([]types.User, error) {
 // Batch callers (e.g. autoApproveNodes) use it to write many rows and then
 // trigger a single policy rebuild instead of one per node.
 func (s *State) persistNode(node types.NodeView) (types.NodeView, error) {
+	return s.persistNodeWith(node, nodeUpdateColumns, nil)
+}
+
+// persistNodeWith serialises current node data and related changes in one transaction.
+func (s *State) persistNodeWith(
+	node types.NodeView,
+	columns []string,
+	inTx func(*gorm.DB) error,
+) (types.NodeView, error) {
 	if !node.Valid() {
 		return types.NodeView{}, ErrInvalidNodeView
 	}
@@ -664,11 +675,10 @@ func (s *State) persistNode(node types.NodeView) (types.NodeView, error) {
 	// ephemeral logout) between the caller's update and this persist: a missing
 	// node means we must not re-insert it.
 	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
 
 	fresh, exists := s.nodeStore.GetNode(node.ID())
 	if !exists {
-		s.persistMu.Unlock()
-
 		log.Warn().
 			EmbedObject(node).
 			Bool("is_ephemeral", node.IsEphemeral()).
@@ -681,11 +691,18 @@ func (s *State) persistNode(node types.NodeView) (types.NodeView, error) {
 
 	// Explicitly select all node columns so GORM includes nil/zero-value
 	// fields (e.g. UserID=nil when converting a user-owned node to tagged).
-	// Omit "Expiry" here: expiry is only updated through explicit
-	// SetNodeExpiry calls or re-registration, not during MapRequest updates.
-	err := s.db.DB.Select(nodeUpdateColumns).Omit("Expiry").Updates(nodePtr).Error
-	s.persistMu.Unlock()
+	err := s.db.Write(func(tx *gorm.DB) error {
+		err := tx.Select(columns).Updates(nodePtr).Error
+		if err != nil {
+			return err
+		}
 
+		if inTx != nil {
+			return inTx(tx)
+		}
+
+		return nil
+	})
 	if err != nil {
 		return types.NodeView{}, fmt.Errorf("saving node: %w", err)
 	}
@@ -1071,8 +1088,7 @@ func (s *State) SetNodeExpiry(nodeID types.NodeID, expiry *time.Time) (types.Nod
 		recompute = change.PolicyChange()
 	}
 
-	// Persist expiry change to database directly since persistNodeAndRefreshPolicy omits expiry.
-	err := s.db.NodeSetExpiry(nodeID, expiry)
+	_, err := s.persistNode(n)
 	if err != nil {
 		c := nodeWriteFailed(nodeID, s.policyChangeSince(genBefore).Merge(recompute))
 
@@ -2073,8 +2089,6 @@ type authNodeUpdateParams struct {
 	ExistingNode types.NodeView
 	// Cached registration payload from the originating client request.
 	RegData *types.RegistrationData
-	// Pre-validated hostinfo; NetInfo preserved from ExistingNode.
-	ValidHostinfo *tailcfg.Hostinfo
 	// Hostname from hostinfo, or generated from keys if client omits it.
 	Hostname string
 	// Auth user; may differ from ExistingNode.User() on conversion.
@@ -2151,19 +2165,26 @@ func (s *State) applyAuthNodeUpdate(params authNodeUpdateParams) (types.NodeView
 		return types.NodeView{}, false, ErrNodeKeyInUse
 	}
 
-	// Update existing node in [NodeStore] - validation passed, safe to mutate
-	before, updatedNodeView, ok := s.nodeStore.UpdateNodeDiff(params.ExistingNode.ID(), func(node *types.Node) {
-		node.NodeKey = regData.NodeKey
-		node.DiscoKey = regData.DiscoKey
-		node.Hostname = params.Hostname
+	var hostinfoErr error
 
-		// Preserve NetInfo from existing node when re-registering
-		node.Hostinfo = params.ValidHostinfo
-		node.Hostinfo.NetInfo = preserveNetInfo(
-			params.ExistingNode,
-			params.ExistingNode.ID(),
-			params.ValidHostinfo,
-		)
+	// Merge auth metadata with current operational data under the writer lock.
+	before, updatedNodeView, ok := s.nodeStore.UpdateNodeDiff(params.ExistingNode.ID(), func(node *types.Node) {
+		hostinfo := cmp.Or(node.Hostinfo.Clone(), &tailcfg.Hostinfo{})
+		hostinfo.Hostname = params.Hostname
+		hostinfo.RequestTags = slices.Clone(requestTags)
+
+		hostinfoErr = types.ValidateHostinfo(hostinfo)
+		if hostinfoErr != nil {
+			return
+		}
+
+		node.NodeKey = regData.NodeKey
+		if !regData.DiscoKey.IsZero() {
+			node.DiscoKey = regData.DiscoKey
+		}
+
+		node.Hostname = params.Hostname
+		node.Hostinfo = hostinfo
 
 		// Preserve the node's live endpoints when the register request carried
 		// none. Web/OIDC relogins report endpoints via MapRequest, not register,
@@ -2205,7 +2226,7 @@ func (s *State) applyAuthNodeUpdate(params authNodeUpdateParams) (types.NodeView
 				node.Expiry = regData.Expiry
 			}
 		case !wasTagged && isTagged:
-			// Personal → Tagged: clear expiry (tagged nodes don't expire)
+			// Personal → Tagged: clear expiry; tagged nodes disable it by default.
 			node.Expiry = nil
 		case params.IsConvertFromTag && !isTagged:
 			// Explicit conversion from tagged to user-owned: set expiry from client request
@@ -2222,13 +2243,12 @@ func (s *State) applyAuthNodeUpdate(params authNodeUpdateParams) (types.NodeView
 				node.Expiry = regData.Expiry
 			}
 		case isTagged && node.IsExpired():
-			// Tagged → Tagged, but carrying a stale PAST expiry from an older
-			// headscale's logout stamp (#3371). Tagged nodes never expire, so
-			// clear it; a deliberate future expiry has IsExpired() == false and
-			// falls through to the no-op below.
+			// Tagged → Tagged and expired: a person re-authenticated it, so clear
+			// the past expiry. A future administrative expiry has not taken
+			// effect and falls through to the no-op below.
 			node.Expiry = nil
 		}
-		// Tagged → Tagged with no stale expiry: keep existing expiry - no action.
+		// Tagged → Tagged and not expired: keep existing expiry - no action.
 
 		// Apply default node expiry for non-tagged nodes when the
 		// resolved expiry is still nil or zero (e.g., CLI registration
@@ -2244,6 +2264,10 @@ func (s *State) applyAuthNodeUpdate(params authNodeUpdateParams) (types.NodeView
 
 	if !ok {
 		return types.NodeView{}, false, fmt.Errorf("%w: %d", ErrNodeNotInNodeStore, params.ExistingNode.ID())
+	}
+
+	if hostinfoErr != nil {
+		return types.NodeView{}, false, hostinfoErr
 	}
 
 	keysOnly := onlyKeysChanged(before, updatedNodeView, time.Now())
@@ -2264,14 +2288,7 @@ func (s *State) applyAuthNodeUpdate(params authNodeUpdateParams) (types.NodeView
 		updateColumns = append(slices.Clone(nodeUpdateColumns), "AuthKeyID")
 	}
 
-	_, err := hsdb.Write(s.db.DB, func(tx *gorm.DB) (*types.Node, error) {
-		err := tx.Select(updateColumns).Updates(updatedNodeView.AsStruct()).Error
-		if err != nil {
-			return nil, fmt.Errorf("saving node: %w", err)
-		}
-
-		return nil, nil //nolint:nilnil // side-effect only write
-	})
+	_, err := s.persistNodeWith(updatedNodeView, updateColumns, nil)
 	if err != nil {
 		return types.NodeView{}, false, err
 	}
@@ -2687,7 +2704,6 @@ func (s *State) HandleNodeFromAuthPath(
 	// Common params for update operations
 	updateParams := authNodeUpdateParams{
 		RegData:        regData,
-		ValidHostinfo:  hostinfo,
 		Hostname:       hostname,
 		User:           user,
 		Expiry:         expiry,
@@ -2871,9 +2887,9 @@ func (s *State) findExistingNodeForPAK(
 // --authkey=KEY") re-presents a spent key legitimately. Anything that
 // authorises something new must present a valid key:
 //   - a node key rotation;
-//   - an expired user-owned node, which is re-authenticating rather than
-//     waking up. Tagged nodes never expire, so their past expiry is only a
-//     stale logout stamp and does not count;
+//   - an expired node. Tagged nodes can carry an administrative expiry or
+//     retain their expiry after an admin tags them. Legacy logout stamps
+//     were cleared by migration; logout no longer expires tagged nodes;
 //   - a tagged key converting a user-owned node to tagged;
 //   - a tagged key other than the one the node last authed with, which retags
 //     it.
@@ -2886,13 +2902,13 @@ func pakSkipsValidation(n types.NodeView, pak *types.PreAuthKey, nodeKey key.Nod
 	}
 
 	isNodeKeyRotation := n.NodeKey() != nodeKey
-	isExpiredUserOwned := !n.IsTagged() && n.IsExpiredAt(now)
+	isExpired := n.IsExpiredAt(now)
 	isOwnershipConversion := pak.ConvertsNodeToTagged(n)
 	isRetag := pak.RetagsNode(n)
 	ownershipMatches := n.IsTagged() ||
 		(pak.User != nil && n.UserID().Valid() && n.UserID().Get() == pak.User.ID)
 
-	return ownershipMatches && !isNodeKeyRotation && !isExpiredUserOwned &&
+	return ownershipMatches && !isNodeKeyRotation && !isExpired &&
 		!isOwnershipConversion && !isRetag
 }
 
@@ -2921,6 +2937,18 @@ func (s *State) HandleNodeFromPreAuthKey(
 	pak, err := s.GetPreAuthKey(regReq.Auth.AuthKey)
 	if err != nil {
 		return types.NodeView{}, s.policyChangeSince(genBefore), err
+	}
+
+	if !pak.Reusable && !pak.Used {
+		mu := &s.singleUseKeyLocks[pak.ID%uint64(len(s.singleUseKeyLocks))]
+		mu.Lock()
+		defer mu.Unlock()
+
+		// Another machine may have consumed this key while we waited.
+		pak, err = s.GetPreAuthKeyByID(pak.ID)
+		if err != nil {
+			return types.NodeView{}, s.policyChangeSince(genBefore), err
+		}
 	}
 
 	// A pre-auth key node's tags come from the key, never from RequestTags.
@@ -3141,6 +3169,7 @@ func (s *State) reregisterNodeWithPAK(
 	// rollback target if the database write below fails.
 	var (
 		prior   *types.Node
+		written *types.Node
 		authErr error
 	)
 
@@ -3150,6 +3179,7 @@ func (s *State) reregisterNodeWithPAK(
 		now := time.Now()
 
 		prior = node.Clone()
+		defer func() { written = node.Clone() }()
 
 		authErr = pakReregisterErr(node.View(), pak, regReq.NodeKey, now)
 		if authErr != nil {
@@ -3188,10 +3218,10 @@ func (s *State) reregisterNodeWithPAK(
 			node.User = nil
 
 			// Converting a user-owned node to tagged drops the user's key
-			// expiry (tagged nodes never expire). But retagging an
+			// expiry (tagged nodes disable it by default). But retagging an
 			// already-tagged node must preserve a deliberate FUTURE expiry
 			// set via `headscale nodes expire` - that is a node property, not
-			// tied to the auth key - and only clear a stale PAST expiry. This
+			// tied to the auth key - and only clear a past expiry with a valid key. This
 			// keeps the retag path symmetric with the same-key relogin path
 			// below rather than silently overriding an admin decision.
 			if wasUserOwned || node.IsExpiredAt(now) {
@@ -3227,10 +3257,8 @@ func (s *State) reregisterNodeWithPAK(
 				node.Expiry = nil
 			}
 		} else if node.IsExpiredAt(now) {
-			// A tagged node must never carry key expiry. Clear a stale
-			// PAST logout stamp so re-auth is not permanently blocked. A
-			// deliberate future expiry (headscale nodes expire) is not yet
-			// expired and is left untouched.
+			// A valid key re-authenticated this expired tagged node. A future
+			// administrative expiry has not taken effect and stays untouched.
 			node.Expiry = nil
 		}
 	})
@@ -3253,50 +3281,20 @@ func (s *State) reregisterNodeWithPAK(
 		return types.NodeView{}, false, authErr
 	}
 
-	_, err := hsdb.Write(s.db.DB, func(tx *gorm.DB) (*types.Node, error) {
-		// Explicitly select all node columns so GORM includes nil/zero-value fields
-		// (see nodeUpdateColumns comment). AuthKeyID is excluded on MapRequest
-		// so a deleted key's stale reference is not persisted, but
-		// re-registration presents a key just loaded from the database, so
-		// its ID must be persisted here — otherwise a restart reloads the old
-		// key and any key-scoped property (e.g. Ephemeral) silently reverts.
-		reregColumns := append(slices.Clone(nodeUpdateColumns), "AuthKeyID")
+	reregColumns := append(slices.Clone(nodeUpdateColumns), "AuthKeyID")
 
-		err := tx.Select(reregColumns).Updates(updatedNodeView.AsStruct()).Error
-		if err != nil {
-			return nil, fmt.Errorf("saving node: %w", err)
-		}
-
-		// Only mark the key used on the *first* registration. On
-		// re-registration the same key is already used and the
-		// atomic compare-and-set in [hsdb.UsePreAuthKey] would otherwise
-		// reject it as "authkey already used", locking out containers
-		// that restart with the same one-shot key.
+	_, err := s.persistNodeWith(updatedNodeView, reregColumns, func(tx *gorm.DB) error {
 		if !pak.Reusable && !pak.Used {
-			err = hsdb.UsePreAuthKey(tx, pak)
+			err := hsdb.UsePreAuthKey(tx, pak)
 			if err != nil {
-				return nil, fmt.Errorf("using pre auth key: %w", err)
+				return fmt.Errorf("using pre auth key: %w", err)
 			}
 		}
 
-		return nil, nil //nolint:nilnil // intentional: transaction success
+		return nil
 	})
 	if err != nil {
-		// Restore the registration fields from the node the writer replaced.
-		// Sessions, endpoints and health may have moved since that snapshot;
-		// preserve them. LastSeen stays because the node did contact us.
-		s.nodeStore.UpdateNode(prior.ID, func(n *types.Node) {
-			n.NodeKey = prior.NodeKey
-			n.Hostname = prior.Hostname
-			n.Hostinfo = prior.Hostinfo
-			n.RegisterMethod = prior.RegisterMethod
-			n.Tags = prior.Tags
-			n.UserID = prior.UserID
-			n.User = prior.User
-			n.Expiry = prior.Expiry
-			n.AuthKey = prior.AuthKey
-			n.AuthKeyID = prior.AuthKeyID
-		})
+		s.undoReregistration(prior, written)
 
 		return types.NodeView{}, false, fmt.Errorf("writing node to database: %w", err)
 	}
@@ -3311,6 +3309,53 @@ func (s *State) reregisterNodeWithPAK(
 		Msg("Node re-authorized")
 
 	return updatedNodeView, onlyKeysChanged(before, updatedNodeView, time.Now()), nil
+}
+
+// undoReregistration preserves later writes while undoing a failed registration.
+func (s *State) undoReregistration(prior, written *types.Node) {
+	restored, exists := s.nodeStore.UpdateNode(prior.ID, func(n *types.Node) {
+		if n.NodeKey == written.NodeKey {
+			n.NodeKey = prior.NodeKey
+		}
+
+		if n.Hostname == written.Hostname {
+			n.Hostname = prior.Hostname
+		}
+
+		if reflect.DeepEqual(n.Hostinfo, written.Hostinfo) {
+			n.Hostinfo = prior.Hostinfo
+		}
+
+		if n.RegisterMethod == written.RegisterMethod {
+			n.RegisterMethod = prior.RegisterMethod
+		}
+
+		if slices.Equal(n.Tags, written.Tags) &&
+			reflect.DeepEqual(n.UserID, written.UserID) &&
+			reflect.DeepEqual(n.User, written.User) {
+			n.Tags = prior.Tags
+			n.UserID = prior.UserID
+			n.User = prior.User
+		}
+
+		if reflect.DeepEqual(n.Expiry, written.Expiry) {
+			n.Expiry = prior.Expiry
+		}
+
+		if reflect.DeepEqual(n.AuthKeyID, written.AuthKeyID) &&
+			reflect.DeepEqual(n.AuthKey, written.AuthKey) {
+			n.AuthKey = prior.AuthKey
+			n.AuthKeyID = prior.AuthKeyID
+		}
+	})
+	if !exists {
+		return
+	}
+
+	_, err := s.persistNode(restored)
+	if err != nil {
+		log.Error().Err(err).Uint64(zf.NodeID, prior.ID.Uint64()).Msg("Persisting re-registration rollback failed")
+	}
 }
 
 // reauthChange returns the [change.Change] to broadcast after an authentication
@@ -3596,6 +3641,7 @@ func (s *State) UpdateNodeFromMapRequest(id types.NodeID, req tailcfg.MapRequest
 		routeChange        bool
 		needsRouteApproval bool
 		autoApprovedRoutes []netip.Prefix
+		staleNodeKey       bool
 	)
 	// Snapshot the primary assignment so we can tell whether the
 	// Hostinfo + auto-approval that follows shifted any prefix.
@@ -3605,10 +3651,14 @@ func (s *State) UpdateNodeFromMapRequest(id types.NodeID, req tailcfg.MapRequest
 	// We need to ensure we update the node as it is in the [NodeStore] at
 	// the time of the request.
 	updatedNode, ok := s.nodeStore.UpdateNode(id, func(currentNode *types.Node) {
+		if currentNode.NodeKey != req.NodeKey {
+			staleNodeKey = true
+			return
+		}
+
 		// Capture the raw wire-level peer change. LastSeen is always
 		// stamped here, so classification tests must not rely on it.
 		delta.peerChange = currentNode.PeerChangeFromMapRequest(req)
-		delta.keyChanged = delta.peerChange.Key != nil
 		delta.discoKeyChanged = delta.peerChange.DiscoKey != nil
 
 		// Normalize before classifying. A nil req.Hostinfo means the client
@@ -3768,6 +3818,10 @@ func (s *State) UpdateNodeFromMapRequest(id types.NodeID, req tailcfg.MapRequest
 
 	if !ok {
 		return change.Change{}, fmt.Errorf("%w: %d", ErrNodeNotInNodeStore, id)
+	}
+
+	if staleNodeKey {
+		return change.Change{}, ErrNodeKeyNotCurrent
 	}
 
 	if delta.dnsMetadataChanged {
@@ -3945,7 +3999,7 @@ func buildMapRequestChangeResponse(
 		}
 	}
 
-	if delta.keyChanged || delta.discoKeyChanged {
+	if delta.discoKeyChanged {
 		c := change.NodeKeyRotated(node)
 		if delta.derpChanged {
 			c.PeerPatches[0].DERPRegion = currentDERP
@@ -3993,8 +4047,7 @@ func routesChanged(oldNode types.NodeView, newHI *tailcfg.Hostinfo) bool {
 // [Node.PeerChangeFromMapRequest] always stamps: a keepalive that only bumps
 // LastSeen should not trigger a full-row UPDATE and policy rescan.
 func peerChangePersistWorthy(peerChange tailcfg.PeerChange) bool {
-	return peerChange.Key != nil ||
-		peerChange.DiscoKey != nil ||
+	return peerChange.DiscoKey != nil ||
 		peerChange.Online != nil ||
 		peerChange.Endpoints != nil ||
 		peerChange.DERPRegion != 0 ||
