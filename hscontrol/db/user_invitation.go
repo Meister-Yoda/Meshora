@@ -132,7 +132,7 @@ func (hsdb *HSDatabase) AcceptUserInvitation(digest, mode, password string, clai
 		hash = hashWebAdminPassword(password)
 
 		<-webAdminHashLimiter
-	} else if mode != "oidc" || claims == nil || !bool(claims.EmailVerified) || claims.Sub == "" || claims.Iss == "" {
+	} else if mode != "oidc" || claims == nil || !bool(claims.EmailVerified) || claims.Sub == "" || claims.Iss == "" || !claims.IdentifierKeepsSubject() {
 		return nil, ErrInvitation
 	}
 

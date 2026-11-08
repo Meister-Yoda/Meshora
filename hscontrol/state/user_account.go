@@ -34,7 +34,13 @@ var (
 	ErrOIDCEmailUnverified = errors.New("OIDC provider has not verified the email address")
 )
 
+var errOIDCSubjectInvalid = errors.New("OIDC subject cannot be preserved")
+
 func (s *State) ResolveOIDCUser(claims *types.OIDCClaims, emailVerifiedRequired bool) (*types.User, error) {
+	if claims == nil || claims.Sub == "" || claims.Iss == "" || !claims.IdentifierKeepsSubject() {
+		return nil, errOIDCSubjectInvalid
+	}
+
 	var (
 		user    *types.User
 		err     error

@@ -720,3 +720,47 @@ func TestRouterServesRootLogin(t *testing.T) {
 	require.Contains(t, response.Body.String(), `action="/"`)
 	require.NotContains(t, response.Body.String(), `class="brand-tag"`)
 }
+
+func TestMergeEmailClaims(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		token    types.OIDCClaims
+		info     types.OIDCUserInfo
+		email    string
+		verified types.FlexibleBoolean
+	}{
+		{"different address", types.OIDCClaims{Email: "old@example.com", EmailVerified: true}, types.OIDCUserInfo{Email: "new@example.com"}, "new@example.com", false},
+		{"flag without address", types.OIDCClaims{Email: "old@example.com"}, types.OIDCUserInfo{EmailVerified: true}, "old@example.com", false},
+		{"same address token flag", types.OIDCClaims{Email: "same@example.com", EmailVerified: true}, types.OIDCUserInfo{Email: "same@example.com"}, "same@example.com", true},
+		{"same address userinfo flag", types.OIDCClaims{Email: "same@example.com"}, types.OIDCUserInfo{Email: "same@example.com", EmailVerified: true}, "same@example.com", true},
+		{"no userinfo email", types.OIDCClaims{Email: "old@example.com", EmailVerified: true}, types.OIDCUserInfo{}, "old@example.com", true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			email, verified := mergeEmailClaims(&tt.token, &tt.info)
+			assert.Equal(t, tt.email, email)
+			assert.Equal(t, tt.verified, verified)
+		})
+	}
+}
+
+func TestOIDCSubjectCollisionCannotLinkAccount(t *testing.T) {
+	app := createTestApp(t)
+	t.Cleanup(func() { require.NoError(t, app.state.Close()) })
+
+	claims := &types.OIDCClaims{Iss: "https://issuer.example", Sub: "alice", Email: "alice@example.com", EmailVerified: true}
+	_, err := app.state.ResolveOIDCUser(claims, true)
+	require.NoError(t, err)
+	original, err := app.state.GetUserByOIDCIdentifier(claims.Identifier())
+	require.NoError(t, err)
+
+	for _, subject := range []string{"alice/", "/alice", "alice//", " alice"} {
+		claims.Sub = subject
+		claims.Username = "attacker"
+		_, err = app.state.ResolveOIDCUser(claims, true)
+		require.Error(t, err)
+	}
+
+	current, err := app.state.GetUserByOIDCIdentifier("https://issuer.example/alice")
+	require.NoError(t, err)
+	assert.Equal(t, *original, *current)
+}

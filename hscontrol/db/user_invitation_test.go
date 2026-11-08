@@ -64,6 +64,11 @@ func TestUserInvitations(t *testing.T) {
 			require.ErrorIs(t, err, ErrInvitation)
 
 			claims.EmailVerified = true
+			claims.Sub = "subject/"
+			_, err = database.AcceptUserInvitation(strings.Repeat("b", 64), "oidc", "", claims)
+			require.ErrorIs(t, err, ErrInvitation)
+
+			claims.Sub = "subject"
 			user, err = database.AcceptUserInvitation(strings.Repeat("b", 64), "oidc", "", claims)
 			require.NoError(t, err)
 			require.True(t, user.ProviderIdentifier.Valid)
