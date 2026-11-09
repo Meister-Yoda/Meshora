@@ -53,6 +53,13 @@ func (h *Headscale) handleRegister(
 	req tailcfg.RegisterRequest,
 	machineKey key.MachinePublic,
 ) (*tailcfg.RegisterResponse, error) {
+	// Every path below may store the client's expiry and send it to peers.
+	expiry, err := types.ValidateExpiry(req.Expiry)
+	if err != nil {
+		return nil, NewHTTPError(http.StatusBadRequest, err.Error(), err)
+	}
+
+	req.Expiry = expiry
 
 	// Check for logout/expiry FIRST, before checking auth key.
 	// Tailscale clients may send logout requests with BOTH a past expiry AND an auth key.
