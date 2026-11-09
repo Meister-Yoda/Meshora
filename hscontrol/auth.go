@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/juanfont/headscale/hscontrol/state"
 	"github.com/juanfont/headscale/hscontrol/types"
 	"github.com/rs/zerolog/log"
 	"gorm.io/gorm"
@@ -22,6 +23,17 @@ type AuthProvider interface {
 	AuthHandler(w http.ResponseWriter, r *http.Request)
 	RegisterURL(authID types.AuthID) string
 	AuthURL(authID types.AuthID) string
+}
+
+func authAdmissionError(err error) HTTPError {
+	switch {
+	case errors.Is(err, types.ErrRegistrationPayloadTooLarge):
+		return NewHTTPError(http.StatusRequestEntityTooLarge, err.Error(), err)
+	case errors.Is(err, state.ErrAuthCacheFull), errors.Is(err, state.ErrAuthCacheClosed):
+		return NewHTTPError(http.StatusServiceUnavailable, "cannot start authentication; retry later", err)
+	default:
+		return NewHTTPError(http.StatusInternalServerError, "cannot start authentication", err)
+	}
 }
 
 // machineKeyMismatch fails closed when a node looked up by NodeKey was started
@@ -41,6 +53,7 @@ func (h *Headscale) handleRegister(
 	req tailcfg.RegisterRequest,
 	machineKey key.MachinePublic,
 ) (*tailcfg.RegisterResponse, error) {
+
 	// Check for logout/expiry FIRST, before checking auth key.
 	// Tailscale clients may send logout requests with BOTH a past expiry AND an auth key.
 	// A past expiry takes precedence - it's a logout regardless of other fields.
@@ -361,6 +374,8 @@ func (h *Headscale) waitForFollowup(
 			}
 		}
 
+		h.state.DeleteAuthCacheEntry(followupReg)
+
 		if verdict.Accept() {
 			if !verdict.Node.Valid() {
 				// registration is expired in the cache, instruct the client to try a new registration
@@ -389,7 +404,11 @@ func (h *Headscale) reqToNewRegisterResponse(
 	authRegReq := types.NewRegisterAuthRequest(regData)
 
 	log.Info().Msgf("new followup node registration using auth id: %s", newAuthID)
-	h.state.SetAuthCacheEntry(newAuthID, authRegReq)
+
+	err = h.state.SetAuthCacheEntry(newAuthID, authRegReq)
+	if err != nil {
+		return nil, authAdmissionError(err)
+	}
 
 	return &tailcfg.RegisterResponse{
 		AuthURL: h.authProvider.RegisterURL(newAuthID),
@@ -440,6 +459,12 @@ func (h *Headscale) handleRegisterWithAuthKey(
 		req,
 		machineKey,
 	)
+
+	// A saved ephemeral node needs cleanup even if it never polls or policy refresh fails.
+	if node.Valid() && node.IsEphemeral() {
+		h.ephemeralGC.Schedule(node.ID(), h.cfg.Node.Ephemeral.InactivityTimeout)
+	}
+
 	if err != nil {
 		h.Change(changed)
 
@@ -524,7 +549,10 @@ func (h *Headscale) handleRegisterInteractive(
 		registrationDataFromRequest(req, machineKey),
 	)
 
-	h.state.SetAuthCacheEntry(authID, authRegReq)
+	err = h.state.SetAuthCacheEntry(authID, authRegReq)
+	if err != nil {
+		return nil, authAdmissionError(err)
+	}
 
 	log.Info().Msgf("starting node registration using auth id: %s", authID)
 

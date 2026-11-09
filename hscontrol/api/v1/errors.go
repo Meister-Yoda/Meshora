@@ -20,6 +20,11 @@ func mapError(msg string, err error) error {
 	}
 
 	switch {
+	case errors.Is(err, types.ErrRegistrationPayloadTooLarge):
+		return huma.Error413RequestEntityTooLarge(msg, err)
+	case errors.Is(err, state.ErrAuthCacheFull), errors.Is(err, state.ErrAuthCacheClosed):
+		return huma.Error503ServiceUnavailable(msg, err)
+
 	case errors.Is(err, gorm.ErrRecordNotFound),
 		errors.Is(err, state.ErrNodeNotFound),
 		errors.Is(err, state.ErrNodeNotInNodeStore),

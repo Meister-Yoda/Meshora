@@ -4,6 +4,7 @@ package types
 //go:generate go run tailscale.com/cmd/viewer --type=User,Node,PreAuthKey,Credential
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"runtime"
@@ -19,6 +20,8 @@ const (
 	DatabasePostgres     = "postgres"
 	DatabaseSqlite       = "sqlite3"
 )
+
+var ErrRegistrationPayloadTooLarge = errors.New("registration payload exceeds size limit")
 
 // Common errors.
 var (
@@ -117,13 +120,16 @@ type PendingRegistrationConfirmation struct {
 // have a single canonical instance even when stored in caches that
 // internally copy values.
 type AuthRequest struct {
-	// regData is populated for node-registration flows (interactive web
-	// or OIDC). It carries the cached registration payload that the
+	// regData is populated before cache admission for node-registration flows
+	// (interactive web or OIDC). The detached regDataJSON later carries what the
 	// auth callback uses to promote this request into a real node.
 	//
 	// nil for non-registration flows. Use [AuthRequest.RegistrationData] to read it
 	// safely.
 	regData *RegistrationData
+
+	// Owned immutable payload after cache admission.
+	regDataJSON string
 
 	// sshBinding is populated for SSH check-mode flows. It captures the
 	// (src, dst) node pair the request was minted for so the follow-up
@@ -165,12 +171,34 @@ func NewAuthRequest() *AuthRequest {
 
 // NewRegisterAuthRequest creates a pending auth request carrying the
 // minimal [RegistrationData] for a node-registration flow. The data is
-// stored by pointer; callers must not mutate it after handing it off.
+// stored by pointer until PrepareForCache detaches it; callers must not
+// mutate it until preparation finishes.
 func NewRegisterAuthRequest(data *RegistrationData) *AuthRequest {
 	rn := NewAuthRequest()
 	rn.regData = data
 
 	return rn
+}
+
+// PrepareForCache detaches and bounds the registration payload before admission.
+func (rn *AuthRequest) PrepareForCache() error {
+	if rn.regData == nil {
+		return nil
+	}
+
+	data, err := json.Marshal(rn.regData)
+	if err != nil {
+		return fmt.Errorf("serializing pending registration: %w", err)
+	}
+
+	if len(data) > MaxRegistrationPayloadBytes {
+		return fmt.Errorf("%w: limit %d bytes", ErrRegistrationPayloadTooLarge, MaxRegistrationPayloadBytes)
+	}
+
+	rn.regDataJSON = string(data)
+	rn.regData = nil
+
+	return nil
 }
 
 // NewSSHCheckAuthRequest creates a pending auth request bound to a
@@ -202,11 +230,22 @@ func (rn *AuthRequest) IsFinished() bool {
 // called on an [AuthRequest] that was not created via
 // [NewRegisterAuthRequest].
 func (rn *AuthRequest) RegistrationData() *RegistrationData {
-	if rn.regData == nil {
+	if rn.regData != nil {
+		return rn.regData
+	}
+
+	if rn.regDataJSON == "" {
 		panic("RegistrationData can only be used in registration requests")
 	}
 
-	return rn.regData
+	var data RegistrationData
+
+	err := json.Unmarshal([]byte(rn.regDataJSON), &data)
+	if err != nil {
+		panic(fmt.Sprintf("decoding prepared registration: %v", err))
+	}
+
+	return &data
 }
 
 // SSHCheckBinding returns the (src, dst) node pair an SSH check-mode
@@ -223,7 +262,7 @@ func (rn *AuthRequest) SSHCheckBinding() *SSHCheckBinding {
 // IsRegistration reports whether this auth request carries registration
 // data (i.e. it was created via [NewRegisterAuthRequest]).
 func (rn *AuthRequest) IsRegistration() bool {
-	return rn.regData != nil
+	return rn.regData != nil || rn.regDataJSON != ""
 }
 
 // IsSSHCheck reports whether this auth request is bound to an SSH
