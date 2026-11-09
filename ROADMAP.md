@@ -886,3 +886,35 @@ vorhandene Ablaufzweige bleiben bei der Metadaten-Anpassung erhalten.
   OAuth-Änderungen im nachfolgenden eigenen lokalen Commit. Noch offen
   sind weitere Eigentums-/Ablauf-/SSH-Checks aus B und die C/D-Pakete;
   keine vollständige Erledigung der gesamten Upstream-Liste behauptet.
+
+
+### Eigentum, Schluesselablauf und Profilkonsistenz (9. November 2026)
+
+- e1de83cb/b1ab98bd angepasst: fremde Benutzer oder Schluessel uebernehmen
+  keine getaggte Geraeteidentitaet. Ein reines Wiederaufwachen veraendert
+  weder Besitzer noch Credential oder Ablaufzeit.
+- ba319ba8: SSH-Bestaetigungen gelten nur fuer die eingefrorene
+  Quellidentitaet; Besitzer-/Tagwechsel und expliziter Ablauf widerrufen sie.
+  Tailscale SSH bleibt standardmaessig deaktiviert.
+- e8461504: abgelaufene Geraete muessen ihren NodeKey wechseln; Clients
+  duerfen Ablaufzeiten nur vorziehen. Die Entscheidung erfolgt im Writer,
+  sodass parallele administrative Aenderungen erhalten bleiben.
+- Nachweise vor dem Profilpaket: vollstaendige Kernpakete gruen
+  (hscontrol 202,519 s; state 69,504 s; mapper 67,648 s; webui 75,035 s),
+  gezielte Race-Tests gruen (state 27,397 s; hscontrol 48,176 s),
+  Diff-Lint ohne Meldungen; Integrationstests kompiliert. Keine Aussage
+  ueber reale Docker-/Hardware-Abnahme.
+- 14baf554 angepasst: Benutzerprofile und Credential-Kopien werden nach
+  Updates konsistent erneuert; Schreibreihenfolge und Policy-Benutzerlisten
+  sind serialisiert. OIDC meldet Profilveraenderungen an verbundene Clients.
+  Gemeinsame unveraenderliche UID und bestaetigte Meshora-Mailadresse bleiben
+  erhalten, auch wenn der Anbieter spaeter keine Mailadresse liefert.
+- Neue Profiltests einschliesslich gleichzeitiger Updates und verbundenen
+  Testclients gruen (state 0,592 s; servertest 6,086 s), passende Race-Tests
+  gruen (3,586/7,282 s). Mailadressenerhalt-Test gruen (4,734 s),
+  Diff-Lint 0 Meldungen, Server-Build erfolgreich. Vollstaendige erneute
+  Kernpaketpruefung gruen: hscontrol 203,856 s, state 74,228 s, types
+  0,093 s, mapper 62,762 s, webui 75,704 s.
+- Noch offen: Bestaetigung von Mailaenderungen auf dieselben konsistenten
+  Profil-/Credential-Aktualisierungen pruefen; anschliessend C/D-Pakete.
+  Die gesamte Upstream-Liste ist weiterhin in Arbeit. Kein Push oder Release.

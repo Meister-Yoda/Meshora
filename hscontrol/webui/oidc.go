@@ -13,6 +13,7 @@ import (
 	"github.com/juanfont/headscale/hscontrol/db"
 	hsstate "github.com/juanfont/headscale/hscontrol/state"
 	"github.com/juanfont/headscale/hscontrol/types"
+	"github.com/juanfont/headscale/hscontrol/types/change"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/oauth2"
 )
@@ -208,11 +209,14 @@ func (h *Handler) oidcCallback(w http.ResponseWriter, r *http.Request) {
 
 	claims.Iss, claims.Sub = idToken.Issuer, idToken.Subject
 
-	var user *types.User
+	var (
+		user       *types.User
+		userChange change.Change
+	)
 	if flow.invitation != "" {
 		user, err = h.state.AcceptUserInvitation(flow.invitation, "oidc", "", &claims)
 	} else {
-		user, err = h.state.ResolveOIDCUser(&claims, h.activeOIDC.EmailVerifiedRequired)
+		user, userChange, err = h.state.ResolveOIDCUser(&claims, h.activeOIDC.EmailVerifiedRequired)
 	}
 	if err != nil {
 		log.Warn().Err(err).Bool("email_present", claims.Email != "").Bool("email_verified", bool(claims.EmailVerified)).Msg("WebUI OIDC account resolution failed")
@@ -230,6 +234,10 @@ func (h *Handler) oidcCallback(w http.ResponseWriter, r *http.Request) {
 
 		h.renderLogin(w, r, http.StatusForbidden, "", message)
 		return
+	}
+
+	if !userChange.IsEmpty() {
+		h.change(userChange)
 	}
 
 	account, err := h.state.UserAccount(types.UserID(user.ID))

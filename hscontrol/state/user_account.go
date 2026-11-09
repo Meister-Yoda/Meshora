@@ -8,6 +8,7 @@ import (
 
 	"github.com/juanfont/headscale/hscontrol/db"
 	"github.com/juanfont/headscale/hscontrol/types"
+	"github.com/juanfont/headscale/hscontrol/types/change"
 	"github.com/juanfont/headscale/hscontrol/util"
 )
 
@@ -36,20 +37,21 @@ var (
 
 var errOIDCSubjectInvalid = errors.New("OIDC subject cannot be preserved")
 
-func (s *State) ResolveOIDCUser(claims *types.OIDCClaims, emailVerifiedRequired bool) (*types.User, error) {
+func (s *State) ResolveOIDCUser(claims *types.OIDCClaims, emailVerifiedRequired bool) (*types.User, change.Change, error) {
 	if claims == nil || claims.Sub == "" || claims.Iss == "" || !claims.IdentifierKeepsSubject() {
-		return nil, errOIDCSubjectInvalid
+		return nil, change.Change{}, errOIDCSubjectInvalid
 	}
 
 	var (
 		user    *types.User
 		err     error
 		newUser bool
+		c       change.Change
 	)
 
 	user, err = s.GetUserByOIDCIdentifier(claims.Identifier())
 	if err != nil && !errors.Is(err, db.ErrUserNotFound) {
-		return nil, fmt.Errorf("creating or updating user: %w", err)
+		return nil, change.Change{}, fmt.Errorf("creating or updating user: %w", err)
 	}
 
 	// Only a verified mailbox can link a previously local identity. Never
@@ -59,7 +61,7 @@ func (s *State) ResolveOIDCUser(claims *types.OIDCClaims, emailVerifiedRequired 
 		if parseErr == nil && address.Address == claims.Email {
 			users, listErr := s.ListAllUsers()
 			if listErr != nil {
-				return nil, fmt.Errorf("finding user by email: %w", listErr)
+				return nil, change.Change{}, fmt.Errorf("finding user by email: %w", listErr)
 			}
 
 			for i := range users {
@@ -70,7 +72,7 @@ func (s *State) ResolveOIDCUser(claims *types.OIDCClaims, emailVerifiedRequired 
 
 				if user != nil || candidate.ProviderIdentifier.Valid ||
 					(candidate.Provider != "" && candidate.Provider != util.RegisterMethodCLI) {
-					return nil, ErrOIDCEmailConflict
+					return nil, change.Change{}, ErrOIDCEmailConflict
 				}
 
 				user = candidate
@@ -84,11 +86,11 @@ func (s *State) ResolveOIDCUser(claims *types.OIDCClaims, emailVerifiedRequired 
 	if user == nil {
 		_, emailErr := db.NormalizeAccountEmail(claims.Email)
 		if emailErr != nil {
-			return nil, emailErr
+			return nil, change.Change{}, emailErr
 		}
 
 		if emailVerifiedRequired && (!bool(claims.EmailVerified) || claims.Email == "") {
-			return nil, ErrOIDCEmailUnverified
+			return nil, change.Change{}, ErrOIDCEmailUnverified
 		}
 
 		newUser = true
@@ -98,27 +100,27 @@ func (s *State) ResolveOIDCUser(claims *types.OIDCClaims, emailVerifiedRequired 
 	user.FromClaim(claims, emailVerifiedRequired)
 
 	if newUser {
-		user, _, err = s.CreateUser(*user)
+		user, c, err = s.CreateUser(*user)
 		if err != nil {
-			return nil, fmt.Errorf("creating user: %w", err)
+			return nil, change.Change{}, fmt.Errorf("creating user: %w", err)
 		}
 	} else {
-		_, _, err = s.UpdateUser(types.UserID(user.ID), func(u *types.User) error {
+		user, c, err = s.UpdateUser(types.UserID(user.ID), func(u *types.User) error {
 			// The account may have been linked by another login since lookup.
 			if u.ProviderIdentifier.Valid && u.ProviderIdentifier != user.ProviderIdentifier {
 				return ErrOIDCEmailConflict
 			}
 
-			*u = *user
+			u.FromClaim(claims, emailVerifiedRequired)
 
 			return nil
 		})
 		if err != nil {
-			return nil, fmt.Errorf("updating user: %w", err)
+			return nil, change.Change{}, fmt.Errorf("updating user: %w", err)
 		}
 	}
 
-	return user, nil
+	return user, c, nil
 }
 
 func (s *State) UserSecurity(id types.UserID) (*types.UserSecurity, error) {

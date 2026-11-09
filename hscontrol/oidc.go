@@ -20,6 +20,7 @@ import (
 	"github.com/juanfont/headscale/hscontrol/state"
 	"github.com/juanfont/headscale/hscontrol/templates"
 	"github.com/juanfont/headscale/hscontrol/types"
+	"github.com/juanfont/headscale/hscontrol/types/change"
 	"github.com/juanfont/headscale/hscontrol/util"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/oauth2"
@@ -380,7 +381,7 @@ func (a *AuthProviderOIDC) OIDCCallbackHandler(
 		return
 	}
 
-	user, err := a.createOrUpdateUserFromClaim(&claims)
+	user, userChange, err := a.createOrUpdateUserFromClaim(&claims)
 	if err != nil {
 		httpUserError(writer, NewHTTPError(
 			http.StatusInternalServerError,
@@ -390,6 +391,8 @@ func (a *AuthProviderOIDC) OIDCCallbackHandler(
 
 		return
 	}
+
+	a.h.Change(userChange)
 
 	// If this is a registration flow, render the confirmation
 	// interstitial instead of finalising the registration immediately.
@@ -715,7 +718,7 @@ func (a *AuthProviderOIDC) getAuthInfoFromState(state string) *AuthInfo {
 
 func (a *AuthProviderOIDC) createOrUpdateUserFromClaim(
 	claims *types.OIDCClaims,
-) (*types.User, error) {
+) (*types.User, change.Change, error) {
 	return a.h.state.ResolveOIDCUser(claims, a.cfg.EmailVerifiedRequired)
 }
 

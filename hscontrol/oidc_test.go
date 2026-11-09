@@ -669,7 +669,7 @@ func TestOIDCVerifiedEmailLinking(t *testing.T) {
 			provider := &AuthProviderOIDC{h: app, cfg: &types.OIDCConfig{}}
 			claims := &types.OIDCClaims{Iss: "https://issuer.example", Sub: "subject", Username: "remote", Email: tc.email, EmailVerified: types.FlexibleBoolean(tc.verified)}
 
-			user, err := provider.createOrUpdateUserFromClaim(claims)
+			user, _, err := provider.createOrUpdateUserFromClaim(claims)
 			if tc.reject {
 				require.Error(t, err)
 
@@ -691,9 +691,10 @@ func TestOIDCVerifiedEmailLinking(t *testing.T) {
 			// provider stops supplying an email address.
 			claims.Email = ""
 			claims.EmailVerified = false
-			repeated, err := provider.createOrUpdateUserFromClaim(claims)
+			repeated, _, err := provider.createOrUpdateUserFromClaim(claims)
 			require.NoError(t, err)
 			assert.Equal(t, user.ID, repeated.ID)
+			assert.Equal(t, user.Email, repeated.Email)
 
 			users, err := app.state.ListAllUsers()
 			require.NoError(t, err)
@@ -755,7 +756,7 @@ func TestOIDCSubjectCollisionCannotLinkAccount(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, app.state.Close()) })
 
 	claims := &types.OIDCClaims{Iss: "https://issuer.example", Sub: "alice", Email: "alice@example.com", EmailVerified: true}
-	_, err := app.state.ResolveOIDCUser(claims, true)
+	_, _, err := app.state.ResolveOIDCUser(claims, true)
 	require.NoError(t, err)
 	original, err := app.state.GetUserByOIDCIdentifier(claims.Identifier())
 	require.NoError(t, err)
@@ -763,7 +764,7 @@ func TestOIDCSubjectCollisionCannotLinkAccount(t *testing.T) {
 	for _, subject := range []string{"alice/", "/alice", "alice//", " alice"} {
 		claims.Sub = subject
 		claims.Username = "attacker"
-		_, err = app.state.ResolveOIDCUser(claims, true)
+		_, _, err = app.state.ResolveOIDCUser(claims, true)
 		require.Error(t, err)
 	}
 
@@ -1450,7 +1451,7 @@ func TestOIDCPendingCallbackPreservesSSHVerdict(t *testing.T) {
 	require.True(t, ok)
 
 	principal := mockoidc.DefaultUser()
-	user, err := a.createOrUpdateUserFromClaim(&types.OIDCClaims{
+	user, _, err := a.createOrUpdateUserFromClaim(&types.OIDCClaims{
 		Iss:           b.idp.Issuer(),
 		Sub:           principal.Subject,
 		Username:      principal.PreferredUsername,

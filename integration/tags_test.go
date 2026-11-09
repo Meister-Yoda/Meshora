@@ -3295,17 +3295,18 @@ func TestTagsAuthKeyWithoutUserRejectsAdvertisedTags(t *testing.T) {
 }
 
 // =============================================================================
-// Test Suite 6: Tagged→User Conversion via CLI Register (#3038)
+// Test Suite 6: User Login on a Tagged Machine via CLI Register (#3038)
 // =============================================================================
 
-// TestTagsAuthKeyConvertToUserViaCLIRegister reproduces the panic from
-// issue #3038: register a node with a tags-only preauthkey (no user), then
-// convert it to a user-owned node via "headscale auth register --auth-id <id> --user <user>".
-// The crash happens in the mapper's generateUserProfiles when [types.Node.User] is nil
-// after the tag→user conversion in [State.processReauthTags].
+// TestTagsAuthKeyConvertToUserViaCLIRegister covers issue #3038:
+// register a node with a tags-only preauthkey (no user), then log the machine
+// in as a user via "headscale auth register --auth-id <id> --user <user>".
+// The crash was in the mapper's generateUserProfiles when [types.Node.User]
+// was nil.
 //
-// The key detail is using a tags-only PreAuthKey (User: nil). When created under
-// a user, the node inherits User from the PreAuthKey and the bug is masked.
+// No user made the key, so no user can take the tagged node back. As for
+// another user's login on a tagged machine on Tailscale SaaS, the login adds a
+// device of the user's own beside it.
 func TestTagsAuthKeyConvertToUserViaCLIRegister(t *testing.T) {
 	IntegrationSkip(t)
 
@@ -3331,10 +3332,8 @@ func TestTagsAuthKeyConvertToUserViaCLIRegister(t *testing.T) {
 	headscale, err := scenario.Headscale()
 	requireNoErrGetHeadscale(t, err)
 
-	// Step 1: Create a tags-only preauthkey WITHOUT a user.
-	// This is the critical detail: when [types.PreAuthKey.UserID] is nil, the node
-	// enters the [state.NodeStore] with [types.Node.User] == nil. The [state.State.processReauthTags]
-	// conversion then sets UserID but not User, leaving it nil for the mapper.
+	// Step 1: Create a tags-only preauthkey WITHOUT a user, so the node enters
+	// the [state.NodeStore] with [types.Node.User] == nil.
 	authKey, err := scenario.CreatePreAuthKeyWithOptions(hsic.AuthKeyOptions{
 		User:      nil,
 		Reusable:  false,
@@ -3356,6 +3355,8 @@ func TestTagsAuthKeyConvertToUserViaCLIRegister(t *testing.T) {
 	err = client.WaitForRunning(integrationutil.PeerSyncTimeout())
 	require.NoError(t, err)
 
+	var taggedID string
+
 	// Verify initial state: node is tagged
 	assert.EventuallyWithT(t, func(c *assert.CollectT) {
 		nodes, err := headscale.ListNodes()
@@ -3364,6 +3365,7 @@ func TestTagsAuthKeyConvertToUserViaCLIRegister(t *testing.T) {
 
 		if len(nodes) == 1 {
 			assertNodeHasTagsWithCollect(c, nodes[0], []string{"tag:valid-owned"})
+			taggedID = nodes[0].Id
 			t.Logf("Initial state - Node ID: %s, Tags: %v", nodes[0].Id, nodes[0].Tags)
 		}
 	}, integrationutil.StatusReadyTimeout, integrationutil.SlowPoll, "node should be tagged initially")
@@ -3386,39 +3388,40 @@ func TestTagsAuthKeyConvertToUserViaCLIRegister(t *testing.T) {
 	body, err := doLoginURL(client.Hostname(), loginURL)
 	require.NoError(t, err)
 
-	// Step 3: Register via CLI with user (this is the exact step that triggers the panic)
+	// Step 3: Register via CLI with user (the step that triggered the panic)
 	err = scenario.runHeadscaleRegister(tagTestUser, body)
 	require.NoError(t, err)
 
 	err = client.WaitForRunning(integrationutil.PeerSyncTimeout())
 	require.NoError(t, err)
 
-	// Step 4: Verify node is now user-owned and the mapper didn't panic.
-	// The panic would occur when the mapper builds the [tailcfg.MapResponse] and calls
-	// [types.Node.Owner].Model().ID with a nil User pointer.
-	// ShutdownAssertNoPanics in the defer catches any panics in headscale logs.
+	// Step 4: The tagged node stays and the user gets a device of its own. The
+	// mapper builds both into the map; ShutdownAssertNoPanics in the defer
+	// catches a panic in the headscale logs.
 	assert.EventuallyWithT(t, func(c *assert.CollectT) {
 		nodes, err := headscale.ListNodes()
 		assert.NoError(c, err)
-		assert.Len(c, nodes, 1)
+		assert.Len(c, nodes, 2)
 
-		if len(nodes) == 1 {
-			assertNodeHasNoTagsWithCollect(c, nodes[0])
-			assert.Equal(c, tagTestUser, nodes[0].User.Name,
-				"Node ownership should be returned to user after untagging")
-			t.Logf("After conversion - Node ID: %s, Tags: %v, User: %s",
-				nodes[0].Id, nodes[0].Tags, nodes[0].User.Name)
+		for _, node := range nodes {
+			if node.Id == taggedID {
+				assertNodeHasTagsWithCollect(c, node, []string{"tag:valid-owned"})
+
+				continue
+			}
+
+			assertNodeHasNoTagsWithCollect(c, node)
+			assert.Equal(c, tagTestUser, node.User.Name, "the login's device belongs to the user")
 		}
-	}, integrationutil.HAConvergeTimeout, 1*time.Second, "node should be user-owned after conversion via CLI register")
+	}, integrationutil.HAConvergeTimeout, 1*time.Second, "login should add a user device beside the tagged node")
 }
 
 // TestTaggedNodeLogoutReloginSingleUseKeyOnline reproduces issue #3371
 // end-to-end with a real tailscale client: a tagged node registered with a
 // single-use key logs out (`tailscale logout`) and re-authenticates with a
-// FRESH single-use tagged key. Tagged nodes never expire (KB 1068), so logout
-// must not stamp an expiry; before the fix the node was left permanently
-// expired and the fresh key was consumed on a re-registration that still
-// reported NodeKeyExpired, locking the node out forever.
+// FRESH single-use tagged key. Logout expires the tagged node, as on Tailscale
+// SaaS; before the fix the fresh key was consumed on a re-registration that
+// still reported NodeKeyExpired, locking the node out forever.
 //
 // The observable proof at the integration level is that after relogin the node
 // is back online with a NULL expiry and the same node ID — not stuck expired.
@@ -3479,15 +3482,13 @@ func TestTaggedNodeLogoutReloginSingleUseKeyOnline(t *testing.T) {
 		}
 	}, integrationutil.StatusReadyTimeout, integrationutil.SlowPoll, "waiting for initial registration")
 
-	// `tailscale logout`. A tagged node must not be expired by this.
+	// `tailscale logout` expires the tagged node.
 	err = client.Logout()
 	require.NoError(t, err)
 
 	err = client.WaitForNeedsLogin(integrationutil.ScaledTimeout(60 * time.Second))
 	require.NoError(t, err)
 
-	// The node must remain in the DB, tagged, and crucially NOT carry a
-	// stale expiry. This is the #3371 root cause (a) surface.
 	assert.EventuallyWithT(t, func(c *assert.CollectT) {
 		nodes, err := headscale.ListNodes()
 		assert.NoError(c, err)
@@ -3495,9 +3496,9 @@ func TestTaggedNodeLogoutReloginSingleUseKeyOnline(t *testing.T) {
 
 		if len(nodes) == 1 {
 			assertNodeHasTagsWithCollect(c, nodes[0], []string{"tag:valid-owned"})
-			assert.Nil(c, nodes[0].Expiry, "#3371: logout must not stamp expiry on a tagged node")
+			assert.NotNil(c, nodes[0].Expiry, "logout expires a tagged node")
 		}
-	}, integrationutil.StatusReadyTimeout, integrationutil.SlowPoll, "tagged node must survive logout without expiry")
+	}, integrationutil.StatusReadyTimeout, integrationutil.SlowPoll, "tagged node must survive logout, expired")
 
 	// KEY2: a FRESH single-use tagged key. Relogin.
 	key2, err := scenario.CreatePreAuthKeyWithTags(userID, false, false, []string{"tag:valid-owned"})
