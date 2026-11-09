@@ -828,3 +828,42 @@ vorhandene Ablaufzweige bleiben bei der Metadaten-Anpassung erhalten.
   gemeldeten ACL-Provider-Fehler wurden gezielt behoben und nachgeprüft.
   Restliche Registrierungs-/API-/Policy-/DB-/DERP-Pakete bleiben offen.
 - Kein Push, Main-Merge, Release oder produktiver Konfigurationseingriff.
+
+
+### Weitere Sicherheitskorrekturen und Wiederaufnahme
+
+- Implementiert: c0925962 angepasst an Meshoras eigene
+  AuthRequest-Konstruktoren mit Erstellungszeit. Cache-Zulassung verdrängt
+  keine laufenden Anmeldungen; begrenzte eigene Payloads, SSH-Reserve und
+  einmalige cookiegebundene OIDC-Verarbeitung. Alle produktiven
+  SetAuthCacheEntry-Aufrufstellen behandeln die neue Fehlerantwort.
+- 7721d8c2/0ecbeafb angepasst: Aufräumtimer bereits bei Registrierung,
+  auch ohne ersten Poll oder bei nachgelagertem Policy-Fehler. Ein alter
+  Timer darf ein inzwischen dauerhaftes Gerät nicht löschen.
+- e3c1bfd6/15a8c758: UTC-Ablaufzeiten vor Mutation prüfen, Bestandsdaten
+  normalisieren und ungültige Peers/Patches isolieren; Neustart-Grenzfälle
+  und administrative Eingaben getestet.
+- 0bf5b0f0/408b9b77: API-Bodies und Fehlerdetails begrenzen, eingegebene
+  Werte nicht in Validierungsfehlern spiegeln und Schlüssel-Scope vor dem
+  Einlesen prüfen. Nicht vorhandene Upstream-SaaS-Mitschnitte wurden nicht
+  kopiert; Sicherheitsfälle in bestehende Meshora-Tests integriert.
+- Zusätzlich notwendige Abhängigkeit f2df4429 angepasst: API-v1/v2-Policy
+  erst separat validieren, dann unter policyMu speichern und aktivieren.
+  Fehler beim Speichern lassen die aktive Policy unverändert. Alte
+  Policy-Zeilen werden nur zusammen mit erfolgreichem Ersatz in derselben
+  Transaktion entfernt. Meshoras Entwurfs-/Aktivierungsweg bleibt erhalten.
+- Unterbrechung/WSL-Neustart: Quelländerungen erhalten, temporäre
+  Testprotokolle verloren. Frische Gesamt-, Race- und PostgreSQL-Prüfung
+  am 9. November gestartet; Diff-Lint nach zwei korrigierten fehlenden
+  Test-Fehlerprüfungen bereits wieder ohne neue Meldungen.
+- Nächster offener Block: OAuth-Taggrenzen (77005fac/4e946edb) und
+  begrenzte Tokenzahl (9979be14); danach weitere B/C/D-Pakete gemäß
+  Abschnitt 15. Keine Produktionsänderung und kein Release.
+
+- Frische Wiederholungsprüfung nach dem Neustart: alle Kernpakete grün
+  (hscontrol 197,322 s; state 68,191 s; mapper 69,013 s; policy/v2 27,038 s).
+  Gezielte Race-Prüfungen grün (hscontrol 25,708 s); isolierter echter
+  PostgreSQL-Konkurrenztest grün (1,86 s); Diff-Lint 0 neue Meldungen.
+- Lokale Commits: 7e1b807d (Cache und kurzlebige Geräte), 10422e68
+  (Ablaufzeiten und robuste Netzwerkkarten). Atomare Policy-Schreibwege
+  und API-Grenzen werden im anschließenden eigenen Commit gesichert.

@@ -484,9 +484,15 @@ func (s *State) ReloadPolicy() ([]change.Change, error) {
 }
 
 func (s *State) reloadPolicyBytes(pol []byte) ([]change.Change, error) {
-	policyChanged, err := s.polMan.SetPolicy(pol)
-	if err != nil {
-		return nil, fmt.Errorf("setting policy: %w", err)
+	var policyChanged bool
+
+	if pol != nil {
+		var err error
+
+		policyChanged, err = s.polMan.SetPolicy(pol)
+		if err != nil {
+			return nil, fmt.Errorf("setting policy: %w", err)
+		}
 	}
 
 	// Clear SSH check auth times when policy changes to ensure stale
@@ -502,9 +508,7 @@ func (s *State) reloadPolicyBytes(pol []byte) ([]change.Change, error) {
 	// inputs of the peer map rebuild it themselves (node writes in the
 	// [NodeStore], [State.updatePolicyManagerNodes] and
 	// [State.updatePolicyManagerUsers]), so the O(n^2) rebuild is skipped
-	// then. The policy API handlers always get here that way: they apply
-	// the policy with [State.SetPolicy], which rebuilds, store it, and
-	// reload the very same bytes.
+	// then. UpdatePolicy installs only after its database write succeeds.
 	if policyChanged {
 		s.nodeStore.RebuildPeerMaps()
 	}
@@ -1593,6 +1597,26 @@ func (s *State) SetPolicyInDB(data string) (*types.Policy, error) {
 	defer s.policyMu.Unlock()
 
 	return s.db.SetPolicy(data)
+}
+
+// UpdatePolicy validates before storage, then serialises storage and activation.
+func (s *State) UpdatePolicy(pol []byte) (*types.Policy, []change.Change, error) {
+	err := s.ValidatePolicy(pol)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	s.policyMu.Lock()
+	defer s.policyMu.Unlock()
+
+	stored, err := s.db.SetPolicy(string(pol))
+	if err != nil {
+		return nil, nil, fmt.Errorf("storing policy: %w", err)
+	}
+
+	cs, err := s.reloadPolicyBytes([]byte(stored.Data))
+
+	return stored, cs, err
 }
 
 // ValidatePolicy reports whether a policy write would accept pol. It

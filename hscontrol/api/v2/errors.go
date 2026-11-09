@@ -2,6 +2,7 @@ package apiv2
 
 import (
 	"errors"
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -50,12 +51,29 @@ func tailscaleErrorTransformer(_ huma.Context, _ string, v any) (any, error) {
 
 	out := apiError{Message: message, Status: em.Status}
 
-	if len(em.Errors) > 0 {
-		details := make([]string, 0, len(em.Errors))
-		for _, d := range em.Errors {
-			details = append(details, d.Error())
+	listed := em.Errors[:min(len(em.Errors), maxErrorDetails)]
+
+	details := make([]string, 0, len(listed)+1)
+	for _, d := range listed {
+		// huma stores a nil detail for a nil error argument.
+		if d == nil {
+			continue
 		}
 
+		// The value is not echoed: for an unexpected property it is the whole
+		// request object, once per property.
+		if d.Location == "" {
+			details = append(details, d.Message)
+		} else {
+			details = append(details, d.Message+" ("+d.Location+")")
+		}
+	}
+
+	if more := len(em.Errors) - len(listed); more > 0 {
+		details = append(details, "and "+strconv.Itoa(more)+" more")
+	}
+
+	if len(details) > 0 {
 		out.Data = []apiErrorData{{Errors: details}}
 	}
 
@@ -84,12 +102,23 @@ func mapError(msg string, err error) error {
 		errors.Is(err, state.ErrGivenNameTaken),
 		errors.Is(err, state.ErrNodeNameNotUnique),
 		errors.Is(err, state.ErrRequestedTagsInvalidOrNotPermitted):
-		return huma.Error400BadRequest(msg, err)
+		// As on Tailscale SaaS, the reason is the message.
+		return huma.Error400BadRequest(err.Error(), err)
+
+	// A refused policy is answered with its own reason as the message.
+	case errors.Is(err, state.ErrInvalidPolicy):
+		message, data := policyRefusal(err)
+
+		return &apiError{Message: message, Status: http.StatusBadRequest, Data: data}
 
 	default:
 		return huma.Error500InternalServerError(msg, err)
 	}
 }
+
+func (e *apiError) Error() string { return e.Message }
+
+func (e *apiError) GetStatus() int { return e.Status }
 
 // policyRefusal is a refused policy as Tailscale reports it: the reason as
 // message and, when tests failed, one data entry per failing test naming its

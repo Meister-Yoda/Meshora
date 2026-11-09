@@ -42,6 +42,7 @@ func mapError(msg string, err error) error {
 		errors.Is(err, state.ErrRequestedTagsInvalidOrNotPermitted),
 		errors.Is(err, types.ErrHostinfoTooLarge),
 		errors.Is(err, types.ErrExpiryOutOfRange),
+		errors.Is(err, state.ErrInvalidPolicy),
 		errors.Is(err, db.ErrUserStillHasNodes),
 		errors.Is(err, db.ErrCannotChangeOIDCUser),
 		errors.Is(err, db.ErrPreAuthKeyNotTaggedOrOwned),

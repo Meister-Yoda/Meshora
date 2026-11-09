@@ -4230,8 +4230,8 @@ func TestPolicySnapshotCommitBoundary(t *testing.T) {
 	require.NotEqual(t, initial.SHA256, current.SHA256)
 
 	_, err = pm.SetPolicy(nil)
-	require.NoError(t, err)
-	require.Equal(t, current, pm.PolicySnapshot(), "legacy empty input is a no-op, not a false loaded snapshot")
+	require.ErrorIs(t, err, ErrPolicyEmpty)
+	require.Equal(t, current, pm.PolicySnapshot(), "rejected empty input must leave the loaded snapshot unchanged")
 }
 
 func TestPolicySnapshotConcurrentReaders(t *testing.T) {
