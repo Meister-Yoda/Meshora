@@ -2,6 +2,7 @@ package apiv2
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -153,4 +154,22 @@ func policyRefusal(err error) (string, []apiErrorData) {
 	}
 
 	return "test(s) failed", data
+}
+
+func unownedTags(b Backend, tags, tokenTags []string) []string {
+	var out []string
+
+	for _, tag := range tags {
+		if !b.State.TagOwnedByTags(tag, tokenTags) {
+			out = append(out, tag)
+		}
+	}
+
+	return out
+}
+
+func tagsRefused(prefix string, tags []string) error {
+	return huma.Error400BadRequest(
+		fmt.Sprintf("%srequested tags %v are invalid or not permitted", prefix, tags),
+	)
 }

@@ -67,7 +67,9 @@ secret for an access token, mints a single-use tagged auth key and registers wit
 it. This works anywhere the client takes an auth key: `tailscale up`, the
 container image, `tsnet` and the
 [`tailscale/github-action`](https://github.com/tailscale/github-action). One
-long-lived secret joins any number of nodes.
+long-lived secret joins any number of nodes. A client keeps its newest 1000
+access tokens and minting more ends the oldest, so give a long-lived integration
+its own client.
 
 Create an OAuth client with the `auth_keys` scope and the tags its nodes get. The
 secret is shown once:
@@ -215,3 +217,7 @@ Headscale with no extra setup.
     - Add your self-signed certificate to the trust store of your OS _or_
     - Disable certificate verification by either setting `cli.insecure: true` in the configuration file or by setting
       `HEADSCALE_CLI_INSECURE=1` via an environment variable. We do **not** recommend to disable certificate validation.
+
+An OAuth client with tags stays within those tags even with the `all` scope.
+A tagged token cannot create an untagged `all` client to bypass that restriction.
+Retagging a device requires permission for both its existing and requested tags.

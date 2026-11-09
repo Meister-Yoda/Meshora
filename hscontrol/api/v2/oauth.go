@@ -35,6 +35,9 @@ type tokenResponse struct {
 	TokenType   string `json:"token_type"`
 	ExpiresIn   int    `json:"expires_in"`
 	Scope       string `json:"scope,omitempty"`
+	// Tags names the tags of a token that can assign them, as Tailscale's
+	// answer does; a reader token's answer has none.
+	Tags string `json:"tags,omitempty"`
 }
 
 // oauthTokenHandler implements the client-credentials grant (RFC 6749 §4.4):
@@ -96,26 +99,34 @@ func oauthTokenHandler(b Backend) http.HandlerFunc {
 		tags, badTag, ok := narrowTags(client, strings.Fields(r.PostForm.Get("tags")))
 		if !ok {
 			writeOAuthError(w, http.StatusBadRequest, "invalid_target",
-				"tag "+badTag+" is not granted to this client")
+				"requested tags ["+badTag+"] are invalid or not permitted")
 
 			return
 		}
 
 		expiry := time.Now().Add(accessTokenTTL)
 
-		tokenStr, _, err := b.State.MintAccessToken(client.ClientID, scopes, tags, &expiry)
+		tokenStr, token, err := b.State.MintAccessToken(client.ClientID, scopes, tags, &expiry)
 		if err != nil {
 			writeOAuthError(w, http.StatusInternalServerError, "server_error", "could not mint access token")
 
 			return
 		}
 
-		writeJSON(w, http.StatusOK, tokenResponse{
+		resp := tokenResponse{
 			AccessToken: tokenStr,
 			TokenType:   "Bearer",
 			ExpiresIn:   int(accessTokenTTL.Seconds()),
-			Scope:       strings.Join(scopes, " "),
-		})
+			Scope:       strings.Join(token.Scopes, " "),
+		}
+
+		granted := scope.Parse(token.Scopes)
+		if scope.Grants(granted, scope.AuthKeys) || scope.Grants(granted, scope.DevicesCore) ||
+			scope.Grants(granted, scope.OAuthKeys) {
+			resp.Tags = strings.Join(token.Tags, " ")
+		}
+
+		writeJSON(w, http.StatusOK, resp)
 	}
 }
 
@@ -139,24 +150,25 @@ func narrowScopes(granted, requested []string) ([]string, string, bool) {
 
 // narrowTags returns the requested tags if each is within the client's grant (an
 // empty request means "the client's full tag set"), otherwise the offending tag
-// and false. A client with the "all" scope may assign any tag, matching Tailscale.
+// and false. Only an untagged client with the "all" scope may assign any tag;
+// a tagged one stays inside its tags, matching Tailscale.
 func narrowTags(client *types.OAuthClient, requested []string) ([]string, string, bool) {
 	if len(requested) == 0 {
 		return client.Tags, "", true
 	}
 
-	allScope := slices.Contains(client.Scopes, string(scope.All))
+	anyTag := len(client.Tags) == 0 && slices.Contains(client.Scopes, string(scope.All))
 
 	for _, req := range requested {
 		// Reject malformed tags at the trust boundary. A client's own tags are
-		// validated at creation, so this only matters for an "all"-scope client,
+		// validated at creation, so this only matters for an any-tag client,
 		// whose tags would otherwise skip the membership check below and flow
 		// unvalidated into auth-key creation.
 		if !strings.HasPrefix(req, "tag:") {
 			return nil, req, false
 		}
 
-		if !allScope && !slices.Contains(client.Tags, req) {
+		if !anyTag && !slices.Contains(client.Tags, req) {
 			return nil, req, false
 		}
 	}

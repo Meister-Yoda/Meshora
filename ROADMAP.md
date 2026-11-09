@@ -867,3 +867,22 @@ vorhandene Ablaufzweige bleiben bei der Metadaten-Anpassung erhalten.
 - Lokale Commits: 7e1b807d (Cache und kurzlebige Geräte), 10422e68
   (Ablaufzeiten und robuste Netzwerkkarten). Atomare Policy-Schreibwege
   und API-Grenzen werden im anschließenden eigenen Commit gesichert.
+
+- OAuth-Block 77005fac/4e946edb/9979be14 implementiert:
+  tagbeschränkte all-Clients bleiben innerhalb ihrer Tags; keine
+  Rechteausweitung über taglose all-Kind-Clients; Retagging verlangt Rechte
+  auf bestehende und neue Tags. API-Tokenantworten zeigen Zuweisungstags
+  nur bei passenden Schreibrechten.
+- Pro OAuth-Client bleiben die neuesten 1000 Access-Tokens gültig;
+  darüber hinaus werden nur dessen älteste Tokens entfernt. Scopes/Tags
+  werden eindeutig sortiert gespeichert. API-Dokumentation aktualisiert.
+- Nachweise dieses Blocks: OAuth-Tests grün (12,589 s), Race-Prüfung
+  hscontrol/db grün (16,283/18,212 s), alle API-v2-Tests grün (35,811 s),
+  gesamtes db-Paket grün (6,805 s), HTTP/OAuth-Servertest grün (64,209 s).
+  Echter isolierter PostgreSQL- plus SQLite-Tokenlimit-Test grün
+  (13,58 s); anderer Client bleibt gültig. Diff-Lint 0 neue Meldungen,
+  Server-Build und diff --check grün.
+- Bereits gesichert: 06510eba (API-Grenzen und atomare Policy-Aktivierung).
+  OAuth-Änderungen im nachfolgenden eigenen lokalen Commit. Noch offen
+  sind weitere Eigentums-/Ablauf-/SSH-Checks aus B und die C/D-Pakete;
+  keine vollständige Erledigung der gesamten Upstream-Liste behauptet.
