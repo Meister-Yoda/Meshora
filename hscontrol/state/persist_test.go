@@ -2493,3 +2493,147 @@ func TestUpdateUserRefreshesNodeCopiesWhenPolicyUpdateFails(t *testing.T) {
 	assert.Equal(t, "renamed-user", updated.User().Name(),
 		"the committed row and its cached copy must agree")
 }
+
+func TestConfirmUserEmailChangeRefreshesNodeCopies(t *testing.T) {
+	for _, policyFailure := range []bool{false, true} {
+		t.Run(strconv.FormatBool(policyFailure), func(t *testing.T) {
+			_, s, nodeID := persistTestSetup(t)
+			t.Cleanup(func() { _ = s.Close() })
+
+			original, ok := s.GetNodeByID(nodeID)
+			require.True(t, ok)
+
+			user := original.User().AsStruct()
+			id := types.UserID(user.ID)
+			_, ok = s.nodeStore.UpdateNode(nodeID, func(n *types.Node) {
+				n.AuthKey = &types.Credential{ID: 1, UserID: new(user.ID), User: user.Clone()}
+			})
+			require.True(t, ok)
+
+			tagged := s.nodeStore.PutNode(types.Node{
+				ID: nodeID + 1, Hostname: "mail-tagged", Tags: []string{"tag:server"},
+				MachineKey: key.NewMachine().Public(), NodeKey: key.NewNode().Public(),
+				AuthKey: &types.Credential{ID: 2, UserID: new(user.ID), User: user.Clone()},
+			})
+			before, ok := s.GetNodeByID(nodeID)
+			require.True(t, ok)
+
+			account, err := s.UserAccount(id)
+			require.NoError(t, err)
+
+			digest := strings.Repeat("a", 64)
+			require.NoError(t, s.BeginUserEmailChange(id, account.Revision, "new@example.test", digest))
+			snapshot := s.nodeStore.data.Load()
+			_, err = s.ConfirmUserEmailChange(id, account.Revision, strings.Repeat("b", 64))
+			require.Error(t, err)
+			require.Same(t, snapshot, s.nodeStore.data.Load(), "invalid proof must not refresh profiles")
+
+			if policyFailure {
+				s.polMan = failingSetUsersPolicyManager{PolicyManager: s.polMan}
+			}
+
+			c, err := s.ConfirmUserEmailChange(id, account.Revision, digest)
+			if policyFailure {
+				require.ErrorIs(t, err, errSetUsersTest)
+			} else {
+				require.NoError(t, err)
+				assert.True(t, c.IncludeSelf, "the owner needs its changed profile")
+				assert.True(t, c.SendAllPeers, "connected peers need the changed profile")
+			}
+
+			updated, ok := s.GetNodeByID(nodeID)
+			require.True(t, ok)
+			assert.Equal(t, "new@example.test", updated.User().Email())
+			assert.Equal(t, "new@example.test", updated.AuthKey().User().Email())
+			assert.Equal(t, user.Email, before.User().Email(), "old snapshots stay immutable")
+			assert.Equal(t, user.Email, before.AuthKey().User().Email())
+
+			updatedTagged, ok := s.GetNodeByID(tagged.ID())
+			require.True(t, ok)
+			assert.True(t, updatedTagged.IsTagged())
+			assert.Equal(t, "new@example.test", updatedTagged.AuthKey().User().Email())
+			assert.Equal(t, user.Email, tagged.AuthKey().User().Email())
+
+			stored, err := s.GetUserByID(id)
+			require.NoError(t, err)
+			assert.Equal(t, user.Name, stored.Name, "immutable account UID is preserved")
+
+			current, err := s.UserAccount(id)
+			require.NoError(t, err)
+			assert.Greater(t, current.Revision, account.Revision)
+			_, err = s.ConfirmUserEmailChange(id, current.Revision, digest)
+			require.Error(t, err, "the proof remains single use")
+		})
+	}
+}
+
+func TestConfirmUserEmailChangePublishesInOrder(t *testing.T) {
+	_, s, nodeID := persistTestSetup(t)
+	t.Cleanup(func() { _ = s.Close() })
+
+	node, ok := s.GetNodeByID(nodeID)
+	require.True(t, ok)
+
+	id := types.UserID(node.User().ID())
+	account, err := s.UserAccount(id)
+	require.NoError(t, err)
+
+	digest := strings.Repeat("c", 64)
+	require.NoError(t, s.BeginUserEmailChange(id, account.Revision, "ordered@example.test", digest))
+
+	resume := make(chan struct{})
+
+	release := sync.OnceFunc(func() { close(resume) })
+	defer release()
+
+	pm := &blockingSetUsersPolicyManager{PolicyManager: s.polMan, reached: make(chan struct{}), resume: resume}
+	s.polMan = pm
+	edited := make(chan error, 1)
+
+	go func() {
+		_, _, err := s.UpdateUser(id, func(u *types.User) error {
+			u.DisplayName = "latest display"
+			return nil
+		})
+		edited <- err
+	}()
+
+	<-pm.reached
+
+	confirmed := make(chan error, 1)
+
+	started := make(chan struct{})
+	go func() {
+		close(started)
+
+		_, err := s.ConfirmUserEmailChange(id, account.Revision, digest)
+		confirmed <- err
+	}()
+
+	<-started
+
+	select {
+	case err := <-confirmed:
+		require.NoError(t, err)
+		t.Fatal("confirmation overtook a paused user update")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	stored, err := s.GetUserByID(id)
+	require.NoError(t, err)
+	assert.Empty(t, stored.Email, "confirmation must not commit ahead of profile publication")
+	release()
+	require.NoError(t, <-edited)
+	require.NoError(t, <-confirmed)
+
+	stored, err = s.GetUserByID(id)
+	require.NoError(t, err)
+	assert.Equal(t, "ordered@example.test", stored.Email)
+	assert.Equal(t, "latest display", stored.DisplayName)
+	require.Len(t, pm.last, 1)
+	assert.Equal(t, stored.Email, pm.last[0].Email)
+
+	updated, ok := s.GetNodeByID(nodeID)
+	require.True(t, ok)
+	assert.Equal(t, stored.TailscaleUserProfile(), updated.User().TailscaleUserProfile())
+}

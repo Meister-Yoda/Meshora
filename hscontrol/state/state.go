@@ -638,6 +638,14 @@ func (s *State) UpdateUser(userID types.UserID, updateFn func(*types.User) error
 		return nil, change.Change{}, err
 	}
 
+	c, err := s.refreshUpdatedUser(previous, user)
+
+	return user, c, err
+}
+
+// refreshUpdatedUser publishes a committed user and its embedded copies while
+// userUpdateMu is held. Both profile edits and verified email changes use it.
+func (s *State) refreshUpdatedUser(previous types.User, user *types.User) (change.Change, error) {
 	var profileChanged bool
 
 	previous.UpdatedAt = user.UpdatedAt
@@ -683,14 +691,14 @@ func (s *State) UpdateUser(userID types.UserID, updateFn func(*types.User) error
 	// Check if policy manager needs updating
 	c, err := s.updatePolicyManagerUsers()
 	if err != nil {
-		return user, change.Change{}, fmt.Errorf("updating policy manager after user update: %w", err)
+		return change.Change{}, fmt.Errorf("updating policy manager after user update: %w", err)
 	}
 
 	if profileChanged {
 		c = change.UserAdded()
 	}
 
-	return user, c, nil
+	return c, nil
 }
 
 // DeleteUser permanently removes a user and all associated data (nodes, API keys, etc).

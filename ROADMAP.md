@@ -1110,7 +1110,7 @@ DNS-Eingriff, Commit, Push oder Release.
 
 ## 21. Naechster Release Candidate: v0.2.3-rc.2 (11. November 2026)
 
-**Status:** Veroeffentlichung vom Benutzer beauftragt; Releasepruefungen laufen.
+**Status:** Als Vorabversion veroeffentlicht; Release- und Registry-Workflow erfolgreich.
 
 Der RC buendelt die abgeschlossenen lokalen Sicherheits-/Upstream-Arbeiten,
 Zonen-/Exit-Datenpfadabnahme und Zertifikatsschritte 1 bis 3. Die unabhaengig
@@ -1123,6 +1123,60 @@ mit neuer initialer CertMagic-Ausstellung beachten. Keine neue RC.2-Migration.
 Externe Zertifikatsabnahme und Nix-Gesamtbuild bleiben offen und sind keine
 durch die RC-Veroeffentlichung erfuellte Abnahme.
 
-**Danach:** Schritt 4 mit vereinbarter oeffentlicher Testdomain und begrenzten
-DNS-Zugangsdaten fortsetzen. Solange diese Angaben fehlen, unabhaengige
-Vorbereitung und verbleibende Release-/Roadmap-Arbeiten weiterfuehren.
+**Veroeffentlichungsnachweis:** RC.2 referenziert d6250e784c2e8b16e06b064b638bc29821968c51.
+[Release](https://github.com/Meister-Yoda/Meshora/releases/tag/v0.2.3-rc.2),
+[Workflow 42929615478](https://github.com/Meister-Yoda/Meshora/actions/runs/42929615478).
+Sieben Assets einschliesslich AMD64-/ARM64-Images, Compose-Paketen und
+Pruefsummen veroeffentlicht. Versions-Tag und RC haben denselben Digest:
+sha256:8bd2551cecb3904b57ed05141bb84b4ea83fdcc703000e1c6c5ea6df781ee92f.
+latest blieb unveraendert:
+sha256:de5af952c0ee4a9c80ca921e60ea5762d44d975317c58d4b2b16d8fc81e146b9.
+Release-Race-Tests, Gesamtbuild und AMD64-Container-Smokecheck in GitHub gruen.
+
+**Getrennte CI-Befunde:** Check Generated Files meldete den fehlenden v2-Client
+fuer ACL-Validierung/Fehlerdaten. Dokumentiert mit make client (gepinntes
+oapi-codegen v2.8.0) generiert, separat in 977b0dbd committed;
+erneute Generierung unveraendert, beide Clientpakete kompilieren.
+Diese Entwicklerclient-Korrektur ist ein Folge-Commit; der bereits
+veroeffentlichte RC.2-Tag wurde nicht veraendert. Deploy docs scheiterte mit
+HTTP 403 beim gh-pages-Push; Berechtigungsproblem weiter offen. Andere
+noch laufende Checks sind keine durch den Releaseworkflow ersetzte Abnahme.
+
+**Danach:** Benutzer hat die echte DNS-Abnahme vorerst zurueckgestellt und
+die Fortsetzung mit Mail-/Profilkonsistenz bestaetigt (Abschnitt 22).
+Oeffentliche Testdomain und begrenzter DNS-Zugang bleiben dafuer offen.
+Das Lesen externer Cloudflare-Zonen wurde durch die automatische
+Freigabepruefung abgelehnt; keine Zonen gelesen oder DNS-Schreibaktionen
+ausgefuehrt. Keine Produktionskonfiguration geaendert.
+
+
+## 22. Mailbestaetigung und konsistente Profile (11. November 2026)
+
+**Status:** Implementiert und lokal validiert nach RC.2; Folgeaenderung fuer
+den naechsten Release Candidate.
+
+Die Mailbestaetigung verwendet jetzt dieselbe userUpdateMu-Sperre und
+denselben vorhandenen Profil-Aktualisierungspfad wie UpdateUser. Geraete-
+Besitzer und eingebettete Credential-Benutzer werden durch neue Kopien
+aktualisiert, einschliesslich Credential-Ersteller getaggter Geraete.
+Alte Snapshots bleiben unveraendert. Betroffene Clientprofile werden aktiv
+neu verteilt; Policy-Benutzerlisten folgen der Schreibreihenfolge.
+
+Unveraendert: bestaetigter, einmaliger und ablaufender Nachweis,
+Kontorevision/Sitzungswiderruf, eindeutige Login-Mail, OIDC-Schutz und
+unveraenderliche UID. Keine neue Migration oder geaenderte Mailzustellung.
+
+**Nachweise:** Neue Regression zeigt vor der Korrektur fehlende
+Profilbenachrichtigung und veraltete Credential-Kopien. Danach normaler
+Pfad und Policy-Fehlerfall bestanden; ungueltiger Nachweis schreibt nichts,
+Replay scheitert, alte Snapshots bleiben erhalten. Gleichzeitiges Update
+und Bestaetigung sowie verbundener Besitzer-/Peer-Client und spaeterer
+Clientbeitritt getestet. Gezielte Race-Tests state/servertest
+2,864/15,414 s gruen. Vollstaendige Pakete state/webui/mapper
+77,977/75,768/67,744 s gruen; Gesamtbuild, Diff-Lint (0 Befunde),
+Vendorhash und git diff --check bestanden.
+Protokolle control_logs/roadmap-20261110/mail-profile-*.log (gitignored).
+
+**Naechster Schritt:** C-Paket aus Abschnitt 15/16, Exit-/Zonen-Policy und
+Datenbankverhalten angepasst integrieren. Die externe DNS-Abnahme bleibt
+bis zur Festlegung einer isolierten Testdomain und begrenzter Credentials offen.

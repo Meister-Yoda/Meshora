@@ -767,3 +767,38 @@ func TestSetDNS(t *testing.T) {
 			return nm != nil && slices.Equal(nm.DNS.CertDomains, []string{"notebook." + domain})
 		})
 }
+
+func TestUserProfileFollowsEmailConfirmation(t *testing.T) {
+	srv := servertest.NewServer(t)
+	owner := srv.CreateUser(t, "email-profile")
+	peer := srv.CreateUser(t, "email-peer")
+	ownerClient := servertest.NewClient(t, srv, "email-owner", servertest.WithUser(owner))
+	peerClient := servertest.NewClient(t, srv, "email-peer", servertest.WithUser(peer))
+	ownerClient.WaitForPeers(t, 1, 5*time.Second)
+	peerClient.WaitForPeers(t, 1, 5*time.Second)
+
+	id := types.UserID(owner.ID)
+	account, err := srv.State().UserAccount(id)
+	require.NoError(t, err)
+
+	digest := strings.Repeat("e", 64)
+	require.NoError(t, srv.State().BeginUserEmailChange(id, account.Revision, "confirmed@example.test", digest))
+	c, err := srv.State().ConfirmUserEmailChange(id, account.Revision, digest)
+	require.NoError(t, err)
+	srv.App.Change(c)
+
+	profileID := owner.TailscaleUserProfile().ID
+
+	for _, client := range []*servertest.TestClient{ownerClient, peerClient} {
+		client.WaitForCondition(t, "confirmed email profile", 5*time.Second, func(nm *netmap.NetworkMap) bool {
+			profile, ok := nm.UserProfiles[profileID]
+			return ok && profile.LoginName() == "confirmed@example.test"
+		})
+	}
+
+	late := servertest.NewClient(t, srv, "email-late", servertest.WithUser(peer))
+	late.WaitForCondition(t, "confirmed email on join", 5*time.Second, func(nm *netmap.NetworkMap) bool {
+		profile, ok := nm.UserProfiles[profileID]
+		return ok && profile.LoginName() == "confirmed@example.test"
+	})
+}

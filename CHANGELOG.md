@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## Meshora (unreleased)
+
+- Keep verified email changes, cached node/credential profiles and connected client profiles in sync with serialized user updates. Preserve UID, single-use proof and session revocation.
+
 ## Meshora v0.2.3-rc.2 (2026-11-11)
 
 - Integrate reviewed upstream hardening for OIDC identity, registration sessions, API request limits, OAuth tag grants, device ownership, expiry persistence and policy activation.

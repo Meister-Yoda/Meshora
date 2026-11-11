@@ -18,24 +18,20 @@ func (s *State) CancelUserEmailChange(id types.UserID, digest string) error {
 }
 
 func (s *State) ConfirmUserEmailChange(id types.UserID, revision uint64, digest string) (change.Change, error) {
+	s.userUpdateMu.Lock()
+	defer s.userUpdateMu.Unlock()
+
+	previous, err := s.db.GetUserByID(id)
+	if err != nil {
+		return change.Change{}, err
+	}
+
 	user, err := s.db.ConfirmUserEmailChange(id, revision, digest)
 	if err != nil {
 		return change.Change{}, err
 	}
 
-	updates := map[types.NodeID]UpdateNodeFunc{}
-
-	for _, node := range s.ListNodesByUser(id).All() {
-		if !node.IsTagged() {
-			updates[node.ID()] = func(n *types.Node) { n.User = user }
-		}
-	}
-
-	if len(updates) > 0 {
-		s.nodeStore.UpdateNodes(updates)
-	}
-
-	return s.updatePolicyManagerUsers()
+	return s.refreshUpdatedUser(*previous, user)
 }
 
 func (s *State) SetUserEmailChangeBlocked(actor, target types.UserID, revision uint64, blocked bool) error {
