@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## Meshora v0.2.3-rc.2 (2026-11-11)
+
+- Integrate reviewed upstream hardening for OIDC identity, registration sessions, API request limits, OAuth tag grants, device ownership, expiry persistence and policy activation.
+- Add opt-in device HTTPS certificates, authenticated Noise DNS challenges, six DNS providers and provider-secret files; keep certificate features disabled by default.
+- Replace server autocert with CertMagic, preserving legacy configuration and adding DNS-01, persistent certificate maintenance and safe manual certificate reload on SIGHUP.
+- Keep ACME retries on the configured CA and retain the previous certificate when a manual reload or renewal fails.
+- Validate logical network zones and restricted exits with real local Tailscale clients and positive/negative IPv4/IPv6 traffic. This does not validate the separate unfinished exit Compose companion.
+- Wait for the first client netmap before reporting a server-test client ready; remove local source paths from release build traces.
+- **Upgrade:** Back up configuration, database and ACME cache. The autocert cache is preserved but not imported; CertMagic initially obtains a new account/certificate. Persist its cache and account for CA issuance limits. No new database migration in RC.2.
+- **Validation limits:** Public DNS-provider/CA issuance and tailscale cert/serve acceptance remain open. Local ACME uses Pebble; Nix full build remains unverified. Existing RC.1 migration and upgrade requirements still apply.
+- Publish versioned AMD64/ARM64 images and advance RC; leave stable latest on v0.2.2.
+
 ## Meshora v0.2.3-rc.1 (2026-10-30)
 
 - Add guarded test-mail delivery using saved SMTP/JMAP settings.

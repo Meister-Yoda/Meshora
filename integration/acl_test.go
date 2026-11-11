@@ -3,6 +3,7 @@ package integration
 import (
 	"fmt"
 	"net/netip"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"github.com/juanfont/headscale/integration/integrationutil"
 	"github.com/juanfont/headscale/integration/tsic"
 	"github.com/ory/dockertest/v3"
+	"github.com/ory/dockertest/v3/docker"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"tailscale.com/tailcfg"
@@ -3597,4 +3599,343 @@ func TestACLDynamicUnknownUserRemoval(t *testing.T) {
 
 	t.Log("Step 3: PASSED - connectivity maintained after removing unknown user")
 	t.Log("Test PASSED: Removing unknown users from policy works correctly")
+}
+
+// TestNetworkZonesDataPlane exercises zone decisions in real tailscaled packet filters.
+func TestNetworkZonesDataPlane(t *testing.T) {
+	IntegrationSkip(t)
+
+	scenario, err := NewScenario(ScenarioSpec{
+		NodesPerUser: 2,
+		Users:        []string{"zone-alice", "zone-bob"},
+		Versions:     []string{"1.104"},
+	})
+
+	require.NoError(t, err)
+	defer scenario.ShutdownAssertNoPanics(t)
+
+	require.NoError(t, scenario.CreateHeadscaleEnv([]tsic.Option{
+		tsic.WithNetfilter("off"), tsic.WithPackages("curl"),
+		tsic.WithWebserver(80), tsic.WithDockerWorkdir("/"),
+	}, hsic.WithTestName("zone-data"), hsic.WithPolicyMode(types.PolicyModeDB)))
+
+	require.NoError(t, scenario.WaitForTailscaleSync())
+	headscale, err := scenario.Headscale()
+
+	require.NoError(t, err)
+	alice, err := scenario.ListTailscaleClients("zone-alice")
+
+	require.NoError(t, err)
+
+	require.Len(t, alice, 2)
+
+	bob, err := scenario.ListTailscaleClients("zone-bob")
+
+	require.NoError(t, err)
+
+	require.Len(t, bob, 2)
+
+	// Every denied endpoint is first proven reachable with the same live service.
+	probe := func(from, to TailscaleClient, allowed bool) {
+		t.Helper()
+
+		for _, ip := range []netip.Addr{to.MustIPv4(), to.MustIPv6()} {
+			url := fmt.Sprintf("http://%s/etc/hostname", netip.AddrPortFrom(ip, 80))
+			require.EventuallyWithT(t, func(c *assert.CollectT) {
+				body, err := from.Curl(url, tsic.WithCurlConnectionTimeout(time.Second),
+					tsic.WithCurlMaxTime(2*time.Second), tsic.WithCurlRetry(0))
+				if allowed {
+					assert.NoError(c, err)
+					assert.Equal(c, to.ContainerID()[:12]+"\n", body)
+				} else {
+					assert.Error(c, err)
+					assert.Empty(c, body)
+				}
+			}, integrationutil.PolicyPropagationTimeout, integrationutil.SlowPoll,
+				"%s -> %s allowed=%t", from.Hostname(), url, allowed)
+		}
+	}
+	for _, pair := range [][2]TailscaleClient{
+		{alice[0], bob[0]},
+		{alice[1], bob[0]},
+		{bob[0], alice[0]},
+		{bob[0], bob[1]},
+		{alice[0], alice[1]},
+	} {
+		probe(pair[0], pair[1], true)
+	}
+
+	model := &types.NetworkZones{Zones: []types.NetworkZone{
+		{ID: "clients", Name: "Clients", Users: []types.UserID{types.UserID(mustParseID(strconv.FormatInt(int64(alice[0].MustStatus().Self.UserID), 10)))}},
+		{ID: "servers", Name: "Servers", Users: []types.UserID{types.UserID(mustParseID(strconv.FormatInt(int64(bob[0].MustStatus().Self.UserID), 10)))}},
+		{ID: "isolated", Name: "Isolated", Nodes: []types.NodeID{types.NodeID(mustParseID(string(alice[1].MustStatus().Self.ID)))}},
+	}, Links: []types.ZoneLink{{From: "clients", To: "servers", Services: []string{"tcp:80"}}}}
+	pol := &policyv2.Policy{NetworkZones: model}
+
+	require.NoError(t, headscale.SetPolicy(pol))
+	t.Log("Directed service permission, explicit device override and same-zone default deny")
+	probe(alice[0], bob[0], true)
+	probe(alice[1], bob[0], false)
+	probe(bob[0], alice[0], false)
+	probe(bob[0], bob[1], false)
+	probe(alice[0], alice[1], false)
+
+	t.Log("Changing the permitted port revokes the previously reachable service")
+
+	model.Links[0].Services = []string{"tcp:81"}
+
+	require.NoError(t, headscale.SetPolicy(pol))
+	probe(alice[0], bob[0], false)
+
+	model.Links[0].Services = []string{"tcp:80"}
+
+	require.NoError(t, headscale.SetPolicy(pol))
+	probe(alice[0], bob[0], true)
+
+	t.Log("Removing the connection revokes both IP families; restoring it restores traffic")
+
+	model.Links = nil
+
+	require.NoError(t, headscale.SetPolicy(pol))
+	probe(alice[0], bob[0], false)
+
+	model.Links = []types.ZoneLink{{From: "clients", To: "servers", Services: []string{"tcp:80"}}}
+
+	require.NoError(t, headscale.SetPolicy(pol))
+	probe(alice[0], bob[0], true)
+
+	t.Log("Hidden personal zones permit same-owner devices and isolate other users")
+
+	pol.NetworkZones = &types.NetworkZones{Zones: []types.NetworkZone{}}
+
+	require.NoError(t, headscale.SetPolicy(pol))
+	probe(alice[0], alice[1], true)
+	probe(alice[0], bob[0], false)
+}
+
+// TestNetworkZonesExitDataPlane keeps the target subnet unapproved so successful
+// traffic must use the selected exit rather than a separately approved subnet.
+func TestNetworkZonesExitDataPlane(t *testing.T) {
+	IntegrationSkip(t)
+
+	scenario, err := NewScenario(ScenarioSpec{
+		NodesPerUser: 1,
+		Users:        []string{"zone-router", "zone-client"},
+		Versions:     []string{"1.104"},
+		Networks: map[string]NetworkSpec{
+			"exitnet":   {Users: []string{"zone-router"}, Subnet: "198.51.100.0/24"},
+			"clientnet": {Users: []string{"zone-client"}},
+		},
+		ExtraService: map[string][]extraServiceFunc{"exitnet": {Webservice}},
+	})
+
+	require.NoError(t, err)
+	defer scenario.ShutdownAssertNoPanics(t)
+
+	require.NoError(t, scenario.CreateHeadscaleEnv([]tsic.Option{tsic.WithPackages("curl")},
+		hsic.WithTestName("zone-exit-data"), hsic.WithPolicyMode(types.PolicyModeDB)))
+	require.NoError(t, scenario.WaitForTailscaleSync())
+	headscale, err := scenario.Headscale()
+
+	require.NoError(t, err)
+	routers, err := scenario.ListTailscaleClients("zone-router")
+
+	require.NoError(t, err)
+	require.Len(t, routers, 1)
+
+	clients, err := scenario.ListTailscaleClients("zone-client")
+
+	require.NoError(t, err)
+	require.Len(t, clients, 1)
+	router, client := routers[0], clients[0]
+	routerID := mustParseID(string(router.MustStatus().Self.ID))
+	clientID := types.NodeID(mustParseID(string(client.MustStatus().Self.ID)))
+	userID := types.UserID(mustParseID(strconv.FormatInt(int64(client.MustStatus().Self.UserID), 10)))
+	// Separate public IPv6 target, with an explicit return route for kernels
+	// without IPv6 NAT. Neither target subnet is approved on the control server.
+	v6Prefix := "2001:db8:" + router.Hostname()[len(router.Hostname())-4:] + "::/64"
+	router6 := strings.TrimSuffix(v6Prefix, "/64") + "2"
+	target6 := strings.TrimSuffix(v6Prefix, "/64") + "3"
+	v6net, err := scenario.pool.CreateNetwork("zone-v6-"+router.Hostname(), func(opts *docker.CreateNetworkOptions) {
+		opts.EnableIPv6 = true
+		opts.IPAM = &docker.IPAMOptions{Config: []docker.IPAMConfig{{Subnet: v6Prefix}}}
+	})
+
+	require.NoError(t, err)
+
+	scenario.networks[v6net.Network.Name] = v6net
+	targets, err := scenario.Services("exitnet")
+
+	require.NoError(t, err)
+	require.Len(t, targets, 1)
+
+	for _, endpoint := range []struct{ container, ip string }{
+		{router.ContainerID(), router6}, {targets[0].Container.ID, target6},
+	} {
+		require.NoError(t, scenario.pool.Client.ConnectNetwork(v6net.Network.ID, docker.NetworkConnectionOptions{
+			Container:      endpoint.container,
+			EndpointConfig: &docker.EndpointConfig{IPAMConfig: &docker.EndpointIPAMConfig{IPv6Address: endpoint.ip}},
+		}))
+	}
+	// Only the disposable target's route setup needs this exec capability;
+	// neither the target service nor the Meshora server runs privileged.
+	setup, err := scenario.pool.Client.CreateExec(docker.CreateExecOptions{
+		Container: targets[0].Container.ID, Privileged: true,
+		Cmd: []string{"ip", "-6", "route", "replace", "fd7a:115c:a1e0::/48", "via", router6},
+	})
+
+	require.NoError(t, err)
+	require.NoError(t, scenario.pool.Client.StartExec(setup.ID, docker.StartExecOptions{}))
+	setupResult, err := scenario.pool.Client.InspectExec(setup.ID)
+
+	require.NoError(t, err)
+	require.Equal(t, 0, setupResult.ExitCode)
+
+	// Client containers do not enable IPv6 forwarding automatically.
+	_, _, err = router.Execute([]string{"sysctl", "-w", "net.ipv6.conf.all.forwarding=1"})
+
+	require.NoError(t, err)
+
+	route, err := scenario.SubnetOfNetwork("exitnet")
+
+	require.NoError(t, err)
+	_, _, err = router.Execute([]string{"tailscale", "set", "--advertise-exit-node", "--advertise-routes=" + route.String() + "," + v6Prefix})
+
+	require.NoError(t, err)
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		nodes, err := headscale.ListNodes()
+		if !assert.NoError(c, err) {
+			return
+		}
+
+		for _, node := range nodes {
+			if node.Id == strconv.FormatUint(routerID, 10) {
+				requireNodeRouteCountWithCollect(c, node, 4, 0, 0)
+
+				return
+			}
+		}
+
+		assert.Fail(c, "router missing")
+	}, integrationutil.PolicyPropagationTimeout, integrationutil.SlowPoll, "exit advertisements received")
+
+	model := &types.NetworkZones{Zones: []types.NetworkZone{
+		{ID: "clients", Name: "Clients", Users: []types.UserID{userID}, Exits: []string{"tag:zone-exit"}},
+		{ID: "providers", Name: "Providers", Nodes: []types.NodeID{types.NodeID(routerID)}},
+	}}
+	pol := &policyv2.Policy{
+		NetworkZones: model,
+		TagOwners:    policyv2.TagOwners{policyv2.Tag("tag:zone-exit"): policyv2.Owners{}},
+	}
+
+	require.NoError(t, headscale.SetPolicy(pol))
+	require.NoError(t, headscale.SetNodeTags(routerID, []string{"tag:zone-exit"}))
+
+	defaults := []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0"), netip.MustParsePrefix("::/0")}
+	_, err = headscale.ApproveRoutes(routerID, defaults)
+
+	require.NoError(t, err)
+
+	checkRoutes := func(allowed bool) {
+		t.Helper()
+
+		require.EventuallyWithT(t, func(c *assert.CollectT) {
+			status, err := client.Status()
+			if !assert.NoError(c, err) {
+				return
+			}
+
+			for _, peer := range status.Peer {
+				if string(peer.ID) == strconv.FormatUint(routerID, 10) {
+					if allowed {
+						requirePeerSubnetRoutesWithCollect(c, peer, defaults)
+					} else {
+						requirePeerSubnetRoutesWithCollect(c, peer, nil)
+					}
+
+					return
+				}
+			}
+
+			assert.False(c, allowed, "allowed exit must be present")
+		}, integrationutil.PolicyPropagationTimeout, integrationutil.SlowPoll, "exit routes allowed=%t", allowed)
+	}
+	checkRoutes(true)
+
+	_, _, err = client.Execute([]string{"tailscale", "set", "--exit-node=" + router.Hostname()})
+
+	require.NoError(t, err)
+	network, err := scenario.Network("exitnet")
+
+	require.NoError(t, err)
+	services, err := scenario.Services("exitnet")
+
+	require.NoError(t, err)
+	require.Len(t, services, 1)
+	web := services[0]
+	url := fmt.Sprintf("http://%s/etc/hostname", web.GetIPInNetwork(network))
+	probe := func(allowed bool) {
+		t.Helper()
+
+		for _, url := range []string{url, "http://[" + target6 + "]/etc/hostname"} {
+			require.EventuallyWithT(t, func(c *assert.CollectT) {
+				body, err := client.Curl(url, tsic.WithCurlConnectionTimeout(time.Second), tsic.WithCurlMaxTime(2*time.Second), tsic.WithCurlRetry(0))
+				if allowed {
+					assert.NoError(c, err)
+					assert.Equal(c, web.Container.ID[:12]+"\n", body)
+				} else {
+					assert.Error(c, err)
+					assert.Empty(c, body)
+				}
+			}, integrationutil.PolicyPropagationTimeout, integrationutil.SlowPoll, "exit traffic allowed=%t", allowed)
+		}
+	}
+	probe(true)
+
+	for _, limit := range []types.ZoneExitLimit{{User: userID, Exits: []string{}}, {Node: clientID, Exits: []string{}}} {
+		model.ExitLimits = []types.ZoneExitLimit{limit}
+
+		require.NoError(t, headscale.SetPolicy(pol))
+		checkRoutes(false)
+		probe(false)
+
+		model.ExitLimits = nil
+
+		require.NoError(t, headscale.SetPolicy(pol))
+		checkRoutes(true)
+		probe(true)
+	}
+
+	// A locked zone deny wins over an explicit user allow for own exits.
+
+	model.Zones[0].Exits = nil
+
+	model.Zones[0].Nodes = []types.NodeID{types.NodeID(routerID)}
+
+	model.Zones = model.Zones[:1]
+
+	model.Zones[0].OwnExits = &types.OwnExitRule{Mode: "allow", Services: []string{"tcp:80"}}
+
+	require.NoError(t, headscale.SetPolicy(pol))
+	probe(true)
+
+	model.Zones[0].OwnExits = &types.OwnExitRule{Mode: "deny", Locked: true}
+
+	model.OwnExitOverrides = []types.OwnExitOverride{{User: userID, Rule: types.OwnExitRule{Mode: "allow", Services: []string{"*"}}}}
+
+	require.NoError(t, headscale.SetPolicy(pol))
+	probe(false)
+
+	model.Zones[0].OwnExits = &types.OwnExitRule{Mode: "allow", Services: []string{"tcp:80"}}
+
+	model.OwnExitOverrides = nil
+
+	require.NoError(t, headscale.SetPolicy(pol))
+	probe(true)
+
+	_, err = headscale.ApproveRoutes(routerID, nil)
+
+	require.NoError(t, err)
+	checkRoutes(false)
+	probe(false)
 }

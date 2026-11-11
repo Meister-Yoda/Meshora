@@ -34,7 +34,7 @@ func advertiseAndApproveRoute(
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	_ = c.Direct().SendUpdate(ctx)
+	require.NoError(t, c.Direct().SendUpdate(ctx))
 
 	nodeID := findNodeID(t, srv, c.Name)
 

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	hscontrol "github.com/juanfont/headscale/hscontrol"
+	hsdns "github.com/juanfont/headscale/hscontrol/dns"
 	"github.com/juanfont/headscale/hscontrol/state"
 	"github.com/juanfont/headscale/hscontrol/types"
 	"tailscale.com/net/memnet"
@@ -39,6 +40,7 @@ type TestServer struct {
 type ServerOption func(*serverConfig)
 
 type serverConfig struct {
+	certProvider          hsdns.Provider
 	batchDelay            time.Duration
 	bufferedChanSize      int
 	ephemeralTimeout      time.Duration
@@ -51,6 +53,12 @@ type serverConfig struct {
 	realListener          bool
 	magicDNSDomain        string
 	dnsResolvers          []string
+}
+
+// WithCertificates enables node challenges with a test provider.
+// Propagation checks stay off because this provider is not public DNS.
+func WithCertificates(provider hsdns.Provider) ServerOption {
+	return func(c *serverConfig) { c.certProvider = provider }
 }
 
 func defaultServerConfig() *serverConfig {
@@ -198,6 +206,12 @@ func NewServer(tb testing.TB, opts ...ServerOption) *TestServer {
 
 	for _, addr := range sc.dnsResolvers {
 		cfg.TailcfgDNSConfig.Resolvers = append(cfg.TailcfgDNSConfig.Resolvers, &dnstype.Resolver{Addr: addr})
+	}
+
+	if sc.certProvider != nil {
+		cfg.DNSConfig.MagicDNS = true
+		cfg.DNSConfig.Certificates = types.CertificatesConfig{Enabled: true, Zone: cfg.BaseDomain}
+		cfg.DNSChallenge.Provider = sc.certProvider
 	}
 
 	app, err := hscontrol.NewHeadscale(&cfg)

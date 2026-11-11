@@ -2,13 +2,17 @@ package servertest_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"fmt"
 	"math/rand/v2"
 	"net/netip"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/juanfont/headscale/hscontrol/dns/dnstest"
 	"github.com/juanfont/headscale/hscontrol/servertest"
 	"github.com/juanfont/headscale/hscontrol/types"
 	"github.com/juanfont/headscale/hscontrol/types/change"
@@ -16,6 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"tailscale.com/control/controlclient"
 	"tailscale.com/tailcfg"
+	"tailscale.com/tailcfg/nodecap"
 	"tailscale.com/types/netmap"
 )
 
@@ -23,6 +28,30 @@ import (
 // connecting, seeing peers, joining mid-session, departing, and
 // reconnecting.
 func TestConnectionLifecycle(t *testing.T) {
+	t.Run("new_client_returns_with_first_map_queued", func(t *testing.T) {
+		t.Parallel()
+
+		for _, noHistory := range []bool{false, true} {
+			t.Run(fmt.Sprintf("no_history=%v", noHistory), func(t *testing.T) {
+				t.Parallel()
+				srv := servertest.NewServer(t)
+
+				var opts []servertest.ClientOption
+				if noHistory {
+					opts = append(opts, servertest.WithoutNetmapHistory())
+				}
+
+				client := servertest.NewClient(t, srv, "first-map", opts...)
+				initial := client.Netmap()
+				require.NotNil(t, initial, "constructor must return with a delivered map")
+				queued := client.WaitForUpdate(t, time.Second)
+				require.NotNil(t, queued, "constructor must not consume the first map")
+				require.Equal(t, initial.SelfNode.ID(), queued.SelfNode.ID())
+				client.Reconnect(t)
+				require.NotNil(t, client.WaitForUpdate(t, 10*time.Second))
+			})
+		}
+	})
 	t.Parallel()
 
 	t.Run("single_node", func(t *testing.T) {
@@ -668,4 +697,73 @@ func TestServerStateCleanup(t *testing.T) {
 	database, err := srv.State().DB().DB.DB()
 	require.NoError(t, err)
 	require.ErrorContains(t, database.Ping(), "database is closed")
+}
+
+func TestSetDNS(t *testing.T) {
+	t.Parallel()
+
+	const domain = "ts.example.com"
+
+	provider := &dnstest.Provider{}
+	srv := servertest.NewServer(t,
+		servertest.WithMagicDNS(domain),
+		servertest.WithCertificates(provider),
+	)
+	user := srv.CreateUser(t, "cert-user")
+
+	laptop := servertest.NewClient(t, srv, "laptop", servertest.WithUser(user))
+	desktop := servertest.NewClient(t, srv, "desktop", servertest.WithUser(user))
+
+	// Without the name in CertDomains the client refuses to run ACME, and
+	// without the https cap `tailscale serve` refuses HTTPS.
+	laptop.WaitForCondition(t, "cert domain and https cap", 10*time.Second,
+		func(nm *netmap.NetworkMap) bool {
+			return nm != nil &&
+				slices.Equal(nm.DNS.CertDomains, []string{"laptop." + domain}) &&
+				hasCap(nm, nodecap.HTTPS)
+		})
+
+	value := func(seed string) string {
+		sum := sha256.Sum256([]byte(seed))
+
+		return base64.RawURLEncoding.EncodeToString(sum[:])
+	}
+
+	nodeKey := func(c *servertest.TestClient) tailcfg.SetDNSRequest {
+		return tailcfg.SetDNSRequest{
+			NodeKey: c.Direct().GetPersist().PrivateNodeKey().Public(),
+			Type:    "TXT",
+		}
+	}
+
+	req := nodeKey(laptop)
+	req.Name = "_acme-challenge.laptop." + domain
+	req.Value = value("laptop")
+	require.NoError(t, laptop.Direct().SetDNS(t.Context(), &req))
+	assert.Equal(t, []string{value("laptop")}, provider.Values(req.Name+"."))
+
+	// desktop asks for laptop's challenge name with its own key.
+	req = nodeKey(desktop)
+	req.Name = "_acme-challenge.laptop." + domain
+	req.Value = value("desktop")
+	require.ErrorContains(t, desktop.Direct().SetDNS(t.Context(), &req), "403")
+
+	// desktop presents laptop's node key on its own Noise session.
+	req = nodeKey(laptop)
+	req.Name = "_acme-challenge.laptop." + domain
+	req.Value = value("forged")
+	require.ErrorContains(t, desktop.Direct().SetDNS(t.Context(), &req), "401")
+
+	assert.Len(t, provider.Calls(), 1, "rejected requests must not reach the DNS provider")
+
+	// The certificate name follows a rename, lowercased; the client only
+	// runs ACME for a name it finds in CertDomains.
+	_, renameChange, err := srv.State().RenameNode(findNodeID(t, srv, "laptop"), "NoteBook")
+	require.NoError(t, err)
+	srv.App.Change(renameChange)
+
+	laptop.WaitForCondition(t, "cert domain follows rename", 10*time.Second,
+		func(nm *netmap.NetworkMap) bool {
+			return nm != nil && slices.Equal(nm.DNS.CertDomains, []string{"notebook." + domain})
+		})
 }

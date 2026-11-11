@@ -256,7 +256,7 @@ tls_letsencrypt_hostname: ""
 tls_letsencrypt_cache_dir: /var/lib/headscale/cache
 
 # Type of ACME challenge to use, currently supported types:
-# HTTP-01 or TLS-ALPN-01
+# HTTP-01, TLS-ALPN-01, or DNS-01 (requires dns.challenge.provider)
 tls_letsencrypt_challenge_type: HTTP-01
 
 # When HTTP-01 challenge is chosen, letsencrypt must set up a
@@ -264,7 +264,21 @@ tls_letsencrypt_challenge_type: HTTP-01
 # :http = port 80
 tls_letsencrypt_listen: ":http"
 
+# Canonical keys also work, taking precedence over legacy keys above:
+# tls:
+#   acme:
+#     hostname: headscale.example.com
+#     challenge_type: DNS-01
+#     cache_dir: /var/lib/headscale/cache
+#     url: https://acme-v02.api.letsencrypt.org/directory
+#     email: admin@example.com
+# DNS-01 uses dns.challenge.provider; it does not enable device certificates.
+# Persist cache_dir; CertMagic uses its own subdirectories and preserves old
+# autocert files. The first start obtains a new certificate/account.
+
 ## Use already defined certificates:
+# Replace the certificate/key together, then send SIGHUP to reload.
+# Canonical names: tls.cert_path and tls.key_path.
 tls_cert_path: ""
 tls_key_path: ""
 

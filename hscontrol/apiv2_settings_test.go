@@ -54,16 +54,21 @@ func TestAPIv2SettingsComputedFields(t *testing.T) {
 			cfg:  types.Config{},
 		},
 		{
-			name:      "https via cert path",
-			cfg:       types.Config{TLS: types.TLSConfig{CertPath: "/x/cert.pem"}},
+			name:      "node certificates behind HTTP proxy",
+			cfg:       types.Config{DNSConfig: types.DNSConfig{Certificates: types.CertificatesConfig{Enabled: true}}},
 			wantHTTPS: true,
 		},
 		{
-			name: "https via letsencrypt",
+			name:      "server cert path does not enable node HTTPS",
+			cfg:       types.Config{TLS: types.TLSConfig{CertPath: "/x/cert.pem"}},
+			wantHTTPS: false,
+		},
+		{
+			name: "server ACME does not enable node HTTPS",
 			cfg: types.Config{
 				TLS: types.TLSConfig{LetsEncrypt: types.LetsEncryptConfig{Hostname: "hs.example.com"}},
 			},
-			wantHTTPS: true,
+			wantHTTPS: false,
 		},
 		{
 			name:                "key duration 7d",
@@ -118,7 +123,7 @@ func TestAPIv2SettingsConstantOffFields(t *testing.T) {
 	want := apiv2.TailnetSettings{
 		ACLsExternallyManagedOn:                true,
 		DevicesKeyDurationDays:                 90,
-		HTTPSEnabled:                           true,
+		HTTPSEnabled:                           false,
 		UsersRoleAllowedToJoinExternalTailnets: "none",
 	}
 	if diff := cmp.Diff(want, s); diff != "" {

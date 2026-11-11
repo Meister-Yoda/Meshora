@@ -72,7 +72,7 @@ func registerSettings(api huma.API, b Backend) {
 			// File-mode policy is genuinely externally managed (read-only via API).
 			ACLsExternallyManagedOn:                cfg.Policy.Mode == types.PolicyModeFile,
 			DevicesKeyDurationDays:                 int(cfg.Node.Expiry / (24 * time.Hour)),
-			HTTPSEnabled:                           cfg.TLS.CertPath != "" || cfg.TLS.LetsEncrypt.Hostname != "",
+			HTTPSEnabled:                           cfg.DNSConfig.Certificates.Enabled,
 			UsersRoleAllowedToJoinExternalTailnets: "none",
 		}}, nil
 	})

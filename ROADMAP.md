@@ -1,6 +1,6 @@
 # Meshora Roadmap
 
-Stand: 8. November 2026.
+Stand: 11. November 2026.
 
 Diese Datei ist die zentrale Liste unserer Vorhaben. Neue vereinbarte Funktionen,
 Verbesserungen und offene Folgearbeiten werden hier ergänzt. Detailkonzepte werden
@@ -19,7 +19,7 @@ verlinkt. Die Reihenfolge ist eine Priorisierung, keine Terminzusage.
 
 ### Container-Basis reproduzierbar absichern
 
-**Status:** In Arbeit · **Priorität:** Hoch
+**Status:** Erledigt · **Priorität:** Hoch
 
 Geprüfte Distroless-Basisimages für reguläre und Debug-Images per Digest pinnen:
 `Dockerfile.meshora` und `.goreleaser.yml`. Das bereinigte CA-Zertifikatsbundle
@@ -27,15 +27,14 @@ von Headscale 0.29.6 berücksichtigen und den tatsächlichen Image-Inhalt prüfe
 
 **Arbeitsstand:** Pins, vier CA-Bundles, Multiarch-Builds, ELF-Architekturen
 und AMD64-Start geprueft. TARGETARCH-Vorbelegung korrigiert.
-**Naechster Schritt:** ARM64-Laufzeitstart auf geeigneter Hardware oder Emulation
-nachholen; Details unter Abschnitt 4.
+**Abschluss am 10. November 2026:** Regulaeres und Debug-ARM64-Image aus dem aktuellen Quellstand unter QEMU 8.2.2 gestartet. Versionsausgabe (linux/arm64), SQLite-Start, HTTP-Healthcheck, Setup-Seite und sauberes Beenden mit Exitcode 0 bestanden. Emulation ersetzt keine Hardware- oder Datenpfadabnahme. Keine Veroeffentlichung; Details unter Abschnitt 4.
 **Abnahme:** Nachvollziehbare Pins, geprüftes CA-Bundle und erfolgreiche Builds
 sowie Startprüfungen für AMD64 und ARM64. Veröffentlichung im jeweiligen
 Release-Auftrag.
 
 ### Zonen, Exits und Kontosicherheit abschließend abnehmen
 
-**Status:** Geplant · **Priorität:** Hoch
+**Status:** Erledigt (lokale Abnahme am 10. November 2026) · **Priorität:** Hoch
 
 - Zonenverkehr mit echten Clients prüfen: erlaubte und verbotene Verbindungen,
   Benutzer-/Geräteausnahmen, verbindliche Sperren, IPv4 und IPv6.
@@ -44,29 +43,35 @@ Release-Auftrag.
 - Aktuellen Arbeitsstand für gemeinsame Konten, OIDC, Zwei-Faktor-Anmeldung und
   Passkeys prüfen; offene Fehler vor dem nächsten Release beheben.
 
-**Nächster Schritt:** Vorhandene Änderungen und Abnahmeberichte zusammenführen,
-verbleibende Prüfungen festlegen. Pakettests ersetzen keine Datenpfad-Abnahme.
+**Nachweis:** Zwei neue dauerhafte Docker-Regressionstests mit echten Tailscale-1.104-Clients bestanden: gerichtete Zonenfreigaben, Benutzervererbung/Geraetevorrang, standardmaessige Sperren, Portwechsel, Widerruf und Wiederherstellung; ausserdem echter IPv4-/IPv6-Exit-Verkehr, Benutzer-/Geraetebeschraenkungen und verbindliche Zonensperre trotz Benutzerfreigabe. Beide Default-Routen gemeinsam geprueft; Ziel-Subnetze bleiben ungenehmigt. Drei vorhandene Subnetz-/Exit-Tests, vollstaendige webui/templates/db/types-Pakete, gezielte WebUI-Race-Pruefungen und Diff-Lint (0 Befunde) bestanden. CI-Matrix um beide Tests erweitert. Details und Grenzen in [Abnahmebericht](docs/ref/debug.md#meshora-zone-exit-and-account-acceptance--2026-11-10).
 **Abnahme:** Die festgelegten Prüfungen sind bestanden und ihre Grenzen dokumentiert.
+
+**Grenzen:** Isolierte lokale Datenpfad-/HTTP-Abnahme; kein neuer produktiver Authentik- oder Mailanbieter-Test, keine oeffentliche Internet-/Hardware-Abnahme und keine Abnahme des noch geplanten integrierten Server-Exits. Der separate Upstream-Abgleich in Abschnitt 15 bleibt in Arbeit. Kein Push oder Release.
 
 ## 2. Headscale gezielt weiter übernehmen
 
 ### Upstream regelmäßig bewerten
 
-**Status:** Geplant · **Priorität:** Mittel
+**Status:** Aktueller Abgleich erledigt (10. November 2026); wiederkehrende Aufgabe · **Priorität:** Mittel
 
 Bei künftigen Upstream-Prüfungen Sicherheits-, Stabilitäts- und Leistungsänderungen
 mit Meshora vergleichen. Bereits übernommene Änderungen erkennen, eigene Funktionen
 erhalten und sinnvolle neue Arbeitspakete hier aufnehmen.
 
-**Ausgangsstand:** Headscale `main` bis `2d220b2e` vom 24. Oktober 2026 geprüft.
-Wesentliche Kernfixes sind bereits in Meshora `acdcc420` enthalten. Die drei danach
-hinzugekommenen Upstream-Commits betreffen nur Release-Hinweise und Dokumentation.
-Daraus folgt kein weiterer funktionaler Merge-Auftrag. Eine automatische Überwachung
-ist damit nicht eingerichtet.
+**Aktueller Stand:** Headscale `main` live bis `7989fed78e8ac3c3ea4f12d8a2a423335a2f450f`
+(10. November 2026) abgerufen. Seit dem Review-Stand `48416ce0` aus Abschnitt 15
+kamen genau zwei Commits hinzu: `e49629eb` (Release-Builds mit `-trimpath`) und
+`7989fed7` (Testclients erst nach erster Netzwerkkarte bereit melden).
+Beide gezielt an Meshora angepasst und lokal validiert; Nachweise in Abschnitt 17.
+Die bereits erfassten groesseren Pakete aus Abschnitt 15/16 bleiben separat offen.
+
+**Historie:** Kernfixes bis zum damaligen Stand `30ff8df9` sind in `acdcc420`
+enthalten; Abgleich vom 27. Oktober bis `2d220b2e` und das umfangreiche Review
+vom 8. November bleiben dokumentiert. Keine automatische Ueberwachung eingerichtet.
 
 ### Knotenzertifikate, DNS-01 und CertMagic
 
-**Status:** In Prüfung · **Priorität:** Mittel
+**Status:** In Arbeit; Provider, Geraete-Challenges und Server-TLS lokal umgesetzt (11. November 2026) · **Priorität:** Mittel
 
 **Ziel:** `tailscale cert` und HTTPS mit `tailscale serve` ermöglichen; das
 zusammengehörige Upstream-Paket für DNS-Challenges und CertMagic bewerten.
@@ -77,7 +82,9 @@ zusammengehörige Upstream-Paket für DNS-Challenges und CertMagic bewerten.
 - Rückwärtskompatibilität, Meshora-Setup, Einstellungen und Reverse Proxy
   berücksichtigen; DNS-Zugangsdaten geschützt behandeln.
 
-**Nächster Schritt:** Integrationsumfang und Konfigurationsübergang ausarbeiten.
+**Plan:** [Integrationsumfang, Konfigurationsuebergang und Abnahme](docs/ref/tls.md#geplante-erweiterung-knotenzertifikate-dns-01-und-certmagic) gegen Headscale 7989fed7 ausgearbeitet. Server-TLS und Geraetezertifikate getrennt; Legacy-/Env-Konfiguration, Proxy-Betrieb, Namensschutz, Provider-Geheimnisse, Cache-Uebergang und Erneuerung erfasst. Provider-Grundlage, Geraete-Challenges und Server-TLS sind lokal integriert; Umsetzung und Nachweise siehe Abschnitt 18/19/20.
+
+**Nächster Schritt:** Schritt 4, reale DNS-Anbieter-/CA-Abnahme und HTTPS ueber tailscale cert/serve. Dafuer oeffentliche Testdomain, DNS-Anbieter und begrenzte Testzugangsdaten festlegen. Keine automatische Verwendung produktiver DNS-Zugangsdaten; danach Releasepruefungen aus Schritt 5.
 **Abnahme bei Umsetzung:** Ausstellung und Erneuerung mit echter DNS-01-Challenge,
 HTTPS über Serve und geprüftes Verhalten bei Fehlern sowie Neustarts.
 
@@ -918,3 +925,204 @@ vorhandene Ablaufzweige bleiben bei der Metadaten-Anpassung erhalten.
 - Noch offen: Bestaetigung von Mailaenderungen auf dieselben konsistenten
   Profil-/Credential-Aktualisierungen pruefen; anschliessend C/D-Pakete.
   Die gesamte Upstream-Liste ist weiterhin in Arbeit. Kein Push oder Release.
+
+### ARM64-Container-Abnahme abgeschlossen (10. November 2026)
+
+Der offene ARM64-Start aus Abschnitt 1 und 4 ist unter QEMU 8.2.2 bestanden.
+Beide Varianten aus dem Quellstand von aae667a9 mit den vorgefundenen lokalen
+Aenderungen wurden neu gebaut. Der temporaere Debug-Dockerfile verwendet
+unveraendert die gepinnte Debug-Basis aus .goreleaser.yml.
+
+- Versionsausgabe bestaetigt Go 1.27.3 und linux/arm64.
+- SQLite-Start, /health mit status=pass und setup_required=true sowie /setup
+  mit Meshora-Inhalt bestanden; Container-Dateisystem schreibgeschuetzt,
+  Testdaten ausschliesslich in temporaeren Dateisystemen.
+- Beide Testcontainer sauber beendet (Exitcode 0) und entfernt.
+- Emulator nur unter /tmp entpackt, keine globale binfmt-Registrierung.
+- Lokale Testimages: meshora-roadmap:arm64-20261110 und
+  meshora-roadmap:arm64-debug-20261110. Kein Push oder Release.
+
+Dies ergaenzt die dokumentierte AMD64-/CA-Abnahme vom 28. Oktober und ersetzt
+keine ARM64-Hardware-, eingerichtete Controlplane- oder Client-Datenpfadabnahme.
+Die aelteren Hinweise auf fehlende ARM64-Emulation beschreiben den damaligen Stand.
+## 17. Aktueller Upstream-Abgleich und kleine Uebernahmen (10. November 2026)
+
+**Status:** Erledigt und lokal validiert; unveroeffentlicht.
+
+Verglichen: letzter Review `48416ce0894ef7bef0ef9c064609b4aa76a0d9b6` gegen live
+abgerufenes Headscale `main` `7989fed78e8ac3c3ea4f12d8a2a423335a2f450f`.
+Meshora basiert auf `aae667a9` mit den vorhandenen lokalen Aenderungen.
+Im neuen Vergleichsbereich liegen genau diese zwei Commits:
+
+- [e49629eb](https://github.com/juanfont/headscale/commit/e49629ebf36cb360dcea1b83f10ffc78bc37c5e2):
+  `-trimpath` in den GoReleaser-Buildflags ergaenzt. Log-Aufrufstellen und
+  Stacktraces enthalten dadurch keine lokalen Checkout-Pfade des Builders.
+  Dockerfile.meshora hatte dieses Flag bereits.
+- [7989fed7](https://github.com/juanfont/headscale/commit/7989fed78e8ac3c3ea4f12d8a2a423335a2f450f):
+  first-map-Synchronisierung an den vorhandenen Meshora-Testclient angepasst.
+  NewClient wartet bis zur ersten Netzwerkkarte, ohne das Update zu konsumieren.
+  Fruehes Poll-Ende und 10-Sekunden-Timeout schlagen ausdruecklich fehl.
+  Bestehender Lifecycle-Test prueft sofortige Verfuegbarkeit, erhaltenes erstes
+  Update, Modus ohne Historie und Wiederverbindung. Der HA-Test wertet den bisher
+  ignorierten SendUpdate-Fehler aus. Upstream-Kommentare ueber Routerwahl nach
+  Sitzungsalter wurden nicht uebertragen: Diese groessere HA-Integration aus
+  Abschnitt 15 steht in Meshora noch aus.
+
+**Validierung:** Erster Regressionstest 4,110 s; breitere Auswahl aus Verbindungs-,
+Routen-, HA-, Scale-, Logout/Relogin- und Cleanup-Tests 94,900 s; gesamter
+TestConnectionLifecycle unter Race-Detector 17,731 s. Nach der letzten
+HA-Fehlerpruefung alle TestHAHealthProbe_-Faelle erneut gruen (16,632 s).
+Diff-Lint 0 Befunde, git diff --check gruen. CGO-freier Build mit -mod=readonly
+und -trimpath erfolgreich; go version -m bestaetigt -trimpath=true.
+GoReleaser-YAML geparst, beide Flags vorhanden. Kein kompletter Release-Lauf.
+Nachweise: control_logs/roadmap-20261110/upstream-*.log (gitignored).
+
+**Naechster Schritt:** Zertifikats-/DNS-01-/CertMagic-Paket gemaess Abschnitt 2
+konkret planen. Die unabhaengige Restarbeit aus Abschnitt 16, insbesondere
+Mailbestaetigung mit konsistenten Profil-/Credential-Updates und die groesseren
+C/D-Pakete, bleibt offen. Dieser kleine Abgleich schliesst sie nicht ab.
+Keine Abhaengigkeits- oder Migrationsaenderung, kein Commit, Push oder Release.
+
+
+## 18. Zertifikate: Konfigurations-/Provider-Grundlage (11. November 2026)
+
+**Status:** Lokal implementiert und validiert; Gesamtfunktion weiter in Arbeit.
+
+- Sechs DNS-Provider aus der geprueften Headscale-Endfassung 7989fed7
+  integriert, einschliesslich acme-dns-Schutz gegen Verdrangen laufender
+  Challenges und Schnittstelle fuer getrennte Registrierungen pro Name.
+- dns.challenge-Konfiguration mit Datei-/Env-Geheimnissen, validierten
+  Resolvern und Propagationszeit. Unbekannte Felder, leere Geheimnisse und
+  Wert-/Dateikonflikte abgelehnt; Decoderfehler redigiert.
+- Kanonische tls-Schluessel auf die bisherige TLS-Implementierung abgebildet;
+  alte Schluessel, Defaults und Env-Konfiguration bleiben unterstuetzt.
+- Debugdump verwendet JSON statt roher Go-Struktur und respektiert dadurch
+  Secret-Ausschluesse. Neue Providerobjekte werden nicht serialisiert.
+- Zertifikatsausstellung bleibt fail-closed: dns.certificates.enabled=true
+  wird abgelehnt, bis Challenge-Verwaltung und authentifizierter Handler
+  samt Mapper-Ankuendigung gemeinsam implementiert sind. Kein DNS-Schreiben
+  allein durch Konfigurationsladen, kein neuer UI-Providereditor.
+- Abhaengigkeiten gezielt ergaenzt, bestehende Versionen und gekoppelte Pins
+  erhalten; go mod tidy sowie Vendorhash-Update/-Check und Modulpruefung gruen.
+
+**Nachweise:** DNS-/Types-Pakettests bestanden; finale Race-Checks 4,395/1,225 s.
+Vollstaendige hscontrol-, webui- und templates-Tests 204,302/74,933/0,024 s gruen.
+Gesamtbuild erfolgreich; Diff-Lint 0 Befunde. Die urspruengliche acme-dns-
+Testfixture war von Systemzeit abhaengig; auf monotone Serversekunden
+umgestellt, unveraenderte Isolationserwartungen anschliessend bestanden.
+Details in [TLS-Dokumentation](docs/ref/tls.md#umsetzungsstand-konfigurations--und-provider-grundlage),
+Protokolle control_logs/roadmap-20261110/cert-*.log (gitignored).
+
+**Naechster Schritt:** Schritt 2 des Zertifikatsplans. CertMagic/Erneuerung,
+Nix-Gesamtbuild, echte DNS-Anbieter und ACME-Ausstellung bleiben offen.
+Keine Datenbankmigration, kein produktiver Eingriff, kein Commit/Push/Release.
+
+
+## 19. Zertifikate: Geraete-Challenges und Noise (11. November 2026)
+
+**Status:** Schritt 2 lokal implementiert und validiert; Gesamtfunktion in Arbeit.
+
+- Challenge-Verwaltung mit Propagationspruefung, zeitlicher Bereinigung,
+  Serialisierung der Provider-Aufrufe und vier Slots je Node integriert.
+  Wiederholungen halten vorhandene eigene Records am Leben; fremde TXT-Werte
+  werden nicht entfernt.
+- Nameserver-/CNAME-Pruefung aus der geprueften Endfassung 7989fed7 uebernommen.
+  Zusaetzlich werden wartende Propagationspruefungen beim Shutdown abgebrochen; weiterer
+  Zugriff wird verweigert. Limits und Kontextabbruch sind getestet.
+- Zertifikatsnamen ueber NodeView auf eigenen zulassigen FQDN beschraenkt;
+  DNS-extra-records und acme-dns-Registrierungsisolation beruecksichtigt.
+  Mapper sendet CertDomains und HTTPS nur fuer berechtigte Namen.
+- Authentifizierter /machine/set-dns-Handler ueber Noise: NodeKey/MachineKey,
+  Ablauf, Recordname, TXT-Typ und Wertformat geprueft. Body-Limit und
+  nachfolgende JSON-Objekte getestet. Keine Provider-Schreibaktionen bei Ablehnung.
+- Die bisherige Aktivierungssperre aus Schritt 1 entfernt; Aktivierung verlangt
+  MagicDNS, passende Zone und Provider. Standard aus. v2-API httpsEnabled
+  korrigiert: meldet Geraetezertifikate statt Server-TLS.
+
+**Nachweise:** Vollstaendige hscontrol/webui/templates/types/mapper-Tests
+203,611/76,812/0,028/0,081/63,570 s bestanden. Race-Pruefungen dns/types/mapper
+4,969/1,255/64,516 s; Endpunkt-/Settings-Tests 3,900 s, echter Noise-Controlclient
+5,831 s. Lint 0 Befunde, Serverbuild, Module und Vendorhash gruen. Lokaler
+DNS-Provider und UDP-Nameserver; kein echter Anbieter-/ACME-Ausstellungsnachweis.
+Details in [TLS-Dokumentation](docs/ref/tls.md#umsetzungsstand-geraete-challenges-und-noise-endpunkt),
+Nachweise control_logs/roadmap-20261110/cert-challenges-*.log (gitignored).
+
+**Naechster Schritt:** Schritt 3, CertMagic fuer das Serverzertifikat. Echte
+CA-/DNS-Anbieterabnahme und vollstaendige Releasepruefungen folgen danach.
+Keine Datenbank-/Protoaenderung, kein produktiver Eingriff, Commit, Push oder Release.
+
+
+## 20. Zertifikate: Server-TLS mit CertMagic (11. November 2026)
+
+**Status:** Schritt 3 lokal implementiert und validiert; externe Gesamtabnahme bleibt offen.
+
+- CertMagic aus der geprueften Headscale-Endfassung 7989fed7 integriert.
+  HTTP-01/TLS-ALPN-01 erhalten, Server-DNS-01 mit vorhandenem Provider und
+  Propagationspruefung ergaenzt. Server-DNS-01 allein verlangt kein MagicDNS
+  und aktiviert keine Geraetezertifikate.
+- Bestehende und kanonische TLS-Schluessel, Env-Fallbacks und relative Pfade
+  bleiben unterstuetzt. Automatisches und manuelles Server-TLS bleiben exklusiv.
+  Neue Module gezielt gepinnt, gekoppelte Go-/SQLite-/Tailscale-Pins erhalten.
+- Zertifikatsverwaltung nach Listenerstart; Abbruch laufender Verwaltung und
+  idempotenter Cache-Stop beim Shutdown. ACME-HTTP-Listener auch bei spaeteren
+  Startfehlern geschlossen. Retries bleiben ausschliesslich bei der konfigurierten CA.
+- Manueller Zertifikats-Reload per SIGHUP vor optionaler ACL-Neuladung.
+  Atomarer Austausch auch fuer Clients ohne SNI. Ungueltige, unpassende,
+  abgelaufene und noch nicht gueltige Ersatzdateien belassen das bisherige Paar.
+- ACME-Logging ueber zerolog-Adapter; alte autocert-Transporthuelle entfernt.
+  Persistenter CertMagic-Speicher ersetzt nicht das autocert-Format: alte
+  Dateien bleiben erhalten; erste Ausstellung/Accountregistrierung erfolgt neu.
+  Cache sichern und CA-Limits vor dem Umstieg beruecksichtigen.
+- Beispielkonfiguration und TLS-Betriebsdokumentation aktualisiert.
+
+**Lokale Abnahme:** Pebble stellt Zertifikate mit HTTP-01, TLS-ALPN-01 und
+DNS-01 aus; TLS-Clients pruefen CA-Kette und Hostnamen. Fehler/Retry prueft
+CA-Bindung. Erzwungene Erneuerung bei DNS-Ausfall behaelt das alte Zertifikat;
+anschliessende erfolgreiche Erneuerung und Neustart laden das neue aus dem
+Speicher ohne erneuten DNS-Write. Alte autocert-Datei bleibt bestehen.
+Manueller Reload einschliesslich paralleler Handshakes getestet. Kein
+ueber Wochen beobachteter Erneuerungszyklus und kein echter DNS-Anbieter.
+
+**Nachweise:** TLS-/Types-/Logger-Race-Tests 4,223/1,037/1,030 s,
+finaler Erneuerungs-Race-Test mit DNS-Ausfall 2,294 s, echter Noise-Client
+4,593 s. Build und Versionsstart erfolgreich; Module, Vendorhash und
+Diff-Lint (0 Befunde) gruen. Vollstaendige Serverregression 267,861 s,
+Types/Logger/WebUI/Templates ebenfalls bestanden. Finale Race-Pruefung von
+Erneuerung und beiden Logoutfaellen 6,536 s gruen.
+
+**Pruefhinweise:** Pebble 2.10.1 findet ARI-Ersatzorders bei Seriennummern mit
+DER-Vorzeichenbyte nicht. Nur die lokale Erneuerungsfixture deaktiviert ARI;
+produktives ARI bleibt aktiv. Ein erster Gesamtlauf meldete ausserdem zwei
+Logout-Ablaufassertionen (TestTaggedNodeLogoutExpiresIt und
+TestWebFlowReauthDifferentUser). Isolierte Tests, Race-Lauf und finaler
+Gesamtlauf bestanden mit unveraenderten Erwartungen; die erste Ursache ist
+nicht abschliessend belegt. Assertions enthalten jetzt Ablauf-/Pruefzeiten,
+damit ein erneutes Auftreten eingegrenzt werden kann.
+Protokolle control_logs/roadmap-20261110/cert-server-*.log (gitignored).
+Details in [TLS-Dokumentation](docs/ref/tls.md#umsetzungsstand-server-tls-mit-certmagic).
+
+**Naechster Schritt:** Oeffentliche Testdomain und begrenzten DNS-Anbieterzugang
+fuer Schritt 4 festlegen; echte Ausstellung/Erneuerung, cert/serve und
+Record-Bereinigung pruefen. Nix-Gesamtbuild, Container- und Releaseabnahme
+folgen in Schritt 5. Keine Datenbank-/Protoaenderung, kein produktiver
+DNS-Eingriff, Commit, Push oder Release.
+
+
+## 21. Naechster Release Candidate: v0.2.3-rc.2 (11. November 2026)
+
+**Status:** Veroeffentlichung vom Benutzer beauftragt; Releasepruefungen laufen.
+
+Der RC buendelt die abgeschlossenen lokalen Sicherheits-/Upstream-Arbeiten,
+Zonen-/Exit-Datenpfadabnahme und Zertifikatsschritte 1 bis 3. Die unabhaengig
+begonnene Exit-Compose-Erweiterung und der WireGuard-Gateway bleiben ausserhalb
+dieses Releases. Versionierter RC und Container-Tag RC werden aktualisiert;
+latest bleibt auf der stabilen v0.2.2.
+
+**Upgrade:** Datenbank, Konfiguration und ACME-Cache sichern; Cache-Uebergang
+mit neuer initialer CertMagic-Ausstellung beachten. Keine neue RC.2-Migration.
+Externe Zertifikatsabnahme und Nix-Gesamtbuild bleiben offen und sind keine
+durch die RC-Veroeffentlichung erfuellte Abnahme.
+
+**Danach:** Schritt 4 mit vereinbarter oeffentlicher Testdomain und begrenzten
+DNS-Zugangsdaten fortsetzen. Solange diese Angaben fehlen, unabhaengige
+Vorbereitung und verbleibende Release-/Roadmap-Arbeiten weiterfuehren.

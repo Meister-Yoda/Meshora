@@ -303,3 +303,77 @@ The separate documentation-site workflow built the docs successfully but
 could not push `gh-pages`: GitHub returned HTTP 403 for
 `github-actions[bot]`. This repository-permission/deployment follow-up
 remains open. No deployment settings or permissions were changed.
+
+## Meshora zone, exit and account acceptance — 2026-11-10
+
+Local acceptance of the current checkout based on `aae667a9`, on branch
+`codex/headscale-sync-2026-11-08`. Existing unrelated release/Compose changes
+were preserved. No production database, policy, identity provider or mail server
+was changed. No push or release was performed.
+
+Two regression tests were added to the existing `integration/acl_test.go` and
+registered by the documented workflow generator in the SQLite CI matrix.
+They run real Tailscale 1.104 daemons in disposable containers; these are
+packet-flow tests rather than synthetic filter evaluations.
+
+### Verified data paths
+
+- `TestNetworkZonesDataPlane`: four clients, two users, IPv4 and IPv6 HTTP.
+  Every endpoint expected to be denied is first proven reachable using the
+  same running service and exact target-container response. A directed TCP/80
+  rule permits the intended source; reverse initiation and same-zone access
+  without a rule are denied. Explicit device membership overrides inherited
+  user membership. Changing the permitted port, removing the link and restoring
+  it update actual traffic. Hidden personal zones allow same-owner devices and
+  isolate other users.
+- `TestNetworkZonesExitDataPlane`: a tagged router and client on separate
+  networks, with separate IPv4 and IPv6 HTTP targets. Only `0.0.0.0/0` and
+  `::/0` are approved; the advertised target subnets remain unapproved and are
+  absent from the client's allowed routes. Responses identify the exact target.
+  User and device exit restrictions each remove both default routes and stop
+  both traffic families; removing each restriction restores them. A locked
+  own-exit zone deny stops both traffic families despite an explicit user allow.
+  Restoring the zone permission restores traffic. Revoking route approval
+  removes both defaults and stops both traffic families again.
+- Existing `TestEnablingRoutes`, `TestEnablingExitRoutes` and
+  `TestSubnetRouterMultiNetworkExitNode` passed in a separate fresh run.
+
+The exit targets use `198.51.100.0/24` and a per-router `2001:db8:…::/64`
+documentation prefix on isolated Docker networks. They do not contact public
+Internet hosts. An earlier fixture used an RFC1918 destination; the actual
+`autogroup:internet` filter correctly excluded it, so that positive expectation
+was corrected without widening product permissions. The IPv6 fixture explicitly
+enables forwarding on the disposable router and adds a return route for
+`fd7a:115c:a1e0::/48` on the target, because this WSL kernel lacks IPv6 NAT.
+Only that target-route setup uses a privileged exec; neither the Meshora server
+nor the target HTTP service runs privileged. No host forwarding or global
+network setting is changed. IPv6 NAT itself is not covered.
+
+### Account and code checks
+
+Full `hscontrol/webui`, `hscontrol/templates`, `hscontrol/db` and
+`hscontrol/types` tests passed (75.356 s, 0.021 s, 6.848 s and 0.060 s).
+The WebUI suite includes local/OIDC login, TOTP, signed WebAuthn responses,
+account/session isolation and email-confirmation checks. Targeted race tests
+for OIDC, factors, account sessions, zone/exit management and route approval
+passed in 86.785 s. Diff lint reported zero issues; `git diff --check` passed.
+The generated matrix adds exactly the two new tests.
+
+The final clean-container dual-stack run is
+`control_logs/20261110-234956-89de84/`; both tests passed in 49.13 s and
+35.84 s and the runner cleaned its containers. Summaries are under
+`control_logs/roadmap-20261110/` (gitignored). The runner used the freshly built
+current server image `hs-zone-exit-data-86de82:latest` with the corrected
+precompiled tests, following the documented prebuilt-image procedure.
+Diagnostic runs and fixture corrections remain in the local logs; the final
+result does not depend on manual changes to running containers.
+
+### Limits
+
+This is local network and account-handler acceptance on one client version.
+It does not establish public-Internet connectivity, IPv6 NAT, real hardware,
+new production Authentik/mail delivery or browser/platform-authenticator
+compatibility. No new browser UI was changed. The proposed integrated Meshora
+server exit and the remaining upstream integration work retain their separate
+open status in the roadmap. This run is not a full repository-wide or
+PostgreSQL integration suite.

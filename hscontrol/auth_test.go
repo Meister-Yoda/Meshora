@@ -3243,7 +3243,7 @@ func TestWebFlowReauthDifferentUser(t *testing.T) {
 	// Verify node is expired
 	user1Node, found = app.state.GetNodesByMachineKeyAllUsers(machineKey.Public())[types.UserID(user1.ID)]
 	require.True(t, found, "Node should still exist after logout")
-	require.True(t, user1Node.IsExpired(), "Node should be expired after logout")
+	require.True(t, user1Node.IsExpired(), "Node should be expired after logout: expiry=%v now=%v", user1Node.Expiry(), time.Now())
 	t.Logf("✓ User1 node expired (logged out)")
 
 	// Step 3: Start interactive re-authentication (simulates "tailscale up")

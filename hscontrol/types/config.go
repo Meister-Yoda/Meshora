@@ -1,6 +1,7 @@
 package types
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
+	hsdns "github.com/juanfont/headscale/hscontrol/dns"
 	"github.com/juanfont/headscale/hscontrol/util"
 	"github.com/prometheus/common/model"
 	"github.com/rs/zerolog"
@@ -23,6 +25,7 @@ import (
 	"tailscale.com/net/tsaddr"
 	"tailscale.com/tailcfg"
 	"tailscale.com/types/dnstype"
+	"tailscale.com/util/dnsname"
 	"tailscale.com/util/set"
 )
 
@@ -31,6 +34,7 @@ const (
 	PKCEMethodS256  string = "S256"
 
 	defaultNodeStoreBatchSize = 100
+	dnsDocsURL                = "https://headscale.net/stable/ref/dns/"
 )
 
 var (
@@ -143,6 +147,8 @@ type Config struct {
 	// not directly converted into a [tailcfg.DNSConfig].
 	DNSConfig DNSConfig
 
+	DNSChallenge DNSChallengeConfig
+
 	// TailcfgDNSConfig is the tailcfg representation of the DNS configuration,
 	// it can be used directly when sending Netmaps to clients.
 	TailcfgDNSConfig *tailcfg.DNSConfig
@@ -167,6 +173,7 @@ type Config struct {
 }
 
 type DNSConfig struct {
+	Certificates     CertificatesConfig
 	MagicDNS         bool   `mapstructure:"magic_dns"`
 	BaseDomain       string `mapstructure:"base_domain"`
 	OverrideLocalDNS bool   `mapstructure:"override_local_dns"`
@@ -174,6 +181,20 @@ type DNSConfig struct {
 	SearchDomains    []string            `mapstructure:"search_domains"`
 	ExtraRecords     []tailcfg.DNSRecord `mapstructure:"extra_records"`
 	ExtraRecordsPath string              `mapstructure:"extra_records_path"`
+}
+
+// CertificatesConfig gates node certificates independently of server TLS.
+type CertificatesConfig struct {
+	Enabled bool
+	Zone    string
+}
+
+// DNSChallengeConfig holds a validated provider without serializing its credentials.
+type DNSChallengeConfig struct {
+	PropagationTimeout time.Duration
+	Resolvers          []string
+	ProviderName       string
+	Provider           hsdns.Provider `json:"-"`
 }
 
 type Nameservers struct {
@@ -282,6 +303,8 @@ type TLSConfig struct {
 }
 
 type LetsEncryptConfig struct {
+	URL           string
+	Email         string
 	Listen        string
 	Hostname      string
 	CacheDir      string
@@ -744,14 +767,14 @@ func validateServerConfigInto(v *configValidator) {
 		})
 	}
 
-	if (viper.GetString("tls_letsencrypt_hostname") != "") &&
-		((viper.GetString("tls_cert_path") != "") || (viper.GetString("tls_key_path") != "")) {
+	if (tlsKey("tls.acme.hostname") != "") &&
+		((tlsKey("tls.cert_path") != "") || (tlsKey("tls.key_path") != "")) {
 		v.Add(&ConfigError{
 			Reason:  "tls_letsencrypt_hostname and tls_cert_path/tls_key_path are mutually exclusive",
-			Current: []KV{{"tls_letsencrypt_hostname", viper.GetString("tls_letsencrypt_hostname")}},
+			Current: []KV{{"tls_letsencrypt_hostname", tlsKey("tls.acme.hostname")}},
 			ConflictsWith: []KV{
-				{"tls_cert_path", viper.GetString("tls_cert_path")},
-				{"tls_key_path", viper.GetString("tls_key_path")},
+				{"tls_cert_path", tlsKey("tls.cert_path")},
+				{"tls_key_path", tlsKey("tls.key_path")},
 			},
 			Hint: "choose one TLS strategy and unset the other (Let's Encrypt OR a static keypair)",
 			See:  "https://headscale.net/stable/ref/tls/",
@@ -766,8 +789,8 @@ func validateServerConfigInto(v *configValidator) {
 		})
 	}
 
-	if (viper.GetString("tls_letsencrypt_hostname") != "") &&
-		(viper.GetString("tls_letsencrypt_challenge_type") == TLSALPN01ChallengeType) &&
+	if (tlsKey("tls.acme.hostname") != "") &&
+		(tlsKey("tls.acme.challenge_type") == TLSALPN01ChallengeType) &&
 		(!strings.HasSuffix(viper.GetString("listen_addr"), ":443")) {
 		// this is only a warning because there could be something sitting in front of headscale that redirects the traffic (e.g. an iptables rule)
 		log.Warn().
@@ -776,11 +799,11 @@ func validateServerConfigInto(v *configValidator) {
 
 	validateListenerCollisions(v)
 
-	if ct := viper.GetString("tls_letsencrypt_challenge_type"); ct != HTTP01ChallengeType && ct != TLSALPN01ChallengeType {
+	if ct := tlsKey("tls.acme.challenge_type"); ct != HTTP01ChallengeType && ct != TLSALPN01ChallengeType && ct != DNS01ChallengeType {
 		v.Add(&ConfigError{
 			Reason:  "tls_letsencrypt_challenge_type has an unsupported value",
 			Current: []KV{{"tls_letsencrypt_challenge_type", ct}},
-			Allowed: []string{HTTP01ChallengeType, TLSALPN01ChallengeType},
+			Allowed: []string{HTTP01ChallengeType, TLSALPN01ChallengeType, DNS01ChallengeType},
 			Hint:    "pick one of the allowed values; HTTP-01 is the default",
 		})
 	}
@@ -875,6 +898,7 @@ func validateServerConfigInto(v *configValidator) {
 	validateDERPConfig(v)
 	validateDatabaseConfig(v)
 	validateMagicDNSConfig(v)
+	validateCertificatesConfig(v)
 
 	depr.Apply(v)
 }
@@ -949,21 +973,170 @@ func validateMagicDNSConfig(v *configValidator) {
 	}
 }
 
+// tlsKey preserves flat settings and their existing defaults. New nonempty
+// canonical settings take precedence, including environment overrides.
+func validateCertificatesConfig(v *configValidator) {
+	if timeout := viper.GetDuration("dns.challenge.propagation_timeout"); timeout < 0 {
+		v.Add(&ConfigError{
+			Reason:  "dns.challenge.propagation_timeout must not be negative",
+			Current: []KV{{"dns.challenge.propagation_timeout", timeout.String()}},
+			Hint:    "use 0 to skip waiting for the record on the zone's nameservers",
+		})
+	}
+
+	enabled := viper.GetBool("dns.certificates.enabled")
+
+	serverDNS01 := tlsKey("tls.acme.hostname") != "" && tlsKey("tls.acme.challenge_type") == DNS01ChallengeType
+
+	if (enabled || serverDNS01) && viper.GetString("dns.challenge.provider.name") == "" {
+		v.Add(&ConfigError{
+			Reason:  "DNS certificates or server DNS-01 require dns.challenge.provider",
+			Current: []KV{{"dns.certificates.enabled", enabled}, {"dns.magic_dns", viper.GetBool("dns.magic_dns")}},
+			Allowed: hsdns.ProviderNames(),
+			Hint:    "configure the DNS provider that hosts dns.base_domain or tls.acme.hostname under dns.challenge.provider",
+			See:     dnsDocsURL,
+		})
+	}
+
+	if !enabled {
+		return
+	}
+
+	if !viper.GetBool("dns.magic_dns") {
+		v.Add(&ConfigError{
+			Reason:  "dns.certificates requires dns.magic_dns",
+			Current: []KV{{"dns.certificates.enabled", true}, {"dns.magic_dns", false}},
+			Hint:    "certificates are issued for MagicDNS names; set dns.magic_dns: true",
+			See:     dnsDocsURL,
+		})
+	}
+
+	base := strings.TrimSuffix(viper.GetString("dns.base_domain"), ".")
+	if base != strings.ToLower(base) || dnsname.ValidHostname(base) != nil {
+		v.Add(&ConfigError{
+			Reason:  "dns.base_domain must be a lowercase DNS name for dns.certificates",
+			Current: []KV{{"dns.base_domain", base}},
+			Hint:    "Tailscale clients match certificate names exactly; use a lowercase public domain you control",
+			See:     dnsDocsURL,
+		})
+	}
+
+	zone := strings.TrimSuffix(viper.GetString("dns.certificates.zone"), ".")
+	if zone != "" && base != zone && !strings.HasSuffix(base, "."+zone) {
+		v.Add(&ConfigError{
+			Reason:  "dns.base_domain is not inside dns.certificates.zone",
+			Current: []KV{{"dns.base_domain", base}, {"dns.certificates.zone", zone}},
+			Hint:    "set zone to the DNS zone that contains base_domain, or leave it empty to use base_domain",
+			See:     dnsDocsURL,
+		})
+	}
+}
+
+func tlsKey(key string) string {
+	legacy := map[string]string{
+		"tls.cert_path":           "tls_cert_path",
+		"tls.key_path":            "tls_key_path",
+		"tls.acme.hostname":       "tls_letsencrypt_hostname",
+		"tls.acme.challenge_type": "tls_letsencrypt_challenge_type",
+		"tls.acme.http_listen":    "tls_letsencrypt_listen",
+		"tls.acme.cache_dir":      "tls_letsencrypt_cache_dir",
+		"tls.acme.url":            "acme_url",
+		"tls.acme.email":          "acme_email",
+	}
+
+	return cmp.Or(viper.GetString(key), viper.GetString(legacy[key]))
+}
+
+// dnsChallengeConfig constructs providers without performing DNS writes.
+func dnsChallengeConfig() (DNSChallengeConfig, error) {
+	cfg := DNSChallengeConfig{
+		ProviderName:       viper.GetString("dns.challenge.provider.name"),
+		Resolvers:          viper.GetStringSlice("dns.challenge.resolvers"),
+		PropagationTimeout: 2 * time.Minute,
+	}
+
+	if viper.IsSet("dns.challenge.propagation_timeout") {
+		timeout, err := time.ParseDuration(fmt.Sprint(viper.Get("dns.challenge.propagation_timeout")))
+		if err != nil || timeout < 0 {
+			return cfg, fmt.Errorf("%w: dns.challenge.propagation_timeout must be a nonnegative duration", hsdns.ErrProviderConfig)
+		}
+
+		cfg.PropagationTimeout = timeout
+	}
+
+	if len(cfg.Resolvers) == 0 {
+		cfg.Resolvers = []string{"1.1.1.1:53", "8.8.8.8:53"}
+	}
+
+	for i, r := range cfg.Resolvers {
+		ip, err := netip.ParseAddr(r)
+		if err == nil {
+			cfg.Resolvers[i] = net.JoinHostPort(ip.String(), "53")
+
+			continue
+		}
+
+		host, port, err := net.SplitHostPort(r)
+		if err != nil {
+			return cfg, fmt.Errorf("%w: invalid dns.challenge.resolvers entry", hsdns.ErrProviderConfig)
+		}
+
+		_, err = netip.ParseAddr(host)
+		if err != nil {
+			return cfg, fmt.Errorf("%w: DNS challenge resolvers must be IP addresses", hsdns.ErrProviderConfig)
+		}
+
+		n, err := strconv.ParseUint(port, 10, 16)
+		if err != nil || n == 0 {
+			return cfg, fmt.Errorf("%w: invalid DNS challenge resolver port", hsdns.ErrProviderConfig)
+		}
+	}
+
+	settings := viper.GetStringMap("dns.challenge.provider")
+	if cfg.ProviderName == "" {
+		if len(settings) > 0 {
+			return cfg, fmt.Errorf("%w: dns.challenge.provider.name is required", hsdns.ErrProviderConfig)
+		}
+
+		return cfg, nil
+	}
+
+	provider, err := hsdns.NewProvider(cfg.ProviderName, settings, func(key string) (any, bool) {
+		key = "dns.challenge.provider." + key
+
+		return viper.Get(key), viper.IsSet(key)
+	})
+	if err != nil {
+		return cfg, err
+	}
+
+	if iso, ok := provider.(hsdns.Isolator); ok && viper.GetBool("dns.certificates.enabled") {
+		err = iso.CheckIsolation()
+		if err != nil {
+			return cfg, fmt.Errorf("%w: %w", hsdns.ErrProviderConfig, err)
+		}
+	}
+
+	cfg.Provider = provider
+
+	return cfg, nil
+}
+
 func tlsConfig() TLSConfig {
 	return TLSConfig{
 		LetsEncrypt: LetsEncryptConfig{
-			Hostname: viper.GetString("tls_letsencrypt_hostname"),
-			Listen:   viper.GetString("tls_letsencrypt_listen"),
+			Hostname: tlsKey("tls.acme.hostname"),
+			Listen:   tlsKey("tls.acme.http_listen"),
 			CacheDir: util.AbsolutePathFromConfigPath(
-				viper.GetString("tls_letsencrypt_cache_dir"),
+				tlsKey("tls.acme.cache_dir"),
 			),
-			ChallengeType: viper.GetString("tls_letsencrypt_challenge_type"),
+			ChallengeType: tlsKey("tls.acme.challenge_type"),
 		},
 		CertPath: util.AbsolutePathFromConfigPath(
-			viper.GetString("tls_cert_path"),
+			tlsKey("tls.cert_path"),
 		),
 		KeyPath: util.AbsolutePathFromConfigPath(
-			viper.GetString("tls_key_path"),
+			tlsKey("tls.key_path"),
 		),
 	}
 }
@@ -1135,6 +1308,10 @@ func dns() (DNSConfig, error) {
 	// 	return DNSConfig{}, fmt.Errorf("unmarshalling dns config: %w", err)
 	// }
 
+	dns.Certificates.Enabled = viper.GetBool("dns.certificates.enabled")
+	if dns.Certificates.Enabled {
+		dns.Certificates.Zone = strings.TrimSuffix(cmp.Or(viper.GetString("dns.certificates.zone"), viper.GetString("dns.base_domain")), ".")
+	}
 	dns.MagicDNS = viper.GetBool("dns.magic_dns")
 	dns.BaseDomain = viper.GetString("dns.base_domain")
 	dns.OverrideLocalDNS = viper.GetBool("dns.override_local_dns")
@@ -1501,6 +1678,10 @@ func LoadServerConfig() (*Config, error) {
 		}
 	}
 
+	dnsChallenge, providerErr := dnsChallengeConfig()
+	if providerErr != nil {
+		v.Add(&ConfigError{Reason: "dns.challenge.provider configuration is invalid", Detail: providerErr.Error(), Cause: providerErr})
+	}
 	err = v.Err()
 	if err != nil {
 		return nil, err
@@ -1550,10 +1731,11 @@ func LoadServerConfig() (*Config, error) {
 		TLS: tlsConfig(),
 
 		DNSConfig:        dnsConfig,
+		DNSChallenge:     dnsChallenge,
 		TailcfgDNSConfig: dnsToTailcfgDNS(dnsConfig),
 
-		ACMEEmail: viper.GetString("acme_email"),
-		ACMEURL:   viper.GetString("acme_url"),
+		ACMEEmail: tlsKey("tls.acme.email"),
+		ACMEURL:   tlsKey("tls.acme.url"),
 
 		UnixSocket:           viper.GetString("unix_socket"),
 		UnixSocketPermission: socketPerm,
@@ -1899,4 +2081,22 @@ func lowercaseRecordNames(records []tailcfg.DNSRecord) []tailcfg.DNSRecord {
 	}
 
 	return normalized
+}
+
+func (c *Config) extraRecordAt(name string, orBelow bool) bool {
+	tailcfgDNSMu.RLock()
+	defer tailcfgDNSMu.RUnlock()
+
+	if c.TailcfgDNSConfig == nil {
+		return false
+	}
+
+	for _, r := range c.TailcfgDNSConfig.ExtraRecords {
+		rn := strings.ToLower(strings.TrimSuffix(r.Name, "."))
+		if rn == name || (orBelow && strings.HasSuffix(rn, "."+name)) {
+			return true
+		}
+	}
+
+	return false
 }

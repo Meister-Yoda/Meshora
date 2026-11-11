@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	hsdns "github.com/juanfont/headscale/hscontrol/dns"
 	"github.com/juanfont/headscale/hscontrol/policy/matcher"
 	"github.com/juanfont/headscale/hscontrol/util"
 	"github.com/juanfont/headscale/hscontrol/util/zlog/zf"
@@ -1286,6 +1287,10 @@ func (nv NodeView) TailNode(
 		capMap[nodecap.FileSharing] = []tailcfg.RawMessage{}
 	}
 
+	if _, ok := nv.CertDomain(cfg); ok {
+		capMap[nodecap.HTTPS] = []tailcfg.RawMessage{}
+	}
+
 	// default-auto-update is always emitted; the value is a JSON bool
 	// reflecting cfg.AutoUpdate.Enabled. Clients read this on first
 	// netmap and store the default locally; subsequent control-plane
@@ -1382,3 +1387,41 @@ func ValidateHostinfo(hi *tailcfg.Hostinfo) error {
 
 	return nil
 }
+
+func (nv NodeView) CertDomain(cfg *Config) (string, bool) {
+	if !nv.Valid() || !cfg.DNSConfig.Certificates.Enabled {
+		return "", false
+	}
+
+	fqdn, err := nv.GetFQDN(cfg.BaseDomain)
+	if err != nil {
+		return "", false
+	}
+
+	domain := strings.TrimSuffix(fqdn, ".")
+
+	// Names from before renames were lowercased can differ from another
+	// node's name by case only, while the challenge record cannot.
+	if domain != strings.ToLower(domain) || len(ACMEChallengePrefix+domain) > 253 {
+		return "", false
+	}
+
+	// A node names itself through its hostname, so it must not get a
+	// certificate for a name the operator gave to a service. A wildcard
+	// order shares its challenge record with the bare name, so names
+	// below the node's are covered too.
+	if cfg.extraRecordAt(domain, true) {
+		return "", false
+	}
+
+	// A node may publish only its own name's challenge, which keeps it from
+	// other names' certificates only where the provider answers each name's
+	// challenge apart.
+	if iso, ok := cfg.DNSChallenge.Provider.(hsdns.Isolator); ok && !iso.Isolates(domain) {
+		return "", false
+	}
+
+	return domain, true
+}
+
+const ACMEChallengePrefix = "_acme-challenge."

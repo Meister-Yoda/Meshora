@@ -1,5 +1,35 @@
 # Meshora starten und im Browser einrichten
 
+## Meshora v0.2.3-rc.2 (11. November 2026)
+
+Vorabversion mit den geprueften Upstream-Sicherheitskorrekturen, optionalen
+Geraetezertifikaten und CertMagic fuer Server-TLS. Enthalten sind Schutz fuer
+OIDC-/OAuth-Identitaeten, Registrierungen, API-Requests, Richtlinien und
+Geraeteeigentum. Zonen und eingeschraenkte Exits wurden mit lokalen echten
+Tailscale-Clients und IPv4-/IPv6-Paketfluss geprueft.
+
+DNS-01 und Geraetezertifikate bleiben standardmaessig deaktiviert. Bestehende
+Reverse-Proxy-Installationen verwenden weiter HTTP intern auf Port 8080.
+Manuelle Serverzertifikate lassen sich per SIGHUP sicher nachladen.
+
+**Vor dem Upgrade:** Datenbank, Konfiguration und ACME-Cache sichern.
+RC.2 fuehrt keine neue Datenbankmigration ein; beim Sprung von aelteren
+Versionen gelten deren Migrationen weiterhin. CertMagic importiert den alten
+autocert-Cache nicht: alte Dateien bleiben erhalten, Account/Zertifikat werden
+zunaechst neu bezogen. Cache persistent speichern und CA-Limits beachten.
+
+```sh
+MESHORA_VERSION=v0.2.3-rc.2 docker compose pull
+MESHORA_VERSION=v0.2.3-rc.2 docker compose up -d
+```
+
+Versionierte Images fuer AMD64/ARM64 und der Container-Tag `RC` folgen diesem
+Build. `latest` bleibt auf der stabilen Version v0.2.2. Die oeffentliche
+DNS-Anbieter-/CA-Abnahme und HTTPS ueber `tailscale cert`/`tailscale serve`
+stehen aus; die lokale ACME-Abnahme verwendet Pebble. Der Nix-Gesamtbuild
+ist noch nicht bestaetigt. Der separate WireGuard-Gateway und die unfertige
+Exit-Compose-Erweiterung gehoeren nicht zu diesem RC-Paket.
+
 ## Meshora v0.2.3-rc.1 (30. Oktober 2026)
 
 Vorabversion mit Testmail, eigener Sitzungsverwaltung und Einladungen für

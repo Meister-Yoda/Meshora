@@ -8,8 +8,10 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
@@ -1162,4 +1164,192 @@ func TestMailSMTPConfiguration(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, cfg.Mail.Password)
 	require.Equal(t, "/run/secrets/meshora_smtp", cfg.Mail.PasswordPath)
+}
+
+func TestDNSChallengeFoundation(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	secret := filepath.Join(t.TempDir(), "dns-token")
+	require.NoError(t, os.WriteFile(secret, []byte("foundation-secret\n"), 0o600))
+
+	for _, tc := range []struct {
+		name     string
+		settings map[string]any
+		wantErr  bool
+	}{
+		{name: "defaults"},
+		{name: "provider file", settings: map[string]any{"dns.challenge.provider.name": "cloudflare", "dns.challenge.provider.api_token_path": secret, "dns.challenge.resolvers": []string{"::1", "127.0.0.1:5353"}}},
+		{name: "unknown provider", settings: map[string]any{"dns.challenge.provider.name": "not-real"}, wantErr: true},
+		{name: "missing provider name", settings: map[string]any{"dns.challenge.provider.api_token": "secret"}, wantErr: true},
+		{name: "unknown setting", settings: map[string]any{"dns.challenge.provider.name": "cloudflare", "dns.challenge.provider.wrong_token": "secret"}, wantErr: true},
+		{name: "invalid timeout", settings: map[string]any{"dns.challenge.propagation_timeout": "not-duration"}, wantErr: true},
+		{name: "negative timeout", settings: map[string]any{"dns.challenge.propagation_timeout": "-1s"}, wantErr: true},
+		{name: "invalid resolver", settings: map[string]any{"dns.challenge.resolvers": []string{"http://resolver.example"}}, wantErr: true},
+		{name: "invalid port", settings: map[string]any{"dns.challenge.resolvers": []string{"127.0.0.1:0"}}, wantErr: true},
+		{name: "enabled certificates require a provider", settings: map[string]any{"dns.certificates.enabled": true}, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			viper.Reset()
+			require.NoError(t, LoadConfig("testdata/base-domain-not-in-server-url.yaml", true))
+
+			for key, value := range tc.settings {
+				viper.Set(key, value)
+			}
+
+			cfg, err := LoadServerConfig()
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+
+			require.NoError(t, err)
+			require.Equal(t, 2*time.Minute, cfg.DNSChallenge.PropagationTimeout)
+			data, err := json.Marshal(cfg)
+
+			require.NoError(t, err)
+			require.NotContains(t, string(data), "foundation-secret")
+
+			if tc.name == "provider file" {
+				require.NotNil(t, cfg.DNSChallenge.Provider)
+				require.Equal(t, []string{"[::1]:53", "127.0.0.1:5353"}, cfg.DNSChallenge.Resolvers)
+			}
+		})
+	}
+}
+
+func TestCanonicalTLSKeysKeepLegacyFallback(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	for _, canonical := range []bool{false, true} {
+		t.Run(strconv.FormatBool(canonical), func(t *testing.T) {
+			viper.Reset()
+			require.NoError(t, LoadConfig("testdata/base-domain-not-in-server-url.yaml", true))
+			viper.Set("tls_letsencrypt_hostname", "old.example.test")
+			viper.Set("acme_url", "https://old-ca.example/directory")
+			viper.Set("tls_letsencrypt_challenge_type", "TLS-ALPN-01")
+
+			if canonical {
+				viper.Set("tls.acme.hostname", "new.example.test")
+				viper.Set("tls.acme.url", "https://new-ca.example/directory")
+			}
+
+			cfg, err := LoadServerConfig()
+
+			require.NoError(t, err)
+
+			if canonical {
+				require.Equal(t, "new.example.test", cfg.TLS.LetsEncrypt.Hostname)
+				require.Equal(t, "https://new-ca.example/directory", cfg.ACMEURL)
+			} else {
+				require.Equal(t, "old.example.test", cfg.TLS.LetsEncrypt.Hostname)
+				require.Equal(t, "https://old-ca.example/directory", cfg.ACMEURL)
+			}
+
+			require.Equal(t, "TLS-ALPN-01", cfg.TLS.LetsEncrypt.ChallengeType)
+		})
+	}
+}
+
+func TestDNSProviderAndCanonicalTLSEnvironment(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	require.NoError(t, LoadConfig("testdata/base-domain-not-in-server-url.yaml", true))
+	t.Setenv("HEADSCALE_DNS_CHALLENGE_PROVIDER_NAME", "cloudflare")
+	t.Setenv("HEADSCALE_DNS_CHALLENGE_PROVIDER_API_TOKEN", "environment-provider-secret")
+	t.Setenv("HEADSCALE_TLS_ACME_HOSTNAME", "env.example.test")
+	t.Setenv("HEADSCALE_TLS_ACME_CHALLENGE_TYPE", "TLS-ALPN-01")
+
+	cfg, err := LoadServerConfig()
+	require.NoError(t, err)
+	require.NotNil(t, cfg.DNSChallenge.Provider)
+	require.Equal(t, "env.example.test", cfg.TLS.LetsEncrypt.Hostname)
+	data, err := json.Marshal(cfg)
+	require.NoError(t, err)
+	require.NotContains(t, string(data), "environment-provider-secret")
+}
+
+func TestCanonicalStaticTLSConflict(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	require.NoError(t, LoadConfig("testdata/base-domain-not-in-server-url.yaml", true))
+	certPath := filepath.Join(t.TempDir(), "fullchain.pem")
+	keyPath := filepath.Join(t.TempDir(), "private.key")
+
+	viper.Set("tls.cert_path", certPath)
+	viper.Set("tls.key_path", keyPath)
+
+	cfg, err := LoadServerConfig()
+	require.NoError(t, err)
+	require.Equal(t, certPath, cfg.TLS.CertPath)
+	require.Equal(t, keyPath, cfg.TLS.KeyPath)
+	viper.Set("tls.acme.hostname", "server.example.test")
+
+	_, err = LoadServerConfig()
+	require.ErrorContains(t, err, "mutually exclusive")
+}
+
+func TestNodeCertificateConfiguration(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	for _, tc := range []struct {
+		name     string
+		settings map[string]any
+		wantErr  string
+	}{
+		{name: "valid"},
+		{name: "missing magicdns", settings: map[string]any{"dns.magic_dns": false}, wantErr: "requires dns.magic_dns"},
+		{name: "uppercase base", settings: map[string]any{"dns.base_domain": "Mesh.example.com"}, wantErr: "lowercase"},
+		{name: "foreign zone", settings: map[string]any{"dns.certificates.zone": "other.example"}, wantErr: "not inside"},
+		{name: "shared acme-dns", settings: map[string]any{"dns.challenge.provider": map[string]any{"name": "acmedns", "username": "user", "password": "secret", "subdomain": "reg", "server_url": "https://dns.example"}}, wantErr: "registration per name"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			viper.Reset()
+			require.NoError(t, LoadConfig("testdata/base-domain-not-in-server-url.yaml", true))
+			viper.Set("dns.base_domain", "mesh.example.com")
+			viper.Set("dns.magic_dns", true)
+			viper.Set("dns.certificates.enabled", true)
+			viper.Set("dns.challenge.provider", map[string]any{"name": "cloudflare", "api_token": t.Name()})
+
+			for k, v := range tc.settings {
+				viper.Set(k, v)
+			}
+
+			cfg, err := LoadServerConfig()
+			if tc.wantErr != "" {
+				require.ErrorContains(t, err, tc.wantErr)
+				return
+			}
+
+			require.NoError(t, err)
+			require.True(t, cfg.DNSConfig.Certificates.Enabled)
+			require.Equal(t, "mesh.example.com", cfg.DNSConfig.Certificates.Zone)
+		})
+	}
+}
+
+func TestServerDNS01Configuration(t *testing.T) {
+	t.Cleanup(viper.Reset)
+
+	for _, provider := range []bool{false, true} {
+		t.Run(strconv.FormatBool(provider), func(t *testing.T) {
+			viper.Reset()
+			require.NoError(t, LoadConfig("testdata/base-domain-not-in-server-url.yaml", true))
+			viper.Set("tls.acme.hostname", "headscale.example.com")
+			viper.Set("tls.acme.challenge_type", DNS01ChallengeType)
+			viper.Set("dns.magic_dns", false)
+
+			if provider {
+				viper.Set("dns.challenge.provider", map[string]any{"name": "cloudflare", "api_token": t.Name()})
+			}
+
+			cfg, err := LoadServerConfig()
+			if !provider {
+				require.ErrorContains(t, err, "require dns.challenge.provider")
+				return
+			}
+
+			require.NoError(t, err)
+			require.Equal(t, DNS01ChallengeType, cfg.TLS.LetsEncrypt.ChallengeType)
+			require.False(t, cfg.DNSConfig.Certificates.Enabled)
+		})
+	}
 }

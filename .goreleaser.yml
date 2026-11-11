@@ -27,6 +27,8 @@ builds:
       - linux_arm64
     flags:
       - -mod=readonly
+      # Keep local checkout paths out of log callers and panic traces.
+      - -trimpath
 
 archives:
   - id: golang-cross

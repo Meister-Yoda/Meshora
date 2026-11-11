@@ -1412,7 +1412,7 @@ func TestIssue3371_TaggedNodeLogoutReloginSingleUseKey(t *testing.T) {
 
 	nodeAfterLogout, found := app.state.GetNodeByNodeKey(nodeKey.Public())
 	require.True(t, found)
-	assert.True(t, nodeAfterLogout.IsExpired(), "logout expires a tagged node")
+	assert.True(t, nodeAfterLogout.IsExpired(), "logout expires a tagged node: expiry=%v now=%v", nodeAfterLogout.Expiry(), time.Now())
 
 	// `tailscale up --auth-key $KEY2`: a BRAND NEW single-use key, and the client
 	// rotates its node key (as the real client does on relogin).
@@ -1545,13 +1545,13 @@ func TestTaggedNodeLogoutExpiresIt(t *testing.T) {
 	nodeAfterLogout, found := app.state.GetNodeByNodeKey(nodeKey.Public())
 	require.True(t, found)
 	assert.True(t, nodeAfterLogout.IsTagged(), "node stays tagged through logout")
-	assert.True(t, nodeAfterLogout.IsExpired(), "logout expires a tagged node")
+	assert.True(t, nodeAfterLogout.IsExpired(), "logout expires a tagged node: expiry=%v now=%v", nodeAfterLogout.Expiry(), time.Now())
 
 	var dbNode types.Node
 	require.NoError(t,
 		app.state.DB().DB.First(&dbNode, nodeAfterLogout.ID().Uint64()).Error)
 	require.NotNil(t, dbNode.Expiry)
-	assert.True(t, dbNode.IsExpired(), "the logout expiry is stored")
+	assert.True(t, dbNode.IsExpired(), "the logout expiry is stored: expiry=%v now=%v", dbNode.Expiry, time.Now())
 }
 
 // TestClientBringsExpiryForward: a client may ask for an earlier expiry, which
